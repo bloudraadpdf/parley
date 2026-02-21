@@ -5,7 +5,7 @@
 
 use super::FontContext;
 use super::context::LayoutContext;
-use super::style::{Brush, StyleProperty, TextStyle, WhiteSpaceCollapse};
+use super::style::{BaseDirection, Brush, StyleProperty, TextStyle, WhiteSpaceCollapse};
 
 use super::layout::Layout;
 
@@ -43,6 +43,11 @@ impl<B: Brush> RangedBuilder<'_, B> {
             .rcx
             .resolve_property(self.fcx, &property.into(), self.scale);
         self.lcx.ranged_style_builder.push(resolved, range);
+    }
+
+    /// Sets the paragraph base direction for bidi resolution.
+    pub fn set_direction(&mut self, direction: BaseDirection) {
+        self.lcx.direction = direction;
     }
 
     pub fn push_inline_box(&mut self, inline_box: InlineBox) {
@@ -137,6 +142,11 @@ impl<B: Brush> StyleRunBuilder<'_, B> {
         self.cursor = range.end;
     }
 
+    /// Sets the paragraph base direction for bidi resolution.
+    pub fn set_direction(&mut self, direction: BaseDirection) {
+        self.lcx.direction = direction;
+    }
+
     pub fn push_inline_box(&mut self, inline_box: InlineBox) {
         self.lcx.inline_boxes.push(inline_box);
     }
@@ -212,6 +222,11 @@ impl<B: Brush> TreeBuilder<'_, B> {
         // TODO: arrange type better here to factor out the index
         inline_box.index = self.lcx.tree_style_builder.current_text_len();
         self.lcx.inline_boxes.push(inline_box);
+    }
+
+    /// Sets the paragraph base direction for bidi resolution.
+    pub fn set_direction(&mut self, direction: BaseDirection) {
+        self.lcx.direction = direction;
     }
 
     pub fn set_white_space_mode(&mut self, white_space_collapse: WhiteSpaceCollapse) {

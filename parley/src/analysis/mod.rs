@@ -8,6 +8,7 @@ use core::marker::PhantomData;
 
 use crate::resolve::StyleRun;
 use crate::{Brush, LayoutContext, WordBreak};
+use parlance::BaseDirection;
 
 use icu_normalizer::properties::{
     CanonicalComposition, CanonicalCompositionBorrowed, CanonicalDecomposition,
@@ -492,14 +493,22 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
             next_mandatory_linebreak
         });
 
-    if needs_bidi_resolution {
+    // Convert paragraph direction to base bidi level
+    let base_level = match lcx.direction {
+        BaseDirection::Auto => None,
+        BaseDirection::Ltr => Some(0),
+        BaseDirection::Rtl => Some(1),
+    };
+    // Resolve bidi when text contains bidi characters OR when an explicit
+    // direction override forces a non-default base level.
+    if needs_bidi_resolution || base_level.is_some() {
         lcx.bidi.resolve(
             text.chars().zip(
                 lcx.info
                     .iter()
                     .map(|info| (info.0.bidi_class, info.0.bracket)),
             ),
-            None,
+            base_level,
         );
     }
 }
