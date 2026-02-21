@@ -7,6 +7,7 @@ use crate::style::Brush;
 use crate::util::nearly_zero;
 use crate::{FontData, IndentOptions, LineHeight, OverflowWrap, TextWrapMode};
 use core::ops::Range;
+use skrifa::MetadataProvider as _;
 
 use alloc::vec::Vec;
 
@@ -398,10 +399,18 @@ impl<B: Brush> LayoutData<B> {
                 index
             });
 
-        let metrics = {
+        let (metrics, space_advance, space_glyph_id) = {
             let font = &self.fonts[font_index];
             let font_ref = skrifa::FontRef::from_index(font.data.as_ref(), font.index).unwrap();
-            skrifa::metrics::Metrics::new(&font_ref, skrifa::prelude::Size::new(font_size), coords)
+            let size = skrifa::prelude::Size::new(font_size);
+            let metrics = skrifa::metrics::Metrics::new(&font_ref, size, coords);
+            let glyph_metrics = skrifa::metrics::GlyphMetrics::new(&font_ref, size, coords);
+            let space_gid = font_ref.charmap().map(' ');
+            let space_advance = space_gid
+                .and_then(|gid| glyph_metrics.advance_width(gid))
+                .unwrap_or(font_size / 4.0);
+            let space_glyph_id = space_gid.map_or(0_u32, |gid| gid.to_u32());
+            (metrics, space_advance, space_glyph_id)
         };
         let units_per_em = metrics.units_per_em as f32;
 
@@ -442,6 +451,8 @@ impl<B: Brush> LayoutData<B> {
                 line_height,
                 x_height: metrics.x_height,
                 cap_height: metrics.cap_height,
+                space_advance,
+                space_glyph_id,
             }
         };
 
@@ -533,6 +544,56 @@ impl<B: Brush> LayoutData<B> {
                         let glyphs = &mut self.glyphs[start..end];
                         if let Some(last) = glyphs.last_mut() {
                             last.advance += spacing;
+                        }
+                    }
+                }
+            }
+        }
+        // Set default tab advances based on tab_size and the run's space advance.
+        // This provides a reasonable default for intrinsic sizing; the line breaker
+        // will override with position-dependent values during layout.
+        for run in &self.runs {
+            let space_advance = run.metrics.space_advance;
+            let space_glyph_id = run.metrics.space_glyph_id;
+            let cluster_range = run.cluster_range.clone();
+            let glyph_start = run.glyph_start;
+
+            // All clusters in a shaping run share the same style, so reading
+            // tab_size from the first cluster's style is sufficient.
+            let tab_size = self
+                .clusters
+                .get(cluster_range.start)
+                .map(|c| self.styles[c.style_index as usize].tab_size)
+                .unwrap_or_default();
+            let default_advance = tab_size.interval(space_advance);
+
+            for cluster in &mut self.clusters[cluster_range] {
+                if cluster.info.whitespace() == Whitespace::Tab {
+                    if default_advance > 0.0 {
+                        let delta = default_advance - cluster.advance;
+                        cluster.advance = default_advance;
+                        // Update glyph advance to match.
+                        if cluster.glyph_len != 0xFF && !nearly_zero(delta) {
+                            let start = glyph_start + cluster.glyph_offset as usize;
+                            let end = start + cluster.glyph_len as usize;
+                            if let Some(last) = self.glyphs[start..end].last_mut() {
+                                last.advance += delta;
+                            }
+                        }
+                    } else {
+                        cluster.advance = 0.0;
+                    }
+                    // Replace the .notdef glyph (ID 0) that the shaper emits
+                    // for U+0009 with the space glyph.  Tab is whitespace: it
+                    // contributes advance but must not render a visible glyph.
+                    if cluster.glyph_len == 0xFF {
+                        // Single glyph stored inline: glyph_offset IS the ID.
+                        cluster.glyph_offset = space_glyph_id;
+                    } else {
+                        let start = glyph_start + cluster.glyph_offset as usize;
+                        let end = start + cluster.glyph_len as usize;
+                        for glyph in &mut self.glyphs[start..end] {
+                            glyph.id = space_glyph_id;
                         }
                     }
                 }

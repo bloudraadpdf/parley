@@ -242,4 +242,9 @@ pub struct RunMetrics {
     pub x_height: Option<f32>,
     /// Distance from the baseline to the top of capital letters.
     pub cap_height: Option<f32>,
+    /// Advance width of the space character (U+0020) in this font at this size.
+    pub space_advance: f32,
+    /// Glyph identifier for U+0020 SPACE in this font (used to replace
+    /// the `.notdef` glyph that the shaper emits for tab characters).
+    pub space_glyph_id: u32,
 }

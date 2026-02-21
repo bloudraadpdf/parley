@@ -52,3 +52,52 @@ pub enum TextWrapMode {
     /// Do not wrap at soft-wrap opportunities.
     NoWrap,
 }
+
+/// CSS `tab-size` property value.
+///
+/// See: <https://www.w3.org/TR/css-text-3/#tab-size-property>
+// Note: `Eq` is not derived because the inner `f32` does not implement it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TabSize {
+    /// Number of space widths (CSS `tab-size: <number>`, default: 8).
+    Spaces(f32),
+    /// Absolute length in layout units (CSS `tab-size: <length>`).
+    Length(f32),
+}
+
+impl Default for TabSize {
+    fn default() -> Self {
+        Self::Spaces(8.0)
+    }
+}
+
+impl TabSize {
+    /// Compute the tab stop interval given the space advance of the current font.
+    pub fn interval(self, space_advance: f32) -> f32 {
+        match self {
+            Self::Spaces(n) => n * space_advance,
+            Self::Length(l) => l,
+        }
+    }
+
+    /// Scale the tab size by the given factor.
+    ///
+    /// Only the `Length` variant is affected; `Spaces` is relative to the
+    /// font's space advance and does not need scaling.
+    pub fn scale(self, scale: f32) -> Self {
+        match self {
+            Self::Length(value) => Self::Length(value * scale),
+            value => value,
+        }
+    }
+
+    /// Returns `true` if `self` and `other` are approximately equal.
+    pub fn nearly_eq(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::Spaces(a), Self::Spaces(b)) | (Self::Length(a), Self::Length(b)) => {
+                (a - b).abs() < f32::EPSILON
+            }
+            _ => false,
+        }
+    }
+}

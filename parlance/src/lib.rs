@@ -56,4 +56,4 @@ pub use generic_family::GenericFamily;
 pub use language::{Language, ParseLanguageError};
 pub use script::{ParseScriptError, Script};
 pub use tag::{FontFeature, FontVariation, ParseSettingsError, ParseSettingsErrorKind, Tag};
-pub use text::{BaseDirection, OverflowWrap, TextWrapMode, WordBreak};
+pub use text::{BaseDirection, OverflowWrap, TabSize, TextWrapMode, WordBreak};

@@ -7,3 +7,4 @@ mod font_selection;
 mod font_shaping;
 mod interactions;
 mod spacing;
+mod tab_size;

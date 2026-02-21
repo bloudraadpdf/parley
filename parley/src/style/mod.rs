@@ -15,7 +15,7 @@ pub use font::{
     FontVariations, FontWeight, FontWidth, GenericFamily,
 };
 pub use fontique::Language;
-pub use parlance::{BaseDirection, OverflowWrap, TextWrapMode, WordBreak};
+pub use parlance::{BaseDirection, OverflowWrap, TabSize, TextWrapMode, WordBreak};
 pub use styleset::StyleSet;
 
 use crate::util::nearly_eq;
@@ -117,6 +117,8 @@ pub enum StyleProperty<'a, B: Brush> {
     OverflowWrap(OverflowWrap),
     /// Control over non-"emergency" line-breaking.
     TextWrapMode(TextWrapMode),
+    /// Tab size.
+    TabSize(TabSize),
 }
 
 /// Unresolved styles.
@@ -168,6 +170,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub overflow_wrap: OverflowWrap,
     /// Control over non-"emergency" line-breaking.
     pub text_wrap_mode: TextWrapMode,
+    /// Tab size.
+    pub tab_size: TabSize,
 }
 
 impl<B: Brush> Default for TextStyle<'static, 'static, B> {
@@ -196,6 +200,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             word_break: WordBreak::default(),
             overflow_wrap: OverflowWrap::default(),
             text_wrap_mode: TextWrapMode::default(),
+            tab_size: TabSize::default(),
         }
     }
 }
@@ -239,5 +244,11 @@ impl<B: Brush> From<GenericFamily> for StyleProperty<'_, B> {
 impl<B: Brush> From<LineHeight> for StyleProperty<'_, B> {
     fn from(value: LineHeight) -> Self {
         StyleProperty::LineHeight(value)
+    }
+}
+
+impl<B: Brush> From<TabSize> for StyleProperty<'_, B> {
+    fn from(value: TabSize) -> Self {
+        StyleProperty::TabSize(value)
     }
 }

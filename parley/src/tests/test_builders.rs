@@ -12,7 +12,7 @@ use peniko::{Blob, color::palette};
 use super::utils::{ColorBrush, asserts::assert_eq_layout_data};
 use crate::{
     FontContext, FontFamily, FontFeatures, FontVariations, Layout, LayoutContext, LineHeight,
-    OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder, TextStyle, TextWrapMode,
+    OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder, TabSize, TextStyle, TextWrapMode,
     TreeBuilder, WordBreak,
 };
 
@@ -255,6 +255,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         word_break: WordBreak::BreakAll,
         overflow_wrap: OverflowWrap::Anywhere,
         text_wrap_mode: TextWrapMode::Wrap,
+        tab_size: TabSize::default(),
     }
 }
 

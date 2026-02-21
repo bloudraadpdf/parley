@@ -18,3 +18,9 @@ pub(crate) const LIGATURES: &str = "fi fl ff ffi ffl office";
 
 /// Text with spaces for word spacing tests
 pub(crate) const SPACED: &str = "one two three four five";
+
+/// Text with tab characters for tab-size tests
+pub(crate) const TABBED: &str = "A\tB\tC";
+
+/// Text with tab at start for tab-size tests
+pub(crate) const TAB_START: &str = "\tHello";

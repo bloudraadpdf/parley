@@ -348,6 +348,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             }
                         }
 
+                        // Override tab advance with position-dependent value
+                        if whitespace == Whitespace::Tab {
+                            let tab_interval =
+                                style.tab_size.interval(run_data.metrics.space_advance);
+                            if tab_interval > 0.0 {
+                                advance = ((self.state.line.x / tab_interval).floor() + 1.0)
+                                    * tab_interval
+                                    - self.state.line.x;
+                            } else {
+                                advance = 0.0;
+                            }
+                        }
+
                         // Compute the x position of the content being currently processed
                         let next_x = self.state.line.x + advance;
 
@@ -693,6 +706,55 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if line.item_range.is_empty() {
             line.text_range = self.layout.data.text_len..self.layout.data.text_len;
         }
+
+        // Forward pass: fix tab cluster advances for correct rendering.
+        // Tabs are position-dependent, so we need cumulative x from line start.
+        {
+            let mut line_x = 0.0_f32;
+            for line_item in &self.lines.line_items[line.item_range.clone()] {
+                match line_item.kind {
+                    LayoutItemKind::InlineBox => {
+                        line_x += self.layout.data.inline_boxes[line_item.index].width;
+                    }
+                    LayoutItemKind::TextRun => {
+                        let run = &self.layout.data.runs[line_item.index];
+                        let space_advance = run.metrics.space_advance;
+                        let glyph_start = run.glyph_start;
+                        let tab_size = self
+                            .layout
+                            .data
+                            .clusters
+                            .get(line_item.cluster_range.start)
+                            .map(|c| self.layout.data.styles[c.style_index as usize].tab_size)
+                            .unwrap_or_default();
+                        let tab_interval = tab_size.interval(space_advance);
+                        let cluster_range = line_item.cluster_range.clone();
+
+                        for cluster in &mut self.layout.data.clusters[cluster_range] {
+                            if tab_interval > 0.0 && cluster.info.whitespace() == Whitespace::Tab {
+                                let next_stop =
+                                    ((line_x / tab_interval).floor() + 1.0) * tab_interval;
+                                let new_advance = next_stop - line_x;
+                                // Keep glyph array advance in sync for non-inline clusters.
+                                if cluster.glyph_len != 0xFF {
+                                    let delta = new_advance - cluster.advance;
+                                    let start = glyph_start + cluster.glyph_offset as usize;
+                                    let end = start + cluster.glyph_len as usize;
+                                    if let Some(last) =
+                                        self.layout.data.glyphs[start..end].last_mut()
+                                    {
+                                        last.advance += delta;
+                                    }
+                                }
+                                cluster.advance = new_advance;
+                            }
+                            line_x += cluster.advance;
+                        }
+                    }
+                }
+            }
+        }
+
         // Compute metrics for the line, but ignore trailing whitespace.
         let mut have_metrics = false;
         let mut needs_reorder = false;
