@@ -18,7 +18,7 @@ use crate::font::FontContext;
 use crate::style::TextStyle;
 use crate::util::nearly_eq;
 use crate::{LineHeight, OverflowWrap, layout};
-use crate::{TabSize, TextWrapMode, WordBreak};
+use crate::{HyphenateCharacter, TabSize, TextWrapMode, WordBreak};
 use core::borrow::Borrow;
 use core::ops::Range;
 use fontique::FamilyId;
@@ -171,6 +171,7 @@ impl ResolveContext {
             StyleProperty::OverflowWrap(value) => OverflowWrap(*value),
             StyleProperty::TextWrapMode(value) => TextWrapMode(*value),
             StyleProperty::TabSize(value) => TabSize(value.scale(scale)),
+            StyleProperty::HyphenateCharacter(value) => HyphenateCharacter(*value),
         }
     }
 
@@ -215,6 +216,7 @@ impl ResolveContext {
             overflow_wrap: raw_style.overflow_wrap,
             text_wrap_mode: raw_style.text_wrap_mode,
             tab_size: raw_style.tab_size.scale(scale),
+            hyphenate_character: raw_style.hyphenate_character,
         }
     }
 
@@ -409,6 +411,8 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     TextWrapMode(TextWrapMode),
     /// Tab size.
     TabSize(TabSize),
+    /// Hyphenate character.
+    HyphenateCharacter(HyphenateCharacter),
 }
 
 /// Flattened group of style properties.
@@ -452,6 +456,8 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) text_wrap_mode: TextWrapMode,
     /// Tab size.
     pub(crate) tab_size: TabSize,
+    /// Hyphenate character.
+    pub(crate) hyphenate_character: HyphenateCharacter,
 }
 
 impl<B: Brush> ResolvedStyle<B> {
@@ -487,6 +493,7 @@ impl<B: Brush> ResolvedStyle<B> {
             OverflowWrap(value) => self.overflow_wrap = value,
             TextWrapMode(value) => self.text_wrap_mode = value,
             TabSize(value) => self.tab_size = value,
+            HyphenateCharacter(value) => self.hyphenate_character = value,
         }
     }
 
@@ -521,6 +528,7 @@ impl<B: Brush> ResolvedStyle<B> {
             OverflowWrap(value) => self.overflow_wrap == *value,
             TextWrapMode(value) => self.text_wrap_mode == *value,
             TabSize(value) => self.tab_size.nearly_eq(*value),
+            HyphenateCharacter(value) => self.hyphenate_character == *value,
         }
     }
 
@@ -534,6 +542,7 @@ impl<B: Brush> ResolvedStyle<B> {
             overflow_wrap: self.overflow_wrap,
             text_wrap_mode: self.text_wrap_mode,
             tab_size: self.tab_size,
+            hyphenate_character: self.hyphenate_character,
             #[cfg(feature = "accesskit")]
             locale: self.locale,
         }

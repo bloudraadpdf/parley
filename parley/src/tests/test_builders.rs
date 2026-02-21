@@ -12,8 +12,8 @@ use peniko::{Blob, color::palette};
 use super::utils::{ColorBrush, asserts::assert_eq_layout_data};
 use crate::{
     FontContext, FontFamily, FontFeatures, FontVariations, Layout, LayoutContext, LineHeight,
-    OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder, TabSize, TextStyle, TextWrapMode,
-    TreeBuilder, WordBreak,
+    HyphenateCharacter, OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder, TabSize,
+    TextStyle, TextWrapMode, TreeBuilder, WordBreak,
 };
 
 // TODO: `FONT_FAMILY_LIST`, `load_fonts`, and `create_font_context` are
@@ -260,6 +260,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         overflow_wrap: OverflowWrap::Anywhere,
         text_wrap_mode: TextWrapMode::Wrap,
         tab_size: TabSize::default(),
+        hyphenate_character: HyphenateCharacter::Auto,
     }
 }
 
@@ -299,6 +300,7 @@ fn set_root_style(rb: &mut RangedBuilder<'_, ColorBrush>) {
     rb.push_default(StyleProperty::LetterSpacing(1.5));
     rb.push_default(StyleProperty::WordBreak(WordBreak::BreakAll));
     rb.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
+    rb.push_default(StyleProperty::HyphenateCharacter(HyphenateCharacter::Auto));
 }
 
 /// Test that all the builders have the same default behavior.

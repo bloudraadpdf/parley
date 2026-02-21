@@ -15,7 +15,7 @@ pub use font::{
     FontVariations, FontWeight, FontWidth, GenericFamily,
 };
 pub use fontique::Language;
-pub use parlance::{BaseDirection, OverflowWrap, TabSize, TextWrapMode, WordBreak};
+pub use parlance::{BaseDirection, HyphenateCharacter, OverflowWrap, TabSize, TextWrapMode, WordBreak};
 pub use styleset::StyleSet;
 
 use crate::util::nearly_eq;
@@ -127,6 +127,8 @@ pub enum StyleProperty<'a, B: Brush> {
     TextWrapMode(TextWrapMode),
     /// Tab size.
     TabSize(TabSize),
+    /// Hyphenate character.
+    HyphenateCharacter(HyphenateCharacter),
 }
 
 /// Unresolved styles.
@@ -188,6 +190,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub text_wrap_mode: TextWrapMode,
     /// Tab size.
     pub tab_size: TabSize,
+    /// Hyphenate character.
+    pub hyphenate_character: HyphenateCharacter,
 }
 
 impl<B: Brush> Default for TextStyle<'static, 'static, B> {
@@ -221,6 +225,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             overflow_wrap: OverflowWrap::default(),
             text_wrap_mode: TextWrapMode::default(),
             tab_size: TabSize::default(),
+            hyphenate_character: HyphenateCharacter::default(),
         }
     }
 }
@@ -270,5 +275,11 @@ impl<B: Brush> From<LineHeight> for StyleProperty<'_, B> {
 impl<B: Brush> From<TabSize> for StyleProperty<'_, B> {
     fn from(value: TabSize) -> Self {
         StyleProperty::TabSize(value)
+    }
+}
+
+impl<B: Brush> From<HyphenateCharacter> for StyleProperty<'_, B> {
+    fn from(value: HyphenateCharacter) -> Self {
+        StyleProperty::HyphenateCharacter(value)
     }
 }

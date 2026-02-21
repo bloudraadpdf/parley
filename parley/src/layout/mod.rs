@@ -42,7 +42,7 @@ pub use crate::editing::{Cursor, Selection};
 // TODO - Move the following to `style` module and submodules.
 
 use crate::style::Brush;
-use crate::{LineHeight, OverflowWrap, TabSize, TextWrapMode};
+use crate::{HyphenateCharacter, LineHeight, OverflowWrap, TabSize, TextWrapMode};
 
 #[allow(clippy::partial_pub_fields)]
 /// Style properties.
@@ -64,6 +64,8 @@ pub struct Style<B: Brush> {
     pub(crate) text_wrap_mode: TextWrapMode,
     /// Tab size.
     pub(crate) tab_size: TabSize,
+    /// Hyphenate character.
+    pub(crate) hyphenate_character: HyphenateCharacter,
     #[cfg(feature = "accesskit")]
     /// Locale if any, so we can set the corresponding AccessKit property
     pub(crate) locale: Option<fontique::Language>,

@@ -101,3 +101,27 @@ impl TabSize {
         }
     }
 }
+
+/// CSS `hyphenate-character` property value.
+///
+/// See: <https://www.w3.org/TR/css-text-4/#hyphenate-character>
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HyphenateCharacter {
+    /// Automatic hyphenation character (U+2010 HYPHEN, default).
+    #[default]
+    Auto,
+    /// Explicit character to use for hyphenation.
+    Character(char),
+}
+
+impl HyphenateCharacter {
+    /// Returns the character to use for hyphenation.
+    ///
+    /// `Auto` resolves to U+2010 HYPHEN.
+    pub fn character(self) -> char {
+        match self {
+            Self::Auto => '\u{2010}',
+            Self::Character(c) => c,
+        }
+    }
+}
