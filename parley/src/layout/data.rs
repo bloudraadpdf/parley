@@ -430,6 +430,11 @@ impl<B: Brush> LayoutData<B> {
                     (metrics.ascent / 2.0, units_per_em / 18.0)
                 };
 
+            // Overline: no dedicated OpenType metric; use ascent for offset
+            // and underline thickness for size (matching browser behaviour).
+            let overline_size = underline_size;
+            let overline_offset = metrics.ascent;
+
             // Compute line height
             let style = &self.styles[style_index as usize];
             let line_height = match style.line_height {
@@ -448,6 +453,8 @@ impl<B: Brush> LayoutData<B> {
                 underline_size,
                 strikethrough_offset,
                 strikethrough_size,
+                overline_offset,
+                overline_size,
                 line_height,
                 x_height: metrics.x_height,
                 cap_height: metrics.cap_height,

@@ -453,4 +453,20 @@ fn render_glyph_run_impl(
             decoration.brush.color,
         );
     }
+    if let Some(decoration) = &style.overline {
+        let overline_offset = decoration.offset.unwrap_or(run.metrics().overline_offset);
+        let size = decoration.size.unwrap_or(run.metrics().overline_size);
+
+        // Overline uses simple rect (doesn't skip ink)
+        let y = glyph_run.baseline() as f64 - overline_offset as f64 + y_offset as f64;
+        let x = glyph_run.offset() as f64 + x_offset as f64;
+        draw_rect(
+            renderer,
+            x,
+            y,
+            glyph_run.advance() as f64,
+            size as f64,
+            decoration.brush.color,
+        );
+    }
 }

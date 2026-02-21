@@ -236,6 +236,10 @@ pub struct RunMetrics {
     pub strikethrough_offset: f32,
     /// Thickness of the strikethrough decoration.
     pub strikethrough_size: f32,
+    /// Offset of the top of overline decoration from the baseline.
+    pub overline_offset: f32,
+    /// Thickness of the overline decoration.
+    pub overline_size: f32,
     /// The line height
     pub line_height: f32,
     /// Distance from the baseline to the top of short lowercase letters.

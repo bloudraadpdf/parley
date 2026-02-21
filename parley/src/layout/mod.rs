@@ -54,6 +54,8 @@ pub struct Style<B: Brush> {
     pub underline: Option<Decoration<B>>,
     /// Strikethrough decoration.
     pub strikethrough: Option<Decoration<B>>,
+    /// Overline decoration.
+    pub overline: Option<Decoration<B>>,
     /// Partially resolved line height, either in in layout units or dependent on metrics
     pub(crate) line_height: LineHeight,
     /// Per-cluster overflow-wrap setting
@@ -67,7 +69,7 @@ pub struct Style<B: Brush> {
     pub(crate) locale: Option<fontique::Language>,
 }
 
-/// Underline or strikethrough decoration.
+/// Underline, strikethrough, or overline decoration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decoration<B: Brush> {
     /// Brush used to draw the decoration.

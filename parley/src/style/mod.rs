@@ -105,6 +105,14 @@ pub enum StyleProperty<'a, B: Brush> {
     StrikethroughSize(Option<f32>),
     /// Brush for rendering the strikethrough decoration.
     StrikethroughBrush(Option<B>),
+    /// Overline decoration.
+    Overline(bool),
+    /// Offset of the overline decoration.
+    OverlineOffset(Option<f32>),
+    /// Size of the overline decoration.
+    OverlineSize(Option<f32>),
+    /// Brush for rendering the overline decoration.
+    OverlineBrush(Option<B>),
     /// Line height.
     LineHeight(LineHeight),
     /// Extra spacing between words.
@@ -158,6 +166,14 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub strikethrough_size: Option<f32>,
     /// Brush for rendering the strikethrough decoration.
     pub strikethrough_brush: Option<B>,
+    /// Overline decoration.
+    pub has_overline: bool,
+    /// Offset of the overline decoration.
+    pub overline_offset: Option<f32>,
+    /// Size of the overline decoration.
+    pub overline_size: Option<f32>,
+    /// Brush for rendering the overline decoration.
+    pub overline_brush: Option<B>,
     /// Line height.
     pub line_height: LineHeight,
     /// Extra spacing between words.
@@ -194,6 +210,10 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             strikethrough_offset: None,
             strikethrough_size: None,
             strikethrough_brush: None,
+            has_overline: false,
+            overline_offset: None,
+            overline_size: None,
+            overline_brush: None,
             line_height: LineHeight::default(),
             word_spacing: 0.0,
             letter_spacing: 0.0,

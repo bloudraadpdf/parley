@@ -160,6 +160,10 @@ impl ResolveContext {
             }
             StyleProperty::StrikethroughSize(value) => StrikethroughSize(value.map(|x| x * scale)),
             StyleProperty::StrikethroughBrush(value) => StrikethroughBrush(value.clone()),
+            StyleProperty::Overline(value) => Overline(*value),
+            StyleProperty::OverlineOffset(value) => OverlineOffset(value.map(|x| x * scale)),
+            StyleProperty::OverlineSize(value) => OverlineSize(value.map(|x| x * scale)),
+            StyleProperty::OverlineBrush(value) => OverlineBrush(value.clone()),
             StyleProperty::LineHeight(value) => LineHeight(value.scale(scale)),
             StyleProperty::WordSpacing(value) => WordSpacing(*value * scale),
             StyleProperty::LetterSpacing(value) => LetterSpacing(*value * scale),
@@ -197,6 +201,12 @@ impl ResolveContext {
                 offset: raw_style.strikethrough_offset.map(|x| x * scale),
                 size: raw_style.strikethrough_size.map(|x| x * scale),
                 brush: raw_style.strikethrough_brush.clone(),
+            },
+            overline: ResolvedDecoration {
+                enabled: raw_style.has_overline,
+                offset: raw_style.overline_offset.map(|x| x * scale),
+                size: raw_style.overline_size.map(|x| x * scale),
+                brush: raw_style.overline_brush.clone(),
             },
             line_height: raw_style.line_height.scale(scale),
             word_spacing: raw_style.word_spacing * scale,
@@ -377,6 +387,14 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     StrikethroughSize(Option<f32>),
     /// Brush for rendering the strikethrough decoration.
     StrikethroughBrush(Option<B>),
+    /// Overline decoration.
+    Overline(bool),
+    /// Offset of the overline decoration.
+    OverlineOffset(Option<f32>),
+    /// Size of the overline decoration.
+    OverlineSize(Option<f32>),
+    /// Brush for rendering the overline decoration.
+    OverlineBrush(Option<B>),
     /// Line height.
     LineHeight(LineHeight),
     /// Extra spacing between words.
@@ -418,6 +436,8 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) underline: ResolvedDecoration<B>,
     /// Strikethrough decoration.
     pub(crate) strikethrough: ResolvedDecoration<B>,
+    /// Overline decoration.
+    pub(crate) overline: ResolvedDecoration<B>,
     /// Line height.
     pub(crate) line_height: LineHeight,
     /// Extra spacing between words.
@@ -456,6 +476,10 @@ impl<B: Brush> ResolvedStyle<B> {
             StrikethroughOffset(value) => self.strikethrough.offset = value,
             StrikethroughSize(value) => self.strikethrough.size = value,
             StrikethroughBrush(value) => self.strikethrough.brush = value,
+            Overline(value) => self.overline.enabled = value,
+            OverlineOffset(value) => self.overline.offset = value,
+            OverlineSize(value) => self.overline.size = value,
+            OverlineBrush(value) => self.overline.brush = value,
             LineHeight(value) => self.line_height = value,
             WordSpacing(value) => self.word_spacing = value,
             LetterSpacing(value) => self.letter_spacing = value,
@@ -486,6 +510,10 @@ impl<B: Brush> ResolvedStyle<B> {
             StrikethroughOffset(value) => self.strikethrough.offset == *value,
             StrikethroughSize(value) => self.strikethrough.size == *value,
             StrikethroughBrush(value) => self.strikethrough.brush == *value,
+            Overline(value) => self.overline.enabled == *value,
+            OverlineOffset(value) => self.overline.offset == *value,
+            OverlineSize(value) => self.overline.size == *value,
+            OverlineBrush(value) => self.overline.brush == *value,
             LineHeight(value) => self.line_height.nearly_eq(*value),
             WordSpacing(value) => nearly_eq(self.word_spacing, *value),
             LetterSpacing(value) => nearly_eq(self.letter_spacing, *value),
@@ -501,6 +529,7 @@ impl<B: Brush> ResolvedStyle<B> {
             brush: self.brush.clone(),
             underline: self.underline.as_layout_decoration(&self.brush),
             strikethrough: self.strikethrough.as_layout_decoration(&self.brush),
+            overline: self.overline.as_layout_decoration(&self.brush),
             line_height: self.line_height,
             overflow_wrap: self.overflow_wrap,
             text_wrap_mode: self.text_wrap_mode,
@@ -511,7 +540,7 @@ impl<B: Brush> ResolvedStyle<B> {
     }
 }
 
-/// Underline or strikethrough decoration.
+/// Underline, strikethrough, or overline decoration.
 #[derive(Clone, PartialEq, Default, Debug)]
 pub(crate) struct ResolvedDecoration<B: Brush> {
     /// True if the decoration is enabled.

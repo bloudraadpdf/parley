@@ -249,6 +249,10 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         strikethrough_offset: Some(1.3),
         strikethrough_size: Some(1.7),
         strikethrough_brush: Some(ColorBrush::new(palette::css::BEIGE)),
+        has_overline: true,
+        overline_offset: Some(1.0),
+        overline_size: Some(2.0),
+        overline_brush: Some(ColorBrush::new(palette::css::MAGENTA)),
         line_height: LineHeight::Absolute(30.),
         word_spacing: 2.,
         letter_spacing: 1.5,
@@ -283,6 +287,12 @@ fn set_root_style(rb: &mut RangedBuilder<'_, ColorBrush>) {
     rb.push_default(StyleProperty::StrikethroughSize(Some(1.7)));
     rb.push_default(StyleProperty::StrikethroughBrush(Some(ColorBrush::new(
         palette::css::BEIGE,
+    ))));
+    rb.push_default(StyleProperty::Overline(true));
+    rb.push_default(StyleProperty::OverlineOffset(Some(1.0)));
+    rb.push_default(StyleProperty::OverlineSize(Some(2.0)));
+    rb.push_default(StyleProperty::OverlineBrush(Some(ColorBrush::new(
+        palette::css::MAGENTA,
     ))));
     rb.push_default(LineHeight::Absolute(30.));
     rb.push_default(StyleProperty::WordSpacing(2.));
