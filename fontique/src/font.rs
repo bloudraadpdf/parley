@@ -369,6 +369,39 @@ impl Synthesis {
             None
         }
     }
+
+    /// Returns synthesis suggestions with faux/variable weight synthesis removed.
+    pub fn without_weight_synthesis(mut self) -> Self {
+        let mut next = 0usize;
+        for i in 0..self.len as usize {
+            let (tag, value) = self.vars[i];
+            if tag.to_be_bytes() == *b"wght" {
+                continue;
+            }
+            self.vars[next] = (tag, value);
+            next += 1;
+        }
+        self.len = next as u8;
+        self.embolden = false;
+        self
+    }
+
+    /// Returns synthesis suggestions with faux/variable italic/oblique synthesis removed.
+    pub fn without_style_synthesis(mut self) -> Self {
+        let mut next = 0usize;
+        for i in 0..self.len as usize {
+            let (tag, value) = self.vars[i];
+            let bytes = tag.to_be_bytes();
+            if bytes == *b"ital" || bytes == *b"slnt" {
+                continue;
+            }
+            self.vars[next] = (tag, value);
+            next += 1;
+        }
+        self.len = next as u8;
+        self.skew = 0;
+        self
+    }
 }
 
 #[allow(clippy::missing_fields_in_debug)]

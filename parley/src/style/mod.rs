@@ -26,6 +26,21 @@ pub enum WhiteSpaceCollapse {
     Preserve,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FontSynthesis {
+    #[default]
+    Auto,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FontSynthesisStyle {
+    #[default]
+    Auto,
+    None,
+    ObliqueOnly,
+}
+
 /// The height that this text takes up. The default is `MetricsRelative(1.0)`, which is the given
 /// font's preferred line height.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -81,6 +96,10 @@ pub enum StyleProperty<'a, B: Brush> {
     FontStyle(FontStyle),
     /// Font weight.
     FontWeight(FontWeight),
+    /// Weight synthesis policy.
+    FontSynthesisWeight(FontSynthesis),
+    /// Style synthesis policy.
+    FontSynthesisStyle(FontSynthesisStyle),
     /// Font variation settings.
     FontVariations(FontVariations<'a>),
     /// Font feature settings.
@@ -144,6 +163,10 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub font_style: FontStyle,
     /// Font weight.
     pub font_weight: FontWeight,
+    /// Weight synthesis policy.
+    pub font_synthesis_weight: FontSynthesis,
+    /// Style synthesis policy.
+    pub font_synthesis_style: FontSynthesisStyle,
     /// Font variation settings.
     pub font_variations: FontVariations<'settings>,
     /// Font feature settings.
@@ -202,6 +225,8 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             font_width: FontWidth::default(),
             font_style: FontStyle::default(),
             font_weight: FontWeight::default(),
+            font_synthesis_weight: FontSynthesis::default(),
+            font_synthesis_style: FontSynthesisStyle::default(),
             font_variations: FontVariations::empty(),
             font_features: FontFeatures::empty(),
             locale: None,

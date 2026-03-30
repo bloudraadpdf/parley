@@ -146,6 +146,8 @@ impl ResolveContext {
             StyleProperty::FontWidth(value) => FontWidth(*value),
             StyleProperty::FontStyle(value) => FontStyle(*value),
             StyleProperty::FontWeight(value) => FontWeight(*value),
+            StyleProperty::FontSynthesisWeight(value) => FontSynthesisWeight(*value),
+            StyleProperty::FontSynthesisStyle(value) => FontSynthesisStyle(*value),
             StyleProperty::FontVariations(value) => FontVariations(self.resolve_variations(value)),
             StyleProperty::FontFeatures(value) => FontFeatures(self.resolve_features(value)),
             StyleProperty::Locale(value) => Locale(*value),
@@ -187,6 +189,8 @@ impl ResolveContext {
             font_width: raw_style.font_width,
             font_style: raw_style.font_style,
             font_weight: raw_style.font_weight,
+            font_synthesis_weight: raw_style.font_synthesis_weight,
+            font_synthesis_style: raw_style.font_synthesis_style,
             font_variations: self.resolve_variations(&raw_style.font_variations),
             font_features: self.resolve_features(&raw_style.font_features),
             locale: raw_style.locale,
@@ -365,6 +369,10 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     FontStyle(FontStyle),
     /// Font weight.
     FontWeight(FontWeight),
+    /// Weight synthesis policy.
+    FontSynthesisWeight(crate::style::FontSynthesis),
+    /// Style synthesis policy.
+    FontSynthesisStyle(crate::style::FontSynthesisStyle),
     /// Font variation settings.
     FontVariations(Resolved<FontVariation>),
     /// Font feature settings.
@@ -428,6 +436,10 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) font_style: FontStyle,
     /// Font weight.
     pub(crate) font_weight: FontWeight,
+    /// Weight synthesis policy.
+    pub(crate) font_synthesis_weight: crate::style::FontSynthesis,
+    /// Style synthesis policy.
+    pub(crate) font_synthesis_style: crate::style::FontSynthesisStyle,
     /// Font variation settings.
     pub(crate) font_variations: Resolved<FontVariation>,
     /// Font feature settings.
@@ -470,6 +482,8 @@ impl<B: Brush> ResolvedStyle<B> {
             FontWidth(value) => self.font_width = value,
             FontStyle(value) => self.font_style = value,
             FontWeight(value) => self.font_weight = value,
+            FontSynthesisWeight(value) => self.font_synthesis_weight = value,
+            FontSynthesisStyle(value) => self.font_synthesis_style = value,
             FontVariations(value) => self.font_variations = value,
             FontFeatures(value) => self.font_features = value,
             Locale(value) => self.locale = value,
@@ -505,6 +519,8 @@ impl<B: Brush> ResolvedStyle<B> {
             FontWidth(value) => self.font_width == *value,
             FontStyle(value) => self.font_style == *value,
             FontWeight(value) => self.font_weight == *value,
+            FontSynthesisWeight(value) => self.font_synthesis_weight == *value,
+            FontSynthesisStyle(value) => self.font_synthesis_style == *value,
             FontVariations(value) => self.font_variations == *value,
             FontFeatures(value) => self.font_features == *value,
             Locale(value) => self.locale == *value,
