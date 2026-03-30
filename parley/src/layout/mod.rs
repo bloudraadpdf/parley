@@ -23,7 +23,7 @@ pub(crate) mod data;
 
 #[cfg(feature = "accesskit")]
 pub use accessibility::LayoutAccessibility;
-pub use alignment::{Alignment, AlignmentOptions};
+pub use alignment::{Alignment, AlignmentOptions, JustificationMode};
 pub use cluster::{Affinity, Cluster, ClusterPath, ClusterSide};
 pub use data::BreakReason;
 pub use glyph::Glyph;

@@ -17,8 +17,8 @@ use super::style::{
 use crate::font::FontContext;
 use crate::style::TextStyle;
 use crate::util::nearly_eq;
-use crate::{LineHeight, OverflowWrap, layout};
 use crate::{HyphenateCharacter, TabSize, TextWrapMode, WordBreak};
+use crate::{LineHeight, OverflowWrap, layout};
 use core::borrow::Borrow;
 use core::ops::Range;
 use fontique::FamilyId;

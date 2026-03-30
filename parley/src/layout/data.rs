@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::inline_box::InlineBox;
-use crate::layout::{ContentWidths, Glyph, LineMetrics, RunMetrics, Style};
+use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
 use crate::util::nearly_zero;
 use crate::{FontData, IndentOptions, LineHeight, OverflowWrap, TextWrapMode};
@@ -297,6 +297,8 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) alignment: Option<super::Alignment>,
     /// Whether the layout is aligned with [`crate::Alignment::Justify`].
     pub(crate) is_aligned_justified: bool,
+    /// The justification mode used for the current aligned state, if any.
+    pub(crate) aligned_justification_mode: Option<JustificationMode>,
     /// The width the layout was aligned to.
     pub(crate) alignment_width: f32,
     /// The text-indent amount in layout units.
@@ -328,6 +330,7 @@ impl<B: Brush> Default for LayoutData<B> {
             #[cfg(feature = "accesskit")]
             alignment: None,
             is_aligned_justified: false,
+            aligned_justification_mode: None,
             alignment_width: 0.0,
             indent_amount: 0.0,
             indent_options: IndentOptions::default(),
@@ -354,6 +357,11 @@ impl<B: Brush> LayoutData<B> {
         self.glyphs.clear();
         self.lines.clear();
         self.line_items.clear();
+        self.is_aligned_justified = false;
+        self.aligned_justification_mode = None;
+        self.alignment_width = 0.0;
+        self.indent_amount = 0.0;
+        self.indent_options = IndentOptions::default();
     }
 
     /// Push an inline box to the list of items

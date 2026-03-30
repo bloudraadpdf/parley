@@ -11,9 +11,9 @@ use peniko::{Blob, color::palette};
 
 use super::utils::{ColorBrush, asserts::assert_eq_layout_data};
 use crate::{
-    FontContext, FontFamily, FontFeatures, FontVariations, Layout, LayoutContext, LineHeight,
-    HyphenateCharacter, OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder, TabSize,
-    TextStyle, TextWrapMode, TreeBuilder, WordBreak,
+    FontContext, FontFamily, FontFeatures, FontSynthesis, FontSynthesisStyle, FontVariations,
+    HyphenateCharacter, Layout, LayoutContext, LineHeight, OverflowWrap, RangedBuilder,
+    StyleProperty, StyleRunBuilder, TabSize, TextStyle, TextWrapMode, TreeBuilder, WordBreak,
 };
 
 // TODO: `FONT_FAMILY_LIST`, `load_fonts`, and `create_font_context` are
@@ -237,6 +237,8 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         font_width: FontWidth::CONDENSED,
         font_style: FontStyle::Italic,
         font_weight: FontWeight::BOLD,
+        font_synthesis_weight: FontSynthesis::None,
+        font_synthesis_style: FontSynthesisStyle::ObliqueOnly,
         font_variations: FontVariations::empty(), // TODO: Set a non-default value
         font_features: FontFeatures::empty(),     // TODO: Set a non-default value
         locale: Some("en-US".parse().unwrap()),
@@ -273,6 +275,10 @@ fn set_root_style(rb: &mut RangedBuilder<'_, ColorBrush>) {
     rb.push_default(StyleProperty::FontWidth(FontWidth::CONDENSED));
     rb.push_default(StyleProperty::FontStyle(FontStyle::Italic));
     rb.push_default(StyleProperty::FontWeight(FontWeight::BOLD));
+    rb.push_default(StyleProperty::FontSynthesisWeight(FontSynthesis::None));
+    rb.push_default(StyleProperty::FontSynthesisStyle(
+        FontSynthesisStyle::ObliqueOnly,
+    ));
     rb.push_default(FontVariations::empty());
     rb.push_default(FontFeatures::empty());
     rb.push_default(StyleProperty::Locale(Some("en-US".parse().unwrap())));
