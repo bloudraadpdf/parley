@@ -3,6 +3,7 @@
 
 use crate::InlineBox;
 use crate::layout::alignment::align;
+use crate::layout::alignment::align_per_line;
 use crate::layout::alignment::unjustify;
 use crate::layout::data::LayoutData;
 use crate::style::Brush;
@@ -150,6 +151,32 @@ impl<B: Brush> Layout<B> {
     ) {
         unjustify(&mut self.data);
         align(&mut self.data, container_width, alignment, options);
+    }
+
+    /// Align the layout with per-line alignment widths.
+    ///
+    /// Each entry in `alignment_widths` overrides the layout's single
+    /// alignment width for the corresponding line index. Lines past
+    /// `alignment_widths.len()` use the LAST per-line width as a fallback.
+    /// Passing an empty slice falls back fully to [`Layout::width`].
+    ///
+    /// Justified text (CSS `text-align: justify`) computes free space per
+    /// line as `alignment_width - line.advance + trailing_whitespace`. When
+    /// lines were broken at different per-line max advances (e.g. CSS 2.1
+    /// §9.5 Rule 9 line-box shortening adjacent to floats), each line must
+    /// be justified against ITS OWN max advance — otherwise band-narrowed
+    /// lines over-stretch and overflow the band's right edge.
+    ///
+    /// You must perform line breaking prior to aligning, through
+    /// [`Layout::break_lines`] or [`Layout::break_all_lines`].
+    pub fn align_per_line(
+        &mut self,
+        alignment_widths: &[f32],
+        alignment: Alignment,
+        options: AlignmentOptions,
+    ) {
+        unjustify(&mut self.data);
+        align_per_line(&mut self.data, alignment_widths, alignment, options);
     }
 
     /// Returns the index and `Line` object for the line containing the

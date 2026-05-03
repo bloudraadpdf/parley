@@ -301,6 +301,12 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) aligned_justification_mode: Option<JustificationMode>,
     /// The width the layout was aligned to.
     pub(crate) alignment_width: f32,
+    /// Per-line override widths supplied by [`crate::Layout::align_per_line`].
+    /// When non-empty, the entry at `line_index` overrides
+    /// [`Self::alignment_width`] for that line; lines without an entry fall
+    /// back to [`Self::alignment_width`]. Empty when single-width
+    /// [`crate::Layout::align`] was used.
+    pub(crate) per_line_alignment_widths: Vec<f32>,
     /// The text-indent amount in layout units.
     pub(crate) indent_amount: f32,
     /// Options controlling text-indent behavior (each-line, hanging).
@@ -332,6 +338,7 @@ impl<B: Brush> Default for LayoutData<B> {
             is_aligned_justified: false,
             aligned_justification_mode: None,
             alignment_width: 0.0,
+            per_line_alignment_widths: Vec::new(),
             indent_amount: 0.0,
             indent_options: IndentOptions::default(),
         }
@@ -360,6 +367,7 @@ impl<B: Brush> LayoutData<B> {
         self.is_aligned_justified = false;
         self.aligned_justification_mode = None;
         self.alignment_width = 0.0;
+        self.per_line_alignment_widths.clear();
         self.indent_amount = 0.0;
         self.indent_options = IndentOptions::default();
     }

@@ -85,6 +85,45 @@ pub(crate) fn align<B: Brush>(
         layout.alignment = Some(alignment);
     }
     layout.alignment_width = alignment_width.unwrap_or(layout.width);
+    layout.per_line_alignment_widths.clear();
+    layout.aligned_justification_mode = if alignment == Alignment::Justify {
+        match options.justification_mode {
+            JustificationMode::None => None,
+            mode => Some(mode),
+        }
+    } else {
+        None
+    };
+    layout.is_aligned_justified = layout.aligned_justification_mode.is_some();
+
+    align_impl::<_, false>(layout, alignment, options);
+}
+
+/// Align the layout with per-line alignment widths.
+///
+/// Each line in `alignment_widths` overrides the layout's single-width
+/// [`crate::Layout::align`] alignment_width for that line. Lines beyond
+/// `alignment_widths.len()` fall back to the LAST per-line width (which is
+/// also stored as `LayoutData::alignment_width` for downstream readers).
+/// Pass an empty slice to fall back fully to single-width behaviour using
+/// `layout.width` as the alignment width.
+///
+/// Used by peedeeef's CSS 2.1 §9.5 Rule 9 line-box shortening: lines
+/// adjacent to floats are broken at narrow band-widths and must justify
+/// against THAT narrow width, not the paragraph's full max-advance.
+pub(crate) fn align_per_line<B: Brush>(
+    layout: &mut LayoutData<B>,
+    alignment_widths: &[f32],
+    alignment: Alignment,
+    options: AlignmentOptions,
+) {
+    let canonical_width = alignment_widths
+        .last()
+        .copied()
+        .unwrap_or(layout.width);
+    layout.alignment_width = canonical_width;
+    layout.per_line_alignment_widths.clear();
+    layout.per_line_alignment_widths.extend_from_slice(alignment_widths);
     layout.aligned_justification_mode = if alignment == Alignment::Justify {
         match options.justification_mode {
             JustificationMode::None => None,
@@ -157,8 +196,17 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
             layout.lines[line_index].metrics.offset = indent;
         }
 
+        // Per-line alignment width override (peedeeef CSS 2.1 §9.5 Rule 9).
+        // Falls back to `layout.alignment_width` when no override is set
+        // for this line.
+        let alignment_width = layout
+            .per_line_alignment_widths
+            .get(line_index)
+            .copied()
+            .unwrap_or(layout.alignment_width);
+
         // Compute free space.
-        let free_space = layout.alignment_width - indent - line_advance + trailing_whitespace;
+        let free_space = alignment_width - indent - line_advance + trailing_whitespace;
 
         if !options.align_when_overflowing && free_space <= 0.0 {
             if is_rtl {
