@@ -385,14 +385,40 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         else {
                             // Case: cluster is a space character (and wrapping is enabled)
                             //
-                            // We hang any overflowing whitespace and then line-break.
+                            // We hang any overflowing whitespace and then line-break — UNLESS we
+                            // already marked an earlier UAX #14 line-break opportunity that
+                            // is "close enough" to the full line (>= 50 % of max_advance).
+                            // Taking that earlier boundary matches the typical browser line-
+                            // breaker (Chromium, Prince, Antenna House) for HY-class breaks
+                            // such as `Outside-` ÷ `float on page 1`, where the residual word
+                            // span of "Outside-float " almost fills the line and the dash-
+                            // break opportunity yields a more balanced two-line layout.
                             if is_space && text_wrap_mode == TextWrapMode::Wrap {
-                                let line_height = run.metrics().line_height;
-                                self.state.append_cluster_to_line(next_x, line_height);
-                                if try_commit_line!(BreakReason::Regular) {
-                                    // TODO: can this be hoisted out of the conditional?
-                                    self.state.cluster_idx += 1;
-                                    return self.start_new_line();
+                                let prefer_prev_boundary = self
+                                    .state
+                                    .prev_boundary
+                                    .as_ref()
+                                    .is_some_and(|prev| {
+                                        max_advance > 0.0
+                                            && prev.state.x >= 0.5 * max_advance
+                                    });
+                                if prefer_prev_boundary {
+                                    let prev = self.state.prev_boundary.take().unwrap();
+                                    self.state.line = prev.state;
+                                    if try_commit_line!(BreakReason::Regular) {
+                                        self.state.item_idx = prev.item_idx;
+                                        self.state.run_idx = prev.run_idx;
+                                        self.state.cluster_idx = prev.cluster_idx;
+                                        return self.start_new_line();
+                                    }
+                                } else {
+                                    let line_height = run.metrics().line_height;
+                                    self.state.append_cluster_to_line(next_x, line_height);
+                                    if try_commit_line!(BreakReason::Regular) {
+                                        // TODO: can this be hoisted out of the conditional?
+                                        self.state.cluster_idx += 1;
+                                        return self.start_new_line();
+                                    }
                                 }
                             }
                             // Case: we have previously encountered a REGULAR line-breaking opportunity in the current line
