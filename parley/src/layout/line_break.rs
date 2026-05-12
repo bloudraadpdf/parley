@@ -55,6 +55,13 @@ struct PrevBoundaryState {
     run_idx: usize,
     cluster_idx: usize,
     state: LineState,
+    /// True when the cluster preceding the marked boundary was NOT
+    /// whitespace — i.e., this is an intra-word break opportunity
+    /// (UAX #14 HY/BB class, dash-or-symbol mid-word) rather than a
+    /// word-after-space boundary. Used to bias the overflow handler
+    /// to prefer hyphen-after splits over hung trailing whitespace
+    /// when the marked line is already substantially full.
+    intra_word: bool,
 }
 
 #[derive(Clone, Default)]
@@ -78,15 +85,22 @@ struct BreakerState {
     line: LineState,
     prev_boundary: Option<PrevBoundaryState>,
     emergency_boundary: Option<PrevBoundaryState>,
+    /// Tracks whether the most recently *appended* cluster on the current
+    /// line was a space-or-nbsp. Used when marking a line-break opportunity
+    /// to classify the boundary as intra-word (preceded by a non-space) or
+    /// word-after-space (preceded by whitespace). See `PrevBoundaryState`
+    /// `intra_word`.
+    last_appended_was_space: bool,
 }
 
 impl BreakerState {
     /// Add the cluster(s) currently being evaluated to the current line
-    fn append_cluster_to_line(&mut self, next_x: f32, clusters_height: f32) {
+    fn append_cluster_to_line(&mut self, next_x: f32, clusters_height: f32, is_space: bool) {
         self.line.items.end = self.item_idx + 1;
         self.line.clusters.end = self.cluster_idx + 1;
         self.line.x = next_x;
         self.add_line_height(clusters_height);
+        self.last_appended_was_space = is_space;
         // Would like to add:
         // self.cluster_idx += 1;
     }
@@ -109,6 +123,7 @@ impl BreakerState {
             run_idx: self.run_idx,
             cluster_idx: self.cluster_idx,
             state: self.line.clone(),
+            intra_word: !self.last_appended_was_space,
         });
     }
 
@@ -120,6 +135,7 @@ impl BreakerState {
             run_idx: self.run_idx,
             cluster_idx: self.cluster_idx,
             state: self.line.clone(),
+            intra_word: !self.last_appended_was_space,
         });
     }
 
@@ -165,6 +181,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.running_line_height = 0.;
         self.state.prev_boundary = None; // Added by Nico
         self.state.emergency_boundary = None;
+        self.state.last_appended_was_space = false;
 
         self.finish_line(self.lines.lines.len() - 1, line_height);
         self.last_line_data()
@@ -318,6 +335,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.append_cluster_to_line(
                                 self.state.line.x,
                                 run.metrics().line_height,
+                                false,
                             );
                             if try_commit_line!(BreakReason::Explicit) {
                                 // TODO: can this be hoisted out of the conditional?
@@ -371,7 +389,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // We simply append the cluster(s) to the current line
                         if next_x <= max_advance {
                             let line_height = run.metrics().line_height;
-                            self.state.append_cluster_to_line(next_x, line_height);
+                            self.state.append_cluster_to_line(next_x, line_height, is_space);
                             self.state.cluster_idx += 1;
                             if is_space {
                                 self.state.line.num_spaces += 1;
@@ -386,20 +404,25 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // Case: cluster is a space character (and wrapping is enabled)
                             //
                             // We hang any overflowing whitespace and then line-break — UNLESS we
-                            // already marked an earlier UAX #14 line-break opportunity that
-                            // is "close enough" to the full line (>= 50 % of max_advance).
-                            // Taking that earlier boundary matches the typical browser line-
-                            // breaker (Chromium, Prince, Antenna House) for HY-class breaks
-                            // such as `Outside-` ÷ `float on page 1`, where the residual word
-                            // span of "Outside-float " almost fills the line and the dash-
-                            // break opportunity yields a more balanced two-line layout.
+                            // already marked an *intra-word* UAX #14 line-break opportunity
+                            // (HY/BB class such as the position after `-` in `Outside-float`)
+                            // that is already "close enough" to the full line. Taking that
+                            // earlier boundary matches the typical browser line-breaker
+                            // (Chromium, Prince, Antenna House) on dash-after splits inside
+                            // narrow boxes, where the residual word span almost fills the
+                            // line and the dash-break yields a more balanced two-line layout.
+                            //
+                            // Word-after-space boundaries are NOT eligible — falling back to
+                            // them here would revert greedy line-fit on every overflowing
+                            // space, regressing standard text wrap.
                             if is_space && text_wrap_mode == TextWrapMode::Wrap {
                                 let prefer_prev_boundary = self
                                     .state
                                     .prev_boundary
                                     .as_ref()
                                     .is_some_and(|prev| {
-                                        max_advance > 0.0
+                                        prev.intra_word
+                                            && max_advance > 0.0
                                             && prev.state.x >= 0.5 * max_advance
                                     });
                                 if prefer_prev_boundary {
@@ -413,7 +436,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     }
                                 } else {
                                     let line_height = run.metrics().line_height;
-                                    self.state.append_cluster_to_line(next_x, line_height);
+                                    self.state
+                                        .append_cluster_to_line(next_x, line_height, true);
                                     if try_commit_line!(BreakReason::Regular) {
                                         // TODO: can this be hoisted out of the conditional?
                                         self.state.cluster_idx += 1;
@@ -465,7 +489,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // We fall back to appending the content to the line.
                             else {
                                 let line_height = run.metrics().line_height;
-                                self.state.append_cluster_to_line(next_x, line_height);
+                                self.state
+                                    .append_cluster_to_line(next_x, line_height, is_space);
                                 self.state.cluster_idx += 1;
                             }
                         }
@@ -597,7 +622,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.line.x + advance
                         };
                         let line_height = run.metrics().line_height;
-                        self.state.append_cluster_to_line(next_x, line_height);
+                        self.state
+                            .append_cluster_to_line(next_x, line_height, is_space);
                         self.state.cluster_idx += 1;
                         char_count += 1;
 
