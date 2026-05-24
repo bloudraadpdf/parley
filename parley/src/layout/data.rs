@@ -372,11 +372,31 @@ impl<B: Brush> LayoutData<B> {
         self.indent_options = IndentOptions::default();
     }
 
-    /// Push an inline box to the list of items
+    /// Push an inline box to the list of items.
+    ///
+    /// UAX #9 §3.3.4 (rule N2) and CSS Writing Modes 4 §2.4 specify that an
+    /// atomic inline (treated as Object Replacement Character U+FFFC) takes
+    /// the embedding direction when no same-direction strong character
+    /// surrounds it. Concretely: inside a `direction: rtl` paragraph an
+    /// inline box at the logical paragraph start must shape at the
+    /// paragraph base level (1, RTL) so that L2 reordering moves it to
+    /// the visual inline-end (right) edge, not the visual inline-start
+    /// (left) edge.
+    ///
+    /// We inherit the previous run's level when one exists so a box
+    /// embedded mid-run keeps the level of its surrounding strong text;
+    /// otherwise we fall back to the paragraph base level instead of
+    /// the LTR default. The previous LTR default caused an inline box
+    /// at the start of an RTL paragraph to be visually placed at the
+    /// left of the line — observably mismatching Chromium, PDFreactor,
+    /// Prince and AHF on the `ui/accent-color/checked-checkbox-rtl`
+    /// scenario family.
     pub(crate) fn push_inline_box(&mut self, index: usize) {
-        // Give the box the same bidi level as the preceding text run
-        // (or else default to 0 if there is not yet a text run)
-        let bidi_level = self.runs.last().map(|r| r.bidi_level).unwrap_or(0);
+        let bidi_level = self
+            .runs
+            .last()
+            .map(|r| r.bidi_level)
+            .unwrap_or(self.base_level);
 
         self.items.push(LayoutItem {
             kind: LayoutItemKind::InlineBox,
