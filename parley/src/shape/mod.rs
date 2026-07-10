@@ -122,18 +122,29 @@ pub(crate) fn shape_text<'a, B: Brush>(
             script = item.script;
         }
         let level = levels.get(char_index).copied().unwrap_or(0);
+        // The pending run must keep ITS OWN style index until it is
+        // flushed below: adopting the new index here used to stamp every
+        // finished run with the FOLLOWING range's style, resolving its
+        // per-run metrics (line_height!) against the wrong style.
+        let mut next_style_index: Option<u16> = None;
         if item.style_index != *style_index {
-            item.style_index = *style_index;
-            style = &styles[*style_index as usize];
-            if !nearly_eq(style.font_size, item.size)
-                || style.locale != item.locale
-                || style.font_variations != item.variations
-                || style.font_features != item.features
-                || !nearly_eq(style.letter_spacing, item.letter_spacing)
-                || !nearly_eq(style.word_spacing, item.word_spacing)
+            let next_style = &styles[*style_index as usize];
+            if !nearly_eq(next_style.font_size, item.size)
+                || next_style.locale != item.locale
+                || next_style.font_variations != item.variations
+                || next_style.font_features != item.features
+                || !nearly_eq(next_style.letter_spacing, item.letter_spacing)
+                || !nearly_eq(next_style.word_spacing, item.word_spacing)
+                // line-height does not affect shaping, but it feeds the
+                // per-run metrics that line boxes are computed from
+                // (CSS 2.1 §10.8 per-contributor extents): a run must
+                // never span two line-heights.
+                || !next_style.line_height.nearly_eq(style.line_height)
             {
                 break_run = true;
             }
+            next_style_index = Some(*style_index);
+            style = next_style;
         }
 
         if level != item.level || script != item.script {
@@ -185,6 +196,9 @@ pub(crate) fn shape_text<'a, B: Brush>(
             item.letter_spacing = style.letter_spacing;
             text_range.start = text_range.end;
             char_range.start = char_range.end;
+        }
+        if let Some(next_style_index) = next_style_index {
+            item.style_index = next_style_index;
         }
 
         if let Some(deferred_boxes) = deferred_boxes {

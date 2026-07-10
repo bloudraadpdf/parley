@@ -89,3 +89,43 @@ fn unquantized_uniform_line_box_still_equals_the_line_height() {
         line.metrics().line_height,
     );
 }
+
+#[test]
+fn runs_keep_their_own_style_index_across_boundaries() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+
+    let text = "small BIG";
+    let boundary = text.find(' ').unwrap();
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(2.0)));
+    builder.push(StyleProperty::FontSize(20.0), boundary + 1..text.len());
+    builder.push(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.0)), boundary + 1..text.len());
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    let line = layout.lines().next().unwrap();
+    let lhs: alloc::vec::Vec<(f32, f32)> = line.runs().map(|r| (r.font_size(), r.metrics().line_height)).collect();
+    assert_eq!(lhs.len(), 2);
+    assert!((lhs[0].1 - 20.0).abs() < 0.01, "run A (10px, 2.0x) line-height should be 20, got {:?}", lhs);
+    assert!((lhs[1].1 - 20.0).abs() < 0.01, "run B (20px, 1.0x) line-height should be 20, got {:?}", lhs);
+}
+
+
+#[test]
+fn default_font_size_relative_line_height_resolves() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "plain";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(2.0)));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    let line = layout.lines().next().unwrap();
+    let run = line.runs().next().unwrap();
+    assert!((run.metrics().line_height - 20.0).abs() < 0.01,
+        "default-only FontSizeRelative(2.0) at 10px should give 20, got {}", run.metrics().line_height);
+}
