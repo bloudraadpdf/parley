@@ -808,6 +808,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
 
         // Compute metrics for the line, but ignore trailing whitespace.
+        //
+        // Alongside the font ascent/descent maxima, accumulate the CSS 2.1
+        // §10.8 per-contributor extents: each run extends the line box by
+        // its own half-leading around the shared baseline, so the line box
+        // is max(above) + max(below) — NOT max(line-height). A run pairing
+        // a deep-descent font with a small line-height can push the line's
+        // below-extent past the tallest run's (PDFreactor golden: 10pt
+        // Cousine `code` spans inside 10pt/1.25 Arimo paragraphs make the
+        // line 13.06pt, not 12.5pt). Uniform-style lines are unchanged:
+        // above + below == line-height there.
+        let mut max_above = 0.0f32;
+        let mut max_below = 0.0f32;
+        let mut have_extents = false;
         let mut have_metrics = false;
         let mut needs_reorder = false;
         for line_item in self.lines.line_items[line.item_range.clone()]
@@ -823,6 +836,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // Default vertical alignment is to align the bottom of boxes with the text baseline.
                     // This is equivalent to the entire height of the box being "ascent"
                     line.metrics.ascent = line.metrics.ascent.max(item.height);
+                    max_above = max_above.max(item.height);
+                    have_extents = true;
 
                     // Mark us as having seen non-whitespace content on this line
                     have_metrics = true;
@@ -857,6 +872,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run = &self.layout.data.runs[line_item.index];
                     line.metrics.ascent = line.metrics.ascent.max(run.metrics.ascent);
                     line.metrics.descent = line.metrics.descent.max(run.metrics.descent);
+                    let half_leading = (run.metrics.line_height
+                        - (run.metrics.ascent + run.metrics.descent))
+                        * 0.5;
+                    max_above = max_above.max(run.metrics.ascent + half_leading);
+                    max_below = max_below.max(run.metrics.descent + half_leading);
+                    have_extents = true;
 
                     // Mark us as having seen non-whitespace content on this line
                     have_metrics = true;
@@ -905,12 +926,27 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run = &self.layout.data.runs[line_item.index];
                     line.metrics.ascent = run.metrics.ascent;
                     line.metrics.descent = run.metrics.descent;
+                    let half_leading = (run.metrics.line_height
+                        - (run.metrics.ascent + run.metrics.descent))
+                        * 0.5;
+                    max_above = max_above.max(run.metrics.ascent + half_leading);
+                    max_below = max_below.max(run.metrics.descent + half_leading);
+                    have_extents = true;
                 }
             } else if let Some(metrics) = prev_line_metrics {
                 // HACK: copy metrics from previous line if we don't have
                 // any; this should only occur for an empty line following
                 // a newline at the end of a layout
                 line.metrics = metrics;
+                // Reconstruct the copied line's above/below extents from its
+                // baseline geometry (committed_y still sits at THIS line's
+                // top, i.e. the previous line's bottom), so the CSS
+                // per-contributor model reproduces the copied geometry
+                // exactly at the new offset.
+                let prev_top = self.state.committed_y as f32 - metrics.line_height;
+                max_above = metrics.baseline - prev_top;
+                max_below = metrics.line_height - max_above;
+                have_extents = true;
                 // If we have no items on this line, it must be the last (empty)
                 // line in a layout following a newline. Commit an empty run so
                 // that AccessKit has a node with which to identify the visual
@@ -941,11 +977,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }
         }
 
-        line.metrics.leading =
-            line.metrics.line_height - (line.metrics.ascent + line.metrics.descent);
-
         // Whether metrics should be quantized to pixel boundaries
         let quantize = self.layout.data.quantize;
+
+        // CSS 2.1 §10.8 per-contributor line box (unquantized/print path
+        // only): the line box spans max(above) to max(below), where each
+        // run contributes its font extent plus its OWN half-leading. The
+        // quantized path keeps the legacy Chrome-mimicking model — its
+        // pixel rounding is calibrated against Chromium fixtures and
+        // uniform-style UI text does not exercise the difference.
+        if !quantize && have_extents {
+            line.metrics.line_height = max_above + max_below;
+        }
+
+        line.metrics.leading =
+            line.metrics.line_height - (line.metrics.ascent + line.metrics.descent);
 
         let (ascent, descent) = if quantize {
             // We mimic Chrome in rounding ascent and descent separately,
@@ -966,6 +1012,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             let above = (leading * 0.5).floor();
             let below = leading.round() - above;
             (above, below)
+        } else if have_extents {
+            // Anchor the baseline at the per-contributor above-extent; the
+            // leading split is whatever the extents dictate rather than an
+            // even halving of the total.
+            (
+                max_above - line.metrics.ascent,
+                max_below - line.metrics.descent,
+            )
         } else {
             (line.metrics.leading * 0.5, line.metrics.leading * 0.5)
         };
