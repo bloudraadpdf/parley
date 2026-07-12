@@ -32,6 +32,18 @@ impl<B: Brush> Layout<B> {
         self.data.scale
     }
 
+    /// Reclaim collapsible trailing whitespace when doing so lets the
+    /// following inline box fit on the current line, instead of wrapping
+    /// the box to the next line.
+    ///
+    /// Browsers wrap the box (the trailing space is then removed as part
+    /// of the wrap); PDF formatters in PDFreactor's tradition remove the
+    /// space FIRST and keep the box when it then fits. Off by default;
+    /// set before calling [`break_all_lines`](Self::break_all_lines).
+    pub fn set_reclaim_space_before_inline_box(&mut self, reclaim: bool) {
+        self.data.reclaim_space_before_inline_box = reclaim;
+    }
+
     /// Returns the style collection for the layout.
     pub fn styles(&self) -> &[Style<B>] {
         &self.data.styles

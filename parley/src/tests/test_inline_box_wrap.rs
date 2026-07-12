@@ -51,3 +51,66 @@ fn spaces_between_full_width_inline_boxes_hang_instead_of_wrapping() {
             .collect::<Vec<_>>(),
     );
 }
+
+/// PDFreactor-parity trailing-space reclaim: `[text][space][box]` where
+/// text + space + box overflows but text + box fits. Browsers wrap the
+/// box; with `set_reclaim_space_before_inline_box(true)` the space's
+/// advance is removed (exactly as a wrap would remove it) and the box
+/// stays on the text's line.
+#[test]
+fn reclaimed_trailing_space_keeps_the_following_box_on_the_line() {
+    let mut fcx = create_font_context();
+
+    // "word " ~= 5 glyphs; box 170px; max 200px. The text alone is well
+    // under 30px at 10px Roboto, text + space + 170px box overflows only
+    // by less than the space's advance.
+    let text = "word ";
+    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext| {
+        let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push_inline_box(InlineBox {
+            id: 0,
+            index: text.len(),
+            width: 170.0,
+            height: 8.0,
+        });
+        builder.build(text)
+    };
+
+    // Compute the tight max_advance from a text-only probe so the
+    // assertion is metric-independent: text+box fits, text+space+box
+    // does not.
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut probe_builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    probe_builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    probe_builder.push_default(StyleProperty::FontSize(10.0));
+    let mut probe = probe_builder.build(text);
+    probe.break_all_lines(None);
+    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let word = metrics.advance - metrics.trailing_whitespace;
+    let space = metrics.trailing_whitespace;
+    assert!(space > 0.0, "probe geometry: the text must end in a space");
+    let max_advance = word + 170.0 + space * 0.5;
+
+    let mut wrapping = build(&mut lcx, &mut fcx);
+    wrapping.break_all_lines(Some(max_advance));
+    assert_eq!(
+        wrapping.len(),
+        2,
+        "without the reclaim flag the box wraps to its own line"
+    );
+
+    let mut reclaiming = build(&mut lcx, &mut fcx);
+    reclaiming.set_reclaim_space_before_inline_box(true);
+    reclaiming.break_all_lines(Some(max_advance));
+    assert_eq!(
+        reclaiming.len(),
+        1,
+        "with the reclaim flag the space is removed and the box stays; lines: {:?}",
+        reclaiming
+            .lines()
+            .map(|line| (line.text_range(), line.metrics().advance))
+            .collect::<Vec<_>>(),
+    );
+}

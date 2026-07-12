@@ -268,6 +268,11 @@ pub(crate) struct LayoutItem {
 pub(crate) struct LayoutData<B: Brush> {
     pub(crate) scale: f32,
     pub(crate) quantize: bool,
+    /// When `true`, the line breaker reclaims the advance of collapsible
+    /// trailing whitespace when doing so lets the following inline box fit
+    /// on the current line (PDFreactor's model) instead of wrapping the
+    /// box (the browser model). See `BreakLines`.
+    pub(crate) reclaim_space_before_inline_box: bool,
     pub(crate) base_level: u8,
     pub(crate) text_len: usize,
     pub(crate) width: f32,
@@ -318,6 +323,7 @@ impl<B: Brush> Default for LayoutData<B> {
         Self {
             scale: 1.,
             quantize: true,
+            reclaim_space_before_inline_box: false,
             base_level: 0,
             text_len: 0,
             width: 0.,
@@ -349,6 +355,7 @@ impl<B: Brush> LayoutData<B> {
     pub(crate) fn clear(&mut self) {
         self.scale = 1.;
         self.quantize = true;
+        self.reclaim_space_before_inline_box = false;
         self.base_level = 0;
         self.text_len = 0;
         self.width = 0.;
