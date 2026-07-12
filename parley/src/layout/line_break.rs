@@ -111,6 +111,13 @@ impl BreakerState {
         self.line.items.end += 1;
         self.line.x = next_x;
         self.add_line_height(box_height);
+        // A break opportunity after an inline box is a between-items
+        // boundary, never an intra-word (UAX #14 HY/BB dash) split. The
+        // overflow handler's dash-preference must not revert to it in
+        // place of hanging trailing whitespace (CSS Text 3 §3.1.2) —
+        // otherwise a collapsible space wrapped after a line-filling box
+        // strands itself on a line of its own.
+        self.last_appended_was_space = true;
         // Would like to add:
         // self.item_idx += 1;
     }

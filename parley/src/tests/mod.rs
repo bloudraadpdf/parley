@@ -3,5 +3,6 @@
 
 mod test_analysis;
 mod test_builders;
+mod test_inline_box_wrap;
 mod test_line_metrics;
 mod utils;
