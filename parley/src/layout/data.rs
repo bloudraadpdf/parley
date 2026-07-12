@@ -705,12 +705,16 @@ impl<B: Brush> LayoutData<B> {
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
                     running_max_width += ibox.width;
-                    if text_wrap_mode == TextWrapMode::Wrap {
+                    if text_wrap_mode == TextWrapMode::Wrap && !ibox.glue {
                         let trailing_whitespace = whitespace_advance(prev_cluster);
                         min_width = min_width.max(running_min_width - trailing_whitespace);
                         min_width = min_width.max(ibox.width);
                         running_min_width = 0.0;
                     } else {
+                        // A glued box (an inline border/padding shim) binds
+                        // to the adjacent text: no soft-wrap opportunity
+                        // exists around it, so it extends the current
+                        // unbreakable run instead of starting one.
                         running_min_width += ibox.width;
                     }
                     prev_cluster = None;

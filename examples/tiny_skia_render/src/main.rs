@@ -91,6 +91,7 @@ fn main() {
         index: 40,
         width: 50.0,
         height: 50.0,
+            glue: false,
     });
 
     // Build the builder into a Layout

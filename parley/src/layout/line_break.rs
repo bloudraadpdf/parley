@@ -316,13 +316,20 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     {
                         // println!("BOX FITS");
 
+                        let box_is_glued = inline_box.glue;
                         self.state.item_idx += 1;
 
                         self.state
                             .append_inline_box_to_line(next_x, inline_box.height);
 
-                        // We can always line break after an inline box
-                        self.state.mark_line_break_opportunity();
+                        // We can always line break after a REPLACED inline
+                        // box; a glued box (inline border/padding shim)
+                        // binds to the adjacent text and offers no
+                        // opportunity (CSS forbids a break between an
+                        // inline's padding and its adjacent glyph).
+                        if !box_is_glued {
+                            self.state.mark_line_break_opportunity();
+                        }
                     } else {
                         // If we're at the start of the line, this box will never fit, so consume it and accept the overflow.
                         if self.state.line.x == 0.0 {
@@ -333,6 +340,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.item_idx += 1;
                                 return self.start_new_line();
                             }
+                        } else if inline_box.glue {
+                            // A glued box (inline border/padding shim) binds
+                            // to the adjacent text: no break exists before
+                            // it, so it overflows with its run exactly like
+                            // the tail of an unbreakable word.
+                            let (next_x, box_height) = (next_x, inline_box.height);
+                            self.state.item_idx += 1;
+                            self.state.append_inline_box_to_line(next_x, box_height);
                         } else if let Some(reclaimed_x) = {
                             let (box_width, box_height) = (inline_box.width, inline_box.height);
                             self.reclaim_trailing_space_for_box(box_width, max_advance)

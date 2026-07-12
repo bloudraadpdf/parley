@@ -34,6 +34,7 @@ fn spaces_between_full_width_inline_boxes_hang_instead_of_wrapping() {
             index,
             width: 199.0,
             height: 8.0,
+            glue: false,
         });
     }
     let mut layout = builder.build(text);
@@ -74,6 +75,7 @@ fn reclaimed_trailing_space_keeps_the_following_box_on_the_line() {
             index: text.len(),
             width: 170.0,
             height: 8.0,
+            glue: false,
         });
         builder.build(text)
     };
@@ -112,5 +114,69 @@ fn reclaimed_trailing_space_keeps_the_following_box_on_the_line() {
             .lines()
             .map(|line| (line.text_range(), line.metrics().advance))
             .collect::<Vec<_>>(),
+    );
+}
+
+/// A glued inline box (a border/padding shim) binds to the adjacent
+/// text: min-content measurement sums the shim widths into the text's
+/// unbreakable run, and the breaker never wraps between a shim and its
+/// glyphs. A replaced (non-glued) box keeps its wrap opportunities.
+#[test]
+fn glued_boxes_bind_to_text_in_measurement_and_breaking() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+
+    // "11" bracketed by an 8px and a 6.75px padding shim (the W8BEN
+    // item-11 cell). The unit's min-content is the SUM of all three.
+    let text = "11";
+    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext, glue: bool| {
+        let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        let mut leading = InlineBox::new(0, 0, 8.0, 0.0);
+        leading.glue = glue;
+        let mut trailing = InlineBox::new(1, text.len(), 6.75, 0.0);
+        trailing.glue = glue;
+        builder.push_inline_box(leading);
+        builder.push_inline_box(trailing);
+        builder.build(text)
+    };
+
+    let glued = build(&mut lcx, &mut fcx, true);
+    let widths = glued.calculate_content_widths();
+    let mut text_only_builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    text_only_builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    text_only_builder.push_default(StyleProperty::FontSize(10.0));
+    let text_only = text_only_builder.build(text).calculate_content_widths();
+    assert!(
+        (widths.min - (text_only.min + 8.0 + 6.75)).abs() < 0.01,
+        "glued min-content must sum the shims into the text run: got {} \
+         for text min {}",
+        widths.min,
+        text_only.min,
+    );
+
+    // Break at a width below the unit: the glued unit must stay on one
+    // line (overflowing), never splitting between shim and glyphs.
+    let mut layout = build(&mut lcx, &mut fcx, true);
+    layout.break_all_lines(Some(widths.min - 2.0));
+    assert_eq!(
+        layout.len(),
+        1,
+        "a glued unit narrower than its column overflows on ONE line; \
+         lines: {:?}",
+        layout
+            .lines()
+            .map(|line| (line.text_range(), line.metrics().advance))
+            .collect::<Vec<_>>(),
+    );
+
+    // The same shapes as REPLACED boxes keep their wrap opportunities.
+    let unglued_widths = build(&mut lcx, &mut fcx, false).calculate_content_widths();
+    assert!(
+        unglued_widths.min < widths.min,
+        "replaced boxes keep per-box wrap opportunities: {} vs glued {}",
+        unglued_widths.min,
+        widths.min,
     );
 }

@@ -97,6 +97,7 @@ fn main() {
             index: 0,
             width: 50.0,
             height: 50.0,
+            glue: false,
         });
 
         builder.push_text(&text[40..50]);
@@ -106,6 +107,7 @@ fn main() {
             index: 50,
             width: 50.0,
             height: 30.0,
+            glue: false,
         });
 
         builder.push_text(&text[50..141]);
@@ -155,12 +157,14 @@ fn main() {
             index: 40,
             width: 50.0,
             height: 50.0,
+            glue: false,
         });
         builder.push_inline_box(InlineBox {
             id: 1,
             index: 50,
             width: 50.0,
             height: 30.0,
+            glue: false,
         });
 
         // Build the builder into a Layout
