@@ -273,6 +273,12 @@ pub(crate) struct LayoutData<B: Brush> {
     /// on the current line (PDFreactor's model) instead of wrapping the
     /// box (the browser model). See `BreakLines`.
     pub(crate) reclaim_space_before_inline_box: bool,
+    /// When `true`, an overflowing trailing space may commit the most recent
+    /// intra-word line-break opportunity instead of hanging the space after a
+    /// complete word that otherwise fits. This preserves Parley's established
+    /// dash-balancing behavior unless a caller explicitly selects strict
+    /// greedy wrapping.
+    pub(crate) prefer_intra_word_break_over_hanging_space: bool,
     pub(crate) base_level: u8,
     pub(crate) text_len: usize,
     pub(crate) width: f32,
@@ -324,6 +330,7 @@ impl<B: Brush> Default for LayoutData<B> {
             scale: 1.,
             quantize: true,
             reclaim_space_before_inline_box: false,
+            prefer_intra_word_break_over_hanging_space: true,
             base_level: 0,
             text_len: 0,
             width: 0.,
@@ -356,6 +363,7 @@ impl<B: Brush> LayoutData<B> {
         self.scale = 1.;
         self.quantize = true;
         self.reclaim_space_before_inline_box = false;
+        self.prefer_intra_word_break_over_hanging_space = true;
         self.base_level = 0;
         self.text_len = 0;
         self.width = 0.;

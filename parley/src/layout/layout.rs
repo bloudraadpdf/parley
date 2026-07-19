@@ -44,6 +44,16 @@ impl<B: Brush> Layout<B> {
         self.data.reclaim_space_before_inline_box = reclaim;
     }
 
+    /// Prefer a recent intra-word break opportunity when a trailing space is
+    /// the first cluster that exceeds the line measure.
+    ///
+    /// Enabled by default to preserve Parley's dash-balancing behavior. When
+    /// disabled, a complete word that fits remains on the line and its
+    /// overflowing collapsible space hangs at the line edge.
+    pub fn set_prefer_intra_word_break_over_hanging_space(&mut self, prefer: bool) {
+        self.data.prefer_intra_word_break_over_hanging_space = prefer;
+    }
+
     /// Returns the style collection for the layout.
     pub fn styles(&self) -> &[Style<B>] {
         &self.data.styles

@@ -492,15 +492,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // them here would revert greedy line-fit on every overflowing
                             // space, regressing standard text wrap.
                             if is_space && text_wrap_mode == TextWrapMode::Wrap {
-                                let prefer_prev_boundary = self
-                                    .state
-                                    .prev_boundary
-                                    .as_ref()
-                                    .is_some_and(|prev| {
-                                        prev.intra_word
-                                            && max_advance > 0.0
-                                            && prev.state.x >= 0.5 * max_advance
-                                    });
+                                let prefer_prev_boundary =
+                                    self.layout.data.prefer_intra_word_break_over_hanging_space
+                                        && self.state.prev_boundary.as_ref().is_some_and(|prev| {
+                                            prev.intra_word
+                                                && max_advance > 0.0
+                                                && prev.state.x >= 0.5 * max_advance
+                                        });
                                 if prefer_prev_boundary {
                                     let prev = self.state.prev_boundary.take().unwrap();
                                     self.state.line = prev.state;
