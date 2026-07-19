@@ -62,6 +62,9 @@ struct PrevBoundaryState {
     /// to prefer hyphen-after splits over hung trailing whitespace
     /// when the marked line is already substantially full.
     intra_word: bool,
+    /// The marked boundary follows an inserted U+00AD discretionary
+    /// hyphen rather than an authored dash.
+    discretionary_hyphen: bool,
 }
 
 #[derive(Clone, Default)]
@@ -91,16 +94,24 @@ struct BreakerState {
     /// word-after-space (preceded by whitespace). See `PrevBoundaryState`
     /// `intra_word`.
     last_appended_was_space: bool,
+    last_appended_source_char: Option<char>,
 }
 
 impl BreakerState {
     /// Add the cluster(s) currently being evaluated to the current line
-    fn append_cluster_to_line(&mut self, next_x: f32, clusters_height: f32, is_space: bool) {
+    fn append_cluster_to_line(
+        &mut self,
+        next_x: f32,
+        clusters_height: f32,
+        is_space: bool,
+        source_char: char,
+    ) {
         self.line.items.end = self.item_idx + 1;
         self.line.clusters.end = self.cluster_idx + 1;
         self.line.x = next_x;
         self.add_line_height(clusters_height);
         self.last_appended_was_space = is_space;
+        self.last_appended_source_char = Some(source_char);
         // Would like to add:
         // self.cluster_idx += 1;
     }
@@ -118,6 +129,7 @@ impl BreakerState {
         // otherwise a collapsible space wrapped after a line-filling box
         // strands itself on a line of its own.
         self.last_appended_was_space = true;
+        self.last_appended_source_char = None;
         // Would like to add:
         // self.item_idx += 1;
     }
@@ -131,6 +143,7 @@ impl BreakerState {
             cluster_idx: self.cluster_idx,
             state: self.line.clone(),
             intra_word: !self.last_appended_was_space,
+            discretionary_hyphen: self.last_appended_source_char == Some('\u{00AD}'),
         });
     }
 
@@ -143,6 +156,7 @@ impl BreakerState {
             cluster_idx: self.cluster_idx,
             state: self.line.clone(),
             intra_word: !self.last_appended_was_space,
+            discretionary_hyphen: self.last_appended_source_char == Some('\u{00AD}'),
         });
     }
 
@@ -189,6 +203,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.prev_boundary = None; // Added by Nico
         self.state.emergency_boundary = None;
         self.state.last_appended_was_space = false;
+        self.state.last_appended_source_char = None;
 
         self.finish_line(self.lines.lines.len() - 1, line_height);
         self.last_line_data()
@@ -412,6 +427,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.x,
                                 run.metrics().line_height,
                                 false,
+                                cluster.info().source_char(),
                             );
                             if try_commit_line!(BreakReason::Explicit) {
                                 // TODO: can this be hoisted out of the conditional?
@@ -465,7 +481,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // We simply append the cluster(s) to the current line
                         if next_x <= max_advance {
                             let line_height = run.metrics().line_height;
-                            self.state.append_cluster_to_line(next_x, line_height, is_space);
+                            self.state.append_cluster_to_line(
+                                next_x,
+                                line_height,
+                                is_space,
+                                cluster.info().source_char(),
+                            );
                             self.state.cluster_idx += 1;
                             if is_space {
                                 self.state.line.num_spaces += 1;
@@ -493,12 +514,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // space, regressing standard text wrap.
                             if is_space && text_wrap_mode == TextWrapMode::Wrap {
                                 let prefer_prev_boundary =
-                                    self.layout.data.prefer_intra_word_break_over_hanging_space
-                                        && self.state.prev_boundary.as_ref().is_some_and(|prev| {
-                                            prev.intra_word
-                                                && max_advance > 0.0
-                                                && prev.state.x >= 0.5 * max_advance
-                                        });
+                                    self.state.prev_boundary.as_ref().is_some_and(|prev| {
+                                        (self
+                                            .layout
+                                            .data
+                                            .prefer_intra_word_break_over_hanging_space
+                                            || prev.discretionary_hyphen)
+                                            && prev.intra_word
+                                            && max_advance > 0.0
+                                            && prev.state.x >= 0.5 * max_advance
+                                    });
                                 if prefer_prev_boundary {
                                     let prev = self.state.prev_boundary.take().unwrap();
                                     self.state.line = prev.state;
@@ -510,8 +535,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     }
                                 } else {
                                     let line_height = run.metrics().line_height;
-                                    self.state
-                                        .append_cluster_to_line(next_x, line_height, true);
+                                    self.state.append_cluster_to_line(
+                                        next_x,
+                                        line_height,
+                                        true,
+                                        cluster.info().source_char(),
+                                    );
                                     if try_commit_line!(BreakReason::Regular) {
                                         // TODO: can this be hoisted out of the conditional?
                                         self.state.cluster_idx += 1;
@@ -563,8 +592,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // We fall back to appending the content to the line.
                             else {
                                 let line_height = run.metrics().line_height;
-                                self.state
-                                    .append_cluster_to_line(next_x, line_height, is_space);
+                                self.state.append_cluster_to_line(
+                                    next_x,
+                                    line_height,
+                                    is_space,
+                                    cluster.info().source_char(),
+                                );
                                 self.state.cluster_idx += 1;
                             }
                         }
@@ -696,8 +729,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.line.x + advance
                         };
                         let line_height = run.metrics().line_height;
-                        self.state
-                            .append_cluster_to_line(next_x, line_height, is_space);
+                        self.state.append_cluster_to_line(
+                            next_x,
+                            line_height,
+                            is_space,
+                            cluster.info().source_char(),
+                        );
                         self.state.cluster_idx += 1;
                         char_count += 1;
 

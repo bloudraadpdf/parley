@@ -160,6 +160,39 @@ fn intra_word_break_preference_can_be_disabled_when_trailing_space_hangs() {
     );
 }
 
+/// Discretionary soft hyphens remain eligible even when the caller disables
+/// the authored-dash preference. A soft hyphen is inserted specifically to
+/// fill a line tail; hanging the following space and keeping the whole word
+/// defeats auto hyphenation and stretches the preceding justified line.
+#[test]
+fn disabled_dash_preference_still_takes_discretionary_soft_hyphen() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "alpha\u{00AD}beta ";
+
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    let metrics = layout.lines().next().unwrap().metrics().clone();
+    let word_advance = metrics.advance - metrics.trailing_whitespace;
+    let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
+
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    let mut layout = builder.build(text);
+    layout.set_prefer_intra_word_break_over_hanging_space(false);
+    layout.break_all_lines(Some(max_advance));
+
+    assert_eq!(
+        layout.lines().next().map(|line| &text[line.text_range()]),
+        Some("alpha\u{00AD}"),
+        "an inserted discretionary hyphen must still fill the line tail"
+    );
+}
+
 /// A glued inline box (a border/padding shim) binds to the adjacent
 /// text: min-content measurement sums the shim widths into the text's
 /// unbreakable run, and the breaker never wraps between a shim and its
