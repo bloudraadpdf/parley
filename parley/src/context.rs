@@ -4,6 +4,7 @@
 //! Context for layout.
 
 use alloc::{vec, vec::Vec};
+use core::num::NonZeroU16;
 
 use super::FontContext;
 use super::builder::{RangedBuilder, StyleRunBuilder};
@@ -39,6 +40,9 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
 
     // Unicode analysis data sources (provided by icu)
     pub(crate) analysis_data_sources: AnalysisDataSources,
+
+    // Optional fixed grid used by consumers when serializing font advances.
+    pub(crate) font_metric_advance_quantization: Option<NonZeroU16>,
 }
 
 impl<B: Brush> LayoutContext<B> {
@@ -55,7 +59,18 @@ impl<B: Brush> LayoutContext<B> {
             info: vec![],
             analysis_data_sources: AnalysisDataSources::new(),
             scx: ShapeContext::default(),
+            font_metric_advance_quantization: None,
         }
+    }
+
+    /// Projects the base font-metric component of shaped glyph advances onto
+    /// a fixed-width grid whose denominator is expressed in em units.
+    ///
+    /// Positioning adjustments and authored letter/word spacing retain their
+    /// full precision. For example, a denominator of 1000 projects base
+    /// advances to integer thousandths of an em while preserving kerning.
+    pub fn set_font_metric_advance_quantization(&mut self, denominator: Option<NonZeroU16>) {
+        self.font_metric_advance_quantization = denominator;
     }
 
     fn resolve_style_set(
@@ -199,7 +214,10 @@ impl<B: Brush> Default for LayoutContext<B> {
 
 impl<B: Brush> Clone for LayoutContext<B> {
     fn clone(&self) -> Self {
-        // None of the internal state is visible so just return a new instance.
-        Self::new()
+        // Scratch allocations are deliberately not cloned, but persistent
+        // caller configuration must survive cloning.
+        let mut cloned = Self::new();
+        cloned.font_metric_advance_quantization = self.font_metric_advance_quantization;
+        cloned
     }
 }

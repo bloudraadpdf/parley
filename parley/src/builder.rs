@@ -282,6 +282,7 @@ fn build_into_layout<B: Brush>(
     layout.data.clear();
     layout.data.scale = scale;
     layout.data.quantize = quantize;
+    layout.data.font_metric_advance_quantization = lcx.font_metric_advance_quantization;
     layout.data.base_level = lcx.bidi.base_level();
     layout.data.text_len = text.len();
 

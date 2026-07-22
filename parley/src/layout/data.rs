@@ -6,6 +6,7 @@ use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMet
 use crate::style::Brush;
 use crate::util::nearly_zero;
 use crate::{FontData, IndentOptions, LineHeight, OverflowWrap, TextWrapMode};
+use core::num::NonZeroU16;
 use core::ops::Range;
 use skrifa::MetadataProvider as _;
 
@@ -268,6 +269,7 @@ pub(crate) struct LayoutItem {
 pub(crate) struct LayoutData<B: Brush> {
     pub(crate) scale: f32,
     pub(crate) quantize: bool,
+    pub(crate) font_metric_advance_quantization: Option<NonZeroU16>,
     /// When `true`, the line breaker reclaims the advance of collapsible
     /// trailing whitespace when doing so lets the following inline box fit
     /// on the current line (PDFreactor's model) instead of wrapping the
@@ -329,6 +331,7 @@ impl<B: Brush> Default for LayoutData<B> {
         Self {
             scale: 1.,
             quantize: true,
+            font_metric_advance_quantization: None,
             reclaim_space_before_inline_box: false,
             prefer_intra_word_break_over_hanging_space: true,
             base_level: 0,
@@ -362,6 +365,7 @@ impl<B: Brush> LayoutData<B> {
     pub(crate) fn clear(&mut self) {
         self.scale = 1.;
         self.quantize = true;
+        self.font_metric_advance_quantization = None;
         self.reclaim_space_before_inline_box = false;
         self.prefer_intra_word_break_over_hanging_space = true;
         self.base_level = 0;
@@ -450,19 +454,31 @@ impl<B: Brush> LayoutData<B> {
                 index
             });
 
-        let (metrics, space_advance, space_glyph_id) = {
-            let font = &self.fonts[font_index];
-            let font_ref = skrifa::FontRef::from_index(font.data.as_ref(), font.index).unwrap();
-            let size = skrifa::prelude::Size::new(font_size);
-            let metrics = skrifa::metrics::Metrics::new(&font_ref, size, coords);
-            let glyph_metrics = skrifa::metrics::GlyphMetrics::new(&font_ref, size, coords);
-            let space_gid = font_ref.charmap().map(' ');
-            let space_advance = space_gid
-                .and_then(|gid| glyph_metrics.advance_width(gid))
-                .unwrap_or(font_size / 4.0);
-            let space_glyph_id = space_gid.map_or(0_u32, |gid| gid.to_u32());
-            (metrics, space_advance, space_glyph_id)
-        };
+        let font = self.fonts[font_index].clone();
+        let font_ref = skrifa::FontRef::from_index(font.data.as_ref(), font.index).unwrap();
+        let size = skrifa::prelude::Size::new(font_size);
+        let metrics = skrifa::metrics::Metrics::new(&font_ref, size, coords);
+        let glyph_metrics = skrifa::metrics::GlyphMetrics::new(&font_ref, size, coords);
+        let advance_projection = self.font_metric_advance_quantization.map(|denominator| {
+            FontMetricAdvanceProjection::new(
+                &font_ref,
+                coords,
+                metrics.units_per_em,
+                font_size,
+                denominator,
+            )
+        });
+        let space_gid = font_ref.charmap().map(' ');
+        let space_advance = space_gid
+            .and_then(|gid| {
+                glyph_metrics.advance_width(gid).map(|advance| {
+                    advance_projection
+                        .as_ref()
+                        .map_or(advance, |projection| projection.project(gid, advance))
+                })
+            })
+            .unwrap_or(font_size / 4.0);
+        let space_glyph_id = space_gid.map_or(0_u32, |gid| gid.to_u32());
         let units_per_em = metrics.units_per_em as f32;
 
         let metrics = {
@@ -549,6 +565,7 @@ impl<B: Brush> LayoutData<B> {
                 &mut self.clusters,
                 &mut self.glyphs,
                 scale_factor,
+                advance_projection.as_ref(),
                 glyph_infos,
                 glyph_positions,
                 char_infos,
@@ -560,6 +577,7 @@ impl<B: Brush> LayoutData<B> {
                 &mut self.clusters,
                 &mut self.glyphs,
                 scale_factor,
+                advance_projection.as_ref(),
                 glyph_infos,
                 glyph_positions,
                 char_infos,
@@ -764,6 +782,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
     clusters: &mut Vec<ClusterData>,
     glyphs: &mut Vec<Glyph>,
     scale_factor: f32,
+    advance_projection: Option<&FontMetricAdvanceProjection<'_>>,
     glyph_infos: &[harfrust::GlyphInfo],
     glyph_positions: &[harfrust::GlyphPosition],
     char_infos: &[(CharInfo, u16)],
@@ -890,13 +909,20 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
             pending_inline_glyph = None;
         }
 
+        let shaped_advance = (glyph_pos.x_advance as f32) * scale_factor;
+        let glyph_id = skrifa::GlyphId::new(glyph_info.glyph_id);
+        let advance = advance_projection
+            .filter(|_| !nearly_zero(shaped_advance))
+            .map_or(shaped_advance, |projection| {
+                projection.project(glyph_id, shaped_advance)
+            });
         let glyph = Glyph {
             id: glyph_info.glyph_id,
             style_index: char_info.1,
             x: (glyph_pos.x_offset as f32) * scale_factor,
             // Convert from font space (Y-up) to layout space (Y-down)
             y: -(glyph_pos.y_offset as f32) * scale_factor,
-            advance: (glyph_pos.x_advance as f32) * scale_factor,
+            advance,
         };
         cluster_advance += glyph.advance;
         // Push any pending glyph. If it was a zero-offset, single glyph cluster, it would
@@ -1002,6 +1028,47 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
     }
 
     run_advance
+}
+
+/// Projects only the base font-metric contribution to a fixed em grid.
+/// Shaping adjustments remain intact because the residual is removed from
+/// the already-shaped advance instead of quantizing that final advance.
+struct FontMetricAdvanceProjection<'a> {
+    glyph_metrics: skrifa::metrics::GlyphMetrics<'a>,
+    units_per_em: f64,
+    font_size: f64,
+    denominator: f64,
+}
+
+impl<'a> FontMetricAdvanceProjection<'a> {
+    fn new(
+        font: &skrifa::FontRef<'a>,
+        coords: &'a [skrifa::prelude::NormalizedCoord],
+        units_per_em: u16,
+        font_size: f32,
+        denominator: NonZeroU16,
+    ) -> Self {
+        Self {
+            glyph_metrics: skrifa::metrics::GlyphMetrics::new(
+                font,
+                skrifa::prelude::Size::unscaled(),
+                coords,
+            ),
+            units_per_em: f64::from(units_per_em),
+            font_size: f64::from(font_size),
+            denominator: f64::from(denominator.get()),
+        }
+    }
+
+    fn project(&self, glyph_id: skrifa::GlyphId, shaped_advance: f32) -> f32 {
+        let Some(metric_units) = self.glyph_metrics.advance_width(glyph_id) else {
+            return shaped_advance;
+        };
+        let metric_em = f64::from(metric_units) / self.units_per_em;
+        let projected_em = (metric_em * self.denominator).floor() / self.denominator;
+        let residual = (metric_em - projected_em) * self.font_size;
+        shaped_advance - residual as f32
+    }
 }
 
 #[derive(PartialEq)]
