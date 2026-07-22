@@ -3,6 +3,7 @@
 
 //! Projection of shaped base advances onto a consumer's fixed font-width grid.
 
+use alloc::format;
 use core::num::NonZeroU16;
 
 use super::test_builders::create_font_context;
@@ -91,6 +92,37 @@ fn projected_font_metric_advances_drive_the_line_break() {
         projected_fit.len(),
         1,
         "line breaking must consume the same projected advances exposed to the consumer",
+    );
+}
+
+#[test]
+fn fixed_grid_line_fit_is_stable_across_many_clusters() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let quantization = Some(FontMetricAdvanceQuantization::All(FIXED_WIDTH_DENOMINATOR));
+
+    // Derive the mathematical line width from one repeated ` space + i`
+    // unit in f64. The full paragraph accumulates the same projected f32
+    // advances in a different association order, which must not turn an
+    // exact fixed-grid boundary into a wrap.
+    let i_advance = measure_advance(&mut lcx, &mut fcx, "i", quantization, None);
+    let pair_advance = measure_advance(&mut lcx, &mut fcx, "i i", quantization, None);
+    let repeated_unit = f64::from(pair_advance - i_advance);
+    let repetitions = 100usize;
+    let width = (f64::from(i_advance) + repeated_unit * repetitions as f64) as f32;
+    let text = format!("{}i", "i ".repeat(repetitions));
+
+    lcx.set_font_metric_advance_quantization(quantization);
+    let mut builder = lcx.ranged_builder(&mut fcx, &text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    let mut layout = builder.build(&text);
+    layout.break_all_lines(Some(width));
+
+    assert_eq!(
+        layout.len(),
+        1,
+        "an exact fixed-grid boundary must not wrap from f32 accumulation: width={width}",
     );
 }
 

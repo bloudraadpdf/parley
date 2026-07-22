@@ -166,6 +166,32 @@ impl BreakerState {
     }
 }
 
+/// Whether `candidate` is within the forward-error bound of a positive f32
+/// sum whose exact result is `max_advance`.
+///
+/// For `n` additions, Higham's standard bound is `gamma_n = n*u/(1-n*u)`,
+/// where `u` is the unit roundoff. Line advances are non-negative, so their
+/// absolute sum is the candidate itself. One further `u * max_advance` term
+/// accounts for storing the independently resolved measure in `f32`.
+#[inline]
+fn line_advance_fits(candidate: f32, max_advance: f32, term_count: usize) -> bool {
+    if candidate <= max_advance {
+        return true;
+    }
+    if !candidate.is_finite() || !max_advance.is_finite() || max_advance < 0.0 {
+        return false;
+    }
+
+    let unit_roundoff = f32::EPSILON * 0.5;
+    let accumulated_roundoff = term_count.max(1) as f32 * unit_roundoff;
+    if accumulated_roundoff >= 1.0 {
+        return false;
+    }
+    let gamma = accumulated_roundoff / (1.0 - accumulated_roundoff);
+    let error_bound = gamma * candidate.abs() + unit_roundoff * max_advance.abs();
+    candidate - max_advance <= error_bound
+}
+
 /// Line breaking support for a paragraph.
 pub struct BreakLines<'a, B: Brush> {
     layout: &'a mut Layout<B>,
@@ -227,7 +253,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             return None;
         }
         let cluster_start = self.state.line.clusters.start;
-        let end = self.state.line.clusters.end.min(self.layout.data.clusters.len());
+        let end = self
+            .state
+            .line
+            .clusters
+            .end
+            .min(self.layout.data.clusters.len());
         let mut idx = end;
         let mut reclaimed = 0.0f32;
         let mut spaces = 0_usize;
@@ -241,7 +272,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 break;
             }
         }
-        if reclaimed <= 0.0 || self.state.line.x - reclaimed + box_width > max_advance {
+        if reclaimed <= 0.0
+            || !self.advance_fits(self.state.line.x - reclaimed + box_width, max_advance)
+        {
             return None;
         }
         for cluster in &mut self.layout.data.clusters[idx..end] {
@@ -327,7 +360,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // If the box fits on the current line (or we are at the start of the current line)
                     // then simply move on to the next item
-                    if next_x <= max_advance || self.state.line.text_wrap_mode != TextWrapMode::Wrap
+                    if self.advance_fits(next_x, max_advance)
+                        || self.state.line.text_wrap_mode != TextWrapMode::Wrap
                     {
                         // println!("BOX FITS");
 
@@ -479,7 +513,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // If the content fits (the x position does NOT exceed max_advance)
                         //
                         // We simply append the cluster(s) to the current line
-                        if next_x <= max_advance {
+                        if self.advance_fits(next_x, max_advance) {
                             let line_height = run.metrics().line_height;
                             self.state.append_cluster_to_line(
                                 next_x,
@@ -617,6 +651,25 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
 
         None
+    }
+
+    /// Compare an accumulated line advance with its measure.
+    ///
+    /// Fixed-grid projection gives each cluster an exact decimal meaning, but
+    /// the public layout representation stores those advances as `f32`.
+    /// Repeated positive additions can therefore finish a handful of ulps on
+    /// the wrong side of the same grid-aligned measure. Use the standard
+    /// forward-error bound for a sum of positive floating-point terms only
+    /// when that fixed-grid contract is active; ordinary shaping retains its
+    /// strict comparison.
+    fn advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
+        candidate <= max_advance
+            || (self.layout.data.font_metric_advance_quantization.is_some()
+                && line_advance_fits(
+                    candidate,
+                    max_advance,
+                    self.state.line.clusters.len() + self.state.line.items.len() + 1,
+                ))
     }
 
     /// Computes the next line in the paragraph by character count.
@@ -1441,5 +1494,22 @@ fn reorder_line_items(runs: &mut [LineItemData]) {
             }
             i += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::line_advance_fits;
+
+    #[test]
+    fn line_fit_absorbs_only_the_bound_of_float_accumulation_error() {
+        // 115 positive cluster advances accumulate to 469.88995 in f32,
+        // while the same fixed-grid values and measure are 469.8898 when
+        // associated at their serialisation boundaries.
+        assert!(line_advance_fits(469.88995, 469.8898, 115));
+        assert!(
+            !line_advance_fits(469.90, 469.8898, 115),
+            "a genuine 0.01pt overflow remains a wrap",
+        );
     }
 }
