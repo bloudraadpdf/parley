@@ -19,6 +19,28 @@ use crate::inline_box::InlineBox;
 use crate::shape::ShapeContext;
 use parlance::BaseDirection;
 
+/// Optional projection of base font-metric advances onto a fixed em grid.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FontMetricAdvanceQuantization {
+    /// Project every shaping run.
+    All(NonZeroU16),
+    /// Project only runs on the Latin shaping path. Common and inherited
+    /// characters follow the script assigned to their surrounding run.
+    Latin(NonZeroU16),
+}
+
+impl FontMetricAdvanceQuantization {
+    pub(crate) fn denominator(self) -> NonZeroU16 {
+        match self {
+            Self::All(denominator) | Self::Latin(denominator) => denominator,
+        }
+    }
+
+    pub(crate) fn applies_to_script(self, script: icu_properties::props::Script) -> bool {
+        matches!(self, Self::All(_)) || script == icu_properties::props::Script::Latin
+    }
+}
+
 /// Shared scratch space used when constructing text layouts.
 ///
 /// This type is designed to be a global resource with only one per-application (or per-thread).
@@ -42,7 +64,7 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     pub(crate) analysis_data_sources: AnalysisDataSources,
 
     // Optional fixed grid used by consumers when serializing font advances.
-    pub(crate) font_metric_advance_quantization: Option<NonZeroU16>,
+    pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
 }
 
 impl<B: Brush> LayoutContext<B> {
@@ -69,8 +91,11 @@ impl<B: Brush> LayoutContext<B> {
     /// Positioning adjustments and authored letter/word spacing retain their
     /// full precision. For example, a denominator of 1000 projects base
     /// advances to integer thousandths of an em while preserving kerning.
-    pub fn set_font_metric_advance_quantization(&mut self, denominator: Option<NonZeroU16>) {
-        self.font_metric_advance_quantization = denominator;
+    pub fn set_font_metric_advance_quantization(
+        &mut self,
+        quantization: Option<FontMetricAdvanceQuantization>,
+    ) {
+        self.font_metric_advance_quantization = quantization;
     }
 
     fn resolve_style_set(

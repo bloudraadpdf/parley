@@ -5,7 +5,9 @@ use crate::inline_box::InlineBox;
 use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
 use crate::util::nearly_zero;
-use crate::{FontData, IndentOptions, LineHeight, OverflowWrap, TextWrapMode};
+use crate::{
+    FontData, FontMetricAdvanceQuantization, IndentOptions, LineHeight, OverflowWrap, TextWrapMode,
+};
 use core::num::NonZeroU16;
 use core::ops::Range;
 use skrifa::MetadataProvider as _;
@@ -269,7 +271,7 @@ pub(crate) struct LayoutItem {
 pub(crate) struct LayoutData<B: Brush> {
     pub(crate) scale: f32,
     pub(crate) quantize: bool,
-    pub(crate) font_metric_advance_quantization: Option<NonZeroU16>,
+    pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
     /// When `true`, the line breaker reclaims the advance of collapsible
     /// trailing whitespace when doing so lets the following inline box fit
     /// on the current line (PDFreactor's model) instead of wrapping the
@@ -431,6 +433,7 @@ impl<B: Brush> LayoutData<B> {
         font_attrs: fontique::Attributes,
         synthesis: fontique::Synthesis,
         glyph_buffer: &harfrust::GlyphBuffer,
+        script: icu_properties::props::Script,
         bidi_level: u8,
         style_index: u16,
         word_spacing: f32,
@@ -459,15 +462,18 @@ impl<B: Brush> LayoutData<B> {
         let size = skrifa::prelude::Size::new(font_size);
         let metrics = skrifa::metrics::Metrics::new(&font_ref, size, coords);
         let glyph_metrics = skrifa::metrics::GlyphMetrics::new(&font_ref, size, coords);
-        let advance_projection = self.font_metric_advance_quantization.map(|denominator| {
-            FontMetricAdvanceProjection::new(
-                &font_ref,
-                coords,
-                metrics.units_per_em,
-                font_size,
-                denominator,
-            )
-        });
+        let advance_projection = self
+            .font_metric_advance_quantization
+            .filter(|quantization| quantization.applies_to_script(script))
+            .map(|quantization| {
+                FontMetricAdvanceProjection::new(
+                    &font_ref,
+                    coords,
+                    metrics.units_per_em,
+                    font_size,
+                    quantization.denominator(),
+                )
+            });
         let space_gid = font_ref.charmap().map(' ');
         let space_advance = space_gid
             .and_then(|gid| {

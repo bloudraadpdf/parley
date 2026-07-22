@@ -7,7 +7,9 @@ use core::num::NonZeroU16;
 
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
-use crate::{FontFamily, LayoutContext, PositionedLayoutItem, StyleProperty};
+use crate::{
+    FontFamily, FontMetricAdvanceQuantization, LayoutContext, PositionedLayoutItem, StyleProperty,
+};
 
 const FIXED_WIDTH_DENOMINATOR: NonZeroU16 = NonZeroU16::new(1000).unwrap();
 
@@ -15,10 +17,10 @@ fn measure_advance(
     lcx: &mut LayoutContext<ColorBrush>,
     fcx: &mut crate::FontContext,
     text: &str,
-    denominator: Option<NonZeroU16>,
+    quantization: Option<FontMetricAdvanceQuantization>,
     word_spacing: Option<f32>,
 ) -> f32 {
-    lcx.set_font_metric_advance_quantization(denominator);
+    lcx.set_font_metric_advance_quantization(quantization);
     let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(12.0));
@@ -53,7 +55,9 @@ fn projected_font_metric_advances_drive_the_line_break() {
         .metrics()
         .advance;
 
-    lcx.set_font_metric_advance_quantization(Some(FIXED_WIDTH_DENOMINATOR));
+    lcx.set_font_metric_advance_quantization(Some(FontMetricAdvanceQuantization::All(
+        FIXED_WIDTH_DENOMINATOR,
+    )));
     let mut projected = build(&mut lcx, &mut fcx);
     projected.break_all_lines(None);
     let projected_advance = projected
@@ -78,7 +82,9 @@ fn projected_font_metric_advances_drive_the_line_break() {
         "the unprojected FUnit residual must wrap beta"
     );
 
-    lcx.set_font_metric_advance_quantization(Some(FIXED_WIDTH_DENOMINATOR));
+    lcx.set_font_metric_advance_quantization(Some(FontMetricAdvanceQuantization::All(
+        FIXED_WIDTH_DENOMINATOR,
+    )));
     let mut projected_fit = build(&mut lcx, &mut fcx);
     projected_fit.break_all_lines(Some(line_width));
     assert_eq!(
@@ -95,7 +101,13 @@ fn projection_preserves_shaping_adjustments() {
 
     let residual = |text, lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext| {
         measure_advance(lcx, fcx, text, None, None)
-            - measure_advance(lcx, fcx, text, Some(FIXED_WIDTH_DENOMINATOR), None)
+            - measure_advance(
+                lcx,
+                fcx,
+                text,
+                Some(FontMetricAdvanceQuantization::All(FIXED_WIDTH_DENOMINATOR)),
+                None,
+            )
     };
     let pair_residual = residual("AV", &mut lcx, &mut fcx);
     let separate_residual = residual("A", &mut lcx, &mut fcx) + residual("V", &mut lcx, &mut fcx);
@@ -116,14 +128,14 @@ fn projection_preserves_authored_word_spacing() {
         &mut lcx,
         &mut fcx,
         "alpha beta",
-        Some(FIXED_WIDTH_DENOMINATOR),
+        Some(FontMetricAdvanceQuantization::All(FIXED_WIDTH_DENOMINATOR)),
         None,
     );
     let spaced = measure_advance(
         &mut lcx,
         &mut fcx,
         "alpha beta",
-        Some(FIXED_WIDTH_DENOMINATOR),
+        Some(FontMetricAdvanceQuantization::All(FIXED_WIDTH_DENOMINATOR)),
         Some(authored_spacing),
     );
 
@@ -138,7 +150,9 @@ fn projection_preserves_authored_word_spacing() {
 fn projected_ligature_cluster_and_glyph_advances_stay_consistent() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-    lcx.set_font_metric_advance_quantization(Some(FIXED_WIDTH_DENOMINATOR));
+    lcx.set_font_metric_advance_quantization(Some(FontMetricAdvanceQuantization::All(
+        FIXED_WIDTH_DENOMINATOR,
+    )));
     let text = "office";
     let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
@@ -159,5 +173,41 @@ fn projected_ligature_cluster_and_glyph_advances_stay_consistent() {
         "projected ligature glyphs and clusters must describe the same advance: \
          glyphs={glyph_advance}, line={}",
         line.metrics().advance,
+    );
+}
+
+#[test]
+fn latin_projection_scope_leaves_complex_script_advances_untouched() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+
+    let natural_arabic = measure_advance(&mut lcx, &mut fcx, "سلام", None, None);
+    let scoped_arabic = measure_advance(
+        &mut lcx,
+        &mut fcx,
+        "سلام",
+        Some(FontMetricAdvanceQuantization::Latin(
+            FIXED_WIDTH_DENOMINATOR,
+        )),
+        None,
+    );
+    assert_eq!(
+        scoped_arabic, natural_arabic,
+        "Latin metric projection must leave quality-shaped Arabic advances unchanged",
+    );
+
+    let natural_latin = measure_advance(&mut lcx, &mut fcx, "alpha", None, None);
+    let scoped_latin = measure_advance(
+        &mut lcx,
+        &mut fcx,
+        "alpha",
+        Some(FontMetricAdvanceQuantization::Latin(
+            FIXED_WIDTH_DENOMINATOR,
+        )),
+        None,
+    );
+    assert!(
+        scoped_latin < natural_latin,
+        "Latin metric projection must still project Latin base advances",
     );
 }

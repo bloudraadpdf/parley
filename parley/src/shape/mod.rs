@@ -475,6 +475,7 @@ fn shape_item<'a, B: Brush>(
             font.attrs,
             font.font.synthesis,
             &glyph_buffer,
+            item.script,
             item.level,
             item.style_index,
             item.word_spacing,

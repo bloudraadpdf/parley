@@ -132,7 +132,7 @@ pub use linebender_resource_handle::FontData;
 pub use util::BoundingBox;
 
 pub use builder::{RangedBuilder, StyleRunBuilder, TreeBuilder};
-pub use context::LayoutContext;
+pub use context::{FontMetricAdvanceQuantization, LayoutContext};
 pub use font::FontContext;
 pub use inline_box::InlineBox;
 #[doc(inline)]
