@@ -65,6 +65,9 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
 
     // Optional fixed grid used by consumers when serializing font advances.
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
+    // Whether line fit uses nominal font metrics while glyph positioning and
+    // emitted advances retain shaping adjustments such as kerning.
+    pub(crate) nominal_font_metric_line_breaks: bool,
 }
 
 impl<B: Brush> LayoutContext<B> {
@@ -82,6 +85,7 @@ impl<B: Brush> LayoutContext<B> {
             analysis_data_sources: AnalysisDataSources::new(),
             scx: ShapeContext::default(),
             font_metric_advance_quantization: None,
+            nominal_font_metric_line_breaks: false,
         }
     }
 
@@ -96,6 +100,17 @@ impl<B: Brush> LayoutContext<B> {
         quantization: Option<FontMetricAdvanceQuantization>,
     ) {
         self.font_metric_advance_quantization = quantization;
+    }
+
+    /// Select nominal font-metric advances for line-fit decisions while
+    /// retaining fully shaped advances for glyph positioning and line output.
+    ///
+    /// This models producers that choose line boundaries on an hmtx width
+    /// grid, then apply GPOS/kern adjustments when positioning the accepted
+    /// line. When fixed metric quantization is configured, the nominal fit
+    /// advances use that same grid.
+    pub fn set_nominal_font_metric_line_breaks(&mut self, enabled: bool) {
+        self.nominal_font_metric_line_breaks = enabled;
     }
 
     fn resolve_style_set(
@@ -243,6 +258,7 @@ impl<B: Brush> Clone for LayoutContext<B> {
         // caller configuration must survive cloning.
         let mut cloned = Self::new();
         cloned.font_metric_advance_quantization = self.font_metric_advance_quantization;
+        cloned.nominal_font_metric_line_breaks = self.nominal_font_metric_line_breaks;
         cloned
     }
 }

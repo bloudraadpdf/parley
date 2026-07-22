@@ -117,13 +117,12 @@ pub(crate) fn align_per_line<B: Brush>(
     alignment: Alignment,
     options: AlignmentOptions,
 ) {
-    let canonical_width = alignment_widths
-        .last()
-        .copied()
-        .unwrap_or(layout.width);
+    let canonical_width = alignment_widths.last().copied().unwrap_or(layout.width);
     layout.alignment_width = canonical_width;
     layout.per_line_alignment_widths.clear();
-    layout.per_line_alignment_widths.extend_from_slice(alignment_widths);
+    layout
+        .per_line_alignment_widths
+        .extend_from_slice(alignment_widths);
     layout.aligned_justification_mode = if alignment == Alignment::Justify {
         match options.justification_mode {
             JustificationMode::None => None,
@@ -361,6 +360,7 @@ mod tests {
             glyph_offset: 1,
             text_offset: 0,
             advance,
+            line_break_advance: advance,
         }
     }
 

@@ -152,6 +152,35 @@ fn projection_preserves_shaping_adjustments() {
 }
 
 #[test]
+fn nominal_metric_line_breaks_retain_kerned_output_advances() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "AV AV AV";
+    let quantization = Some(FontMetricAdvanceQuantization::All(FIXED_WIDTH_DENOMINATOR));
+
+    let shaped_advance = measure_advance(&mut lcx, &mut fcx, text, quantization, None);
+
+    lcx.set_font_metric_advance_quantization(quantization);
+    lcx.set_nominal_font_metric_line_breaks(true);
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    let mut nominal_fit = builder.build(text);
+    nominal_fit.break_all_lines(None);
+    let nominal_mode_output_advance = nominal_fit.lines().next().expect("line").metrics().advance;
+    assert!(
+        (nominal_mode_output_advance - shaped_advance).abs() < 0.0001,
+        "the fit policy must not remove kerning from positioned output: shaped={shaped_advance}, nominal-mode={nominal_mode_output_advance}",
+    );
+
+    nominal_fit.break_all_lines(Some(shaped_advance + f32::EPSILON));
+    assert!(
+        nominal_fit.len() > 1,
+        "nominal hmtx widths must drive wrapping even though the fully kerned line fits"
+    );
+}
+
+#[test]
 fn projection_preserves_authored_word_spacing() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

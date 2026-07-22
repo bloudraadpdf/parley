@@ -37,6 +37,7 @@ impl LineLayout {
 #[derive(Clone, Default)]
 struct LineState {
     x: f32,
+    fit_x: f32,
     items: Range<usize>,
     clusters: Range<usize>,
     num_spaces: usize,
@@ -102,6 +103,7 @@ impl BreakerState {
     fn append_cluster_to_line(
         &mut self,
         next_x: f32,
+        next_fit_x: f32,
         clusters_height: f32,
         is_space: bool,
         source_char: char,
@@ -109,6 +111,7 @@ impl BreakerState {
         self.line.items.end = self.item_idx + 1;
         self.line.clusters.end = self.cluster_idx + 1;
         self.line.x = next_x;
+        self.line.fit_x = next_fit_x;
         self.add_line_height(clusters_height);
         self.last_appended_was_space = is_space;
         self.last_appended_source_char = Some(source_char);
@@ -117,10 +120,11 @@ impl BreakerState {
     }
 
     /// Add inline box to line
-    fn append_inline_box_to_line(&mut self, next_x: f32, box_height: f32) {
+    fn append_inline_box_to_line(&mut self, next_x: f32, next_fit_x: f32, box_height: f32) {
         // self.item_idx += 1;
         self.line.items.end += 1;
         self.line.x = next_x;
+        self.line.fit_x = next_fit_x;
         self.add_line_height(box_height);
         // A break opportunity after an inline box is a between-items
         // boundary, never an intra-word (UAX #14 HY/BB dash) split. The
@@ -225,6 +229,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.items = self.lines.line_items.len();
         self.state.lines = self.lines.lines.len();
         self.state.line.x = 0.;
+        self.state.line.fit_x = 0.;
         self.state.line.running_line_height = 0.;
         self.state.prev_boundary = None; // Added by Nico
         self.state.emergency_boundary = None;
@@ -261,11 +266,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             .min(self.layout.data.clusters.len());
         let mut idx = end;
         let mut reclaimed = 0.0f32;
+        let mut reclaimed_fit = 0.0f32;
         let mut spaces = 0_usize;
         while idx > cluster_start {
             let cluster = &self.layout.data.clusters[idx - 1];
             if cluster.info.whitespace().is_space_or_nbsp() {
                 reclaimed += cluster.advance;
+                reclaimed_fit += cluster.line_break_advance;
                 spaces += 1;
                 idx -= 1;
             } else {
@@ -273,14 +280,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }
         }
         if reclaimed <= 0.0
-            || !self.advance_fits(self.state.line.x - reclaimed + box_width, max_advance)
+            || !self.advance_fits(
+                self.state.line.fit_x - reclaimed_fit + box_width,
+                max_advance,
+            )
         {
             return None;
         }
         for cluster in &mut self.layout.data.clusters[idx..end] {
             cluster.advance = 0.0;
+            cluster.line_break_advance = 0.0;
         }
         self.state.line.x -= reclaimed;
+        self.state.line.fit_x -= reclaimed_fit;
         self.state.line.num_spaces = self.state.line.num_spaces.saturating_sub(spaces);
         Some(reclaimed)
     }
@@ -355,12 +367,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Compute the x position of the content being currently processed
                     let next_x = self.state.line.x + inline_box.width;
+                    let next_fit_x = self.state.line.fit_x + inline_box.width;
 
                     // println!("BOX next_x: {}", next_x);
 
                     // If the box fits on the current line (or we are at the start of the current line)
                     // then simply move on to the next item
-                    if self.advance_fits(next_x, max_advance)
+                    if self.advance_fits(next_fit_x, max_advance)
                         || self.state.line.text_wrap_mode != TextWrapMode::Wrap
                     {
                         // println!("BOX FITS");
@@ -369,7 +382,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         self.state.item_idx += 1;
 
                         self.state
-                            .append_inline_box_to_line(next_x, inline_box.height);
+                            .append_inline_box_to_line(next_x, next_fit_x, inline_box.height);
 
                         // We can always line break after a REPLACED inline
                         // box; a glued box (inline border/padding shim)
@@ -381,10 +394,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         }
                     } else {
                         // If we're at the start of the line, this box will never fit, so consume it and accept the overflow.
-                        if self.state.line.x == 0.0 {
+                        if self.state.line.fit_x == 0.0 {
                             // println!("BOX EMERGENCY BREAK");
-                            self.state
-                                .append_inline_box_to_line(next_x, inline_box.height);
+                            self.state.append_inline_box_to_line(
+                                next_x,
+                                next_fit_x,
+                                inline_box.height,
+                            );
                             if try_commit_line!(BreakReason::Emergency) {
                                 self.state.item_idx += 1;
                                 return self.start_new_line();
@@ -396,11 +412,18 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // the tail of an unbreakable word.
                             let (next_x, box_height) = (next_x, inline_box.height);
                             self.state.item_idx += 1;
-                            self.state.append_inline_box_to_line(next_x, box_height);
+                            self.state
+                                .append_inline_box_to_line(next_x, next_fit_x, box_height);
                         } else if let Some(reclaimed_x) = {
                             let (box_width, box_height) = (inline_box.width, inline_box.height);
                             self.reclaim_trailing_space_for_box(box_width, max_advance)
-                                .map(|_| (self.state.line.x + box_width, box_height))
+                                .map(|_| {
+                                    (
+                                        self.state.line.x + box_width,
+                                        self.state.line.fit_x + box_width,
+                                        box_height,
+                                    )
+                                })
                         } {
                             // PDFreactor's model: remove the collapsible
                             // trailing whitespace (its advance is zeroed —
@@ -409,9 +432,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // `pdfreactor/W8BEN` row 10: `...article:
                             // <input 46.3%>` fits only without the space;
                             // the golden keeps the field on the text line.
-                            let (next_x, box_height) = reclaimed_x;
+                            let (next_x, next_fit_x, box_height) = reclaimed_x;
                             self.state.item_idx += 1;
-                            self.state.append_inline_box_to_line(next_x, box_height);
+                            self.state
+                                .append_inline_box_to_line(next_x, next_fit_x, box_height);
                             self.state.mark_line_break_opportunity();
                         } else {
                             // println!("BOX BREAK");
@@ -452,13 +476,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             //
                             // We also don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
                             // line breaks. We should accept the overflowing fragment in that scenario.
-                            if !is_ligature_continuation && self.state.line.x != 0.0 {
+                            if !is_ligature_continuation && self.state.line.fit_x != 0.0 {
                                 self.state.mark_line_break_opportunity();
                                 // break_opportunity = true;
                             }
                         } else if is_newline {
                             self.state.append_cluster_to_line(
                                 self.state.line.x,
+                                self.state.line.fit_x,
                                 run.metrics().line_height,
                                 false,
                                 cluster.info().source_char(),
@@ -473,7 +498,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         style.overflow_wrap != OverflowWrap::Normal && !is_ligature_continuation
                         && text_wrap_mode == TextWrapMode::Wrap
                         // If we're at the start of the line, this particular cluster will never fit, so it's not a valid emergency break opportunity.
-                        && self.state.line.x != 0.0
+                        && self.state.line.fit_x != 0.0
                         {
                             self.state.mark_emergency_break_opportunity();
                         }
@@ -481,12 +506,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // If current cluster is the start of a ligature, then advance state to include
                         // the remaining clusters that make up the ligature
                         let mut advance = cluster.advance();
+                        let mut fit_advance = cluster.data.line_break_advance;
                         if cluster.is_ligature_start() {
                             while let Some(cluster) = run.get(self.state.cluster_idx + 1) {
                                 if !cluster.is_ligature_continuation() {
                                     break;
                                 } else {
                                     advance += cluster.advance();
+                                    fit_advance += cluster.data.line_break_advance;
                                     self.state.cluster_idx += 1;
                                 }
                             }
@@ -500,23 +527,30 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 advance = ((self.state.line.x / tab_interval).floor() + 1.0)
                                     * tab_interval
                                     - self.state.line.x;
+                                fit_advance = ((self.state.line.fit_x / tab_interval).floor()
+                                    + 1.0)
+                                    * tab_interval
+                                    - self.state.line.fit_x;
                             } else {
                                 advance = 0.0;
+                                fit_advance = 0.0;
                             }
                         }
 
                         // Compute the x position of the content being currently processed
                         let next_x = self.state.line.x + advance;
+                        let next_fit_x = self.state.line.fit_x + fit_advance;
 
                         // println!("Cluster {} next_x: {}", self.state.cluster_idx, next_x);
 
                         // If the content fits (the x position does NOT exceed max_advance)
                         //
                         // We simply append the cluster(s) to the current line
-                        if self.advance_fits(next_x, max_advance) {
+                        if self.advance_fits(next_fit_x, max_advance) {
                             let line_height = run.metrics().line_height;
                             self.state.append_cluster_to_line(
                                 next_x,
+                                next_fit_x,
                                 line_height,
                                 is_space,
                                 cluster.info().source_char(),
@@ -556,7 +590,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             || prev.discretionary_hyphen)
                                             && prev.intra_word
                                             && max_advance > 0.0
-                                            && prev.state.x >= 0.5 * max_advance
+                                            && prev.state.fit_x >= 0.5 * max_advance
                                     });
                                 if prefer_prev_boundary {
                                     let prev = self.state.prev_boundary.take().unwrap();
@@ -571,6 +605,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     let line_height = run.metrics().line_height;
                                     self.state.append_cluster_to_line(
                                         next_x,
+                                        next_fit_x,
                                         line_height,
                                         true,
                                         cluster.info().source_char(),
@@ -628,6 +663,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 let line_height = run.metrics().line_height;
                                 self.state.append_cluster_to_line(
                                     next_x,
+                                    next_fit_x,
                                     line_height,
                                     is_space,
                                     cluster.info().source_char(),
@@ -726,9 +762,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Compute the x position for the line width tracking
                     let next_x = self.state.line.x + inline_box.width;
+                    let next_fit_x = self.state.line.fit_x + inline_box.width;
                     self.state.item_idx += 1;
                     self.state
-                        .append_inline_box_to_line(next_x, inline_box.height);
+                        .append_inline_box_to_line(next_x, next_fit_x, inline_box.height);
                     char_count += 1;
 
                     // Check if we've reached the limit after adding this box
@@ -773,6 +810,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let is_newline = whitespace == Whitespace::Newline;
                         let is_space = whitespace.is_space_or_nbsp();
                         let advance = cluster.advance();
+                        let fit_advance = cluster.data.line_break_advance;
 
                         // Compute the x position.
                         // Newlines don't contribute to line width (matching break_next behavior).
@@ -781,9 +819,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         } else {
                             self.state.line.x + advance
                         };
+                        let next_fit_x = if is_newline {
+                            self.state.line.fit_x
+                        } else {
+                            self.state.line.fit_x + fit_advance
+                        };
                         let line_height = run.metrics().line_height;
                         self.state.append_cluster_to_line(
                             next_x,
+                            next_fit_x,
                             line_height,
                             is_space,
                             cluster.info().source_char(),
