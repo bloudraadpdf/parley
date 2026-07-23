@@ -284,6 +284,8 @@ fn build_into_layout<B: Brush>(
     layout.data.quantize = quantize;
     layout.data.font_metric_advance_quantization = lcx.font_metric_advance_quantization;
     layout.data.nominal_font_metric_line_breaks = lcx.nominal_font_metric_line_breaks;
+    layout.data.prefer_natural_metric_discretionary_breaks =
+        lcx.prefer_natural_metric_discretionary_breaks;
     layout.data.base_level = lcx.bidi.base_level();
     layout.data.text_len = text.len();
 

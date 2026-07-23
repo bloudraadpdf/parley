@@ -361,6 +361,7 @@ mod tests {
             text_offset: 0,
             advance,
             line_break_advance: advance,
+            natural_advance: advance,
         }
     }
 
