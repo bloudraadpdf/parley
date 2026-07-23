@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::InlineBox;
-use crate::layout::LineBreakOverride;
 use crate::layout::alignment::align;
 use crate::layout::alignment::align_per_line;
 use crate::layout::alignment::unjustify;
 use crate::layout::data::LayoutData;
+use crate::layout::{DiscretionaryBreak, LineBreakOverride};
 use crate::style::Brush;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -14,7 +14,7 @@ use core::cmp::Ordering;
 use crate::IndentOptions;
 use crate::layout::{
     ContentWidths, Style, alignment::Alignment, alignment::AlignmentOptions, line::Line,
-    line_break::BreakLines,
+    line_break::BreakLines, run::Run,
 };
 
 /// Text layout.
@@ -46,16 +46,6 @@ impl<B: Brush> Layout<B> {
         self.data.reclaim_space_before_inline_box = reclaim;
     }
 
-    /// Prefer a recent intra-word break opportunity when a trailing space is
-    /// the first cluster that exceeds the line measure.
-    ///
-    /// Enabled by default to preserve Parley's dash-balancing behavior. When
-    /// disabled, a complete word that fits remains on the line and its
-    /// overflowing collapsible space hangs at the line edge.
-    pub fn set_prefer_intra_word_break_over_hanging_space(&mut self, prefer: bool) {
-        self.data.prefer_intra_word_break_over_hanging_space = prefer;
-    }
-
     /// Override soft line-break decisions at selected UTF-8 byte boundaries.
     ///
     /// Overrides are applied after Unicode boundary analysis and before greedy
@@ -77,6 +67,33 @@ impl<B: Brush> Layout<B> {
             canonical.push(entry);
         }
         self.data.line_break_overrides = canonical;
+    }
+
+    /// Set the material widths associated with discretionary break
+    /// opportunities such as soft hyphens.
+    ///
+    /// A discretionary advance is charged only when its boundary is selected;
+    /// it is invisible and occupies no space when the text remains unbroken.
+    /// Duplicate byte indices use the last supplied value.
+    pub fn set_discretionary_breaks(&mut self, mut breaks: Vec<DiscretionaryBreak>) {
+        breaks.sort_by_key(|entry| entry.byte_index);
+        let mut canonical: Vec<DiscretionaryBreak> = Vec::with_capacity(breaks.len());
+        for entry in breaks {
+            if entry.byte_index > self.data.text_len
+                || !entry.advance.is_finite()
+                || entry.advance < 0.0
+            {
+                continue;
+            }
+            if let Some(previous) = canonical.last_mut() {
+                if previous.byte_index == entry.byte_index {
+                    *previous = entry;
+                    continue;
+                }
+            }
+            canonical.push(entry);
+        }
+        self.data.discretionary_breaks = canonical;
     }
 
     /// Returns the style collection for the layout.
@@ -142,6 +159,18 @@ impl<B: Brush> Layout<B> {
 
     pub fn inline_boxes_mut(&mut self) -> &mut [InlineBox] {
         &mut self.data.inline_boxes
+    }
+
+    /// Returns the shaped font runs before or after line breaking.
+    ///
+    /// Before line breaking these cover the complete paragraph and expose the
+    /// actual selected font, size, variation coordinates, and source range.
+    pub fn runs(&self) -> impl ExactSizeIterator<Item = Run<'_, B>> + '_ + Clone {
+        self.data
+            .runs
+            .iter()
+            .enumerate()
+            .map(move |(index, data)| Run::new(self, 0, index as u32, data, None))
     }
 
     /// Returns an iterator over the lines in the layout.

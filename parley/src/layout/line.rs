@@ -29,6 +29,20 @@ impl<'a, B: Brush> Line<'a, B> {
         self.data.break_reason
     }
 
+    /// Advance of material inserted because this line ended at a
+    /// discretionary break (for example, a visible soft-hyphen glyph).
+    pub fn discretionary_advance(&self) -> f32 {
+        self.data.discretionary_advance
+    }
+
+    /// Returns whether this line selected a registered discretionary break.
+    ///
+    /// This is distinct from [`Self::discretionary_advance`] because the
+    /// selected inserted material may legitimately have zero width.
+    pub fn ends_at_discretionary_break(&self) -> bool {
+        self.data.ends_at_discretionary_break
+    }
+
     /// Returns the range of text for the line.
     pub fn text_range(&self) -> Range<usize> {
         self.data.text_range.clone()

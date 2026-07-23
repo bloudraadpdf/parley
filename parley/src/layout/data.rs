@@ -13,6 +13,23 @@ pub struct LineBreakOverride {
     /// `true` adds an opportunity; `false` suppresses the Unicode opportunity.
     pub opportunity: bool,
 }
+
+/// Material inserted only when a discretionary line break is taken.
+///
+/// The advance participates in line fitting and alignment, but not in the
+/// unbroken text flow. This is the standard penalty-node model used for soft
+/// hyphens: the visible hyphen has a real width only on the line where the
+/// break is selected.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DiscretionaryBreak {
+    /// UTF-8 byte index of the boundary after the discretionary character.
+    pub byte_index: usize,
+    /// Advance of the material displayed when the break is taken.
+    pub advance: f32,
+    /// Maximum number of consecutive lines that may end at this class of
+    /// discretionary break. `None` imposes no limit.
+    pub max_consecutive_lines: Option<u32>,
+}
 use crate::util::nearly_zero;
 use crate::{
     FontData, FontMetricAdvanceQuantization, IndentOptions, LineHeight, OverflowWrap, TextWrapMode,
@@ -187,6 +204,13 @@ pub(crate) struct LineData {
     pub(crate) num_spaces: usize,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
+    /// Advance inserted only because this line ended at a discretionary
+    /// break. Zero for ordinary and mandatory breaks.
+    pub(crate) discretionary_advance: f32,
+    /// Whether this line selected a registered discretionary boundary.
+    /// Kept separately from the advance because valid inserted material may
+    /// have zero width.
+    pub(crate) ends_at_discretionary_break: bool,
 }
 
 impl LineData {
@@ -291,16 +315,12 @@ pub(crate) struct LayoutData<B: Brush> {
     /// on the current line (PDFreactor's model) instead of wrapping the
     /// box (the browser model). See `BreakLines`.
     pub(crate) reclaim_space_before_inline_box: bool,
-    /// When `true`, an overflowing trailing space may commit the most recent
-    /// intra-word line-break opportunity instead of hanging the space after a
-    /// complete word that otherwise fits. This preserves Parley's established
-    /// dash-balancing behavior unless a caller explicitly selects strict
-    /// greedy wrapping.
-    pub(crate) prefer_intra_word_break_over_hanging_space: bool,
     /// Caller-supplied decisions for specific UTF-8 byte boundaries. Entries
     /// are sorted by `byte_index`; `opportunity = true` adds a soft break and
     /// `false` suppresses the Unicode soft break at that boundary.
     pub(crate) line_break_overrides: Vec<LineBreakOverride>,
+    /// Sorted discretionary break material, keyed by UTF-8 boundary.
+    pub(crate) discretionary_breaks: Vec<DiscretionaryBreak>,
     pub(crate) base_level: u8,
     pub(crate) text_len: usize,
     pub(crate) width: f32,
@@ -354,8 +374,8 @@ impl<B: Brush> Default for LayoutData<B> {
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
             reclaim_space_before_inline_box: false,
-            prefer_intra_word_break_over_hanging_space: true,
             line_break_overrides: Vec::new(),
+            discretionary_breaks: Vec::new(),
             base_level: 0,
             text_len: 0,
             width: 0.,
@@ -390,7 +410,6 @@ impl<B: Brush> LayoutData<B> {
         self.font_metric_advance_quantization = None;
         self.nominal_font_metric_line_breaks = false;
         self.reclaim_space_before_inline_box = false;
-        self.prefer_intra_word_break_over_hanging_space = true;
         self.line_break_overrides.clear();
         self.base_level = 0;
         self.text_len = 0;
