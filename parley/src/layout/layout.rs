@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::InlineBox;
+use crate::layout::LineBreakOverride;
 use crate::layout::alignment::align;
 use crate::layout::alignment::align_per_line;
 use crate::layout::alignment::unjustify;
 use crate::layout::data::LayoutData;
 use crate::style::Brush;
+use alloc::vec::Vec;
 use core::cmp::Ordering;
 
 use crate::IndentOptions;
@@ -52,6 +54,29 @@ impl<B: Brush> Layout<B> {
     /// overflowing collapsible space hangs at the line edge.
     pub fn set_prefer_intra_word_break_over_hanging_space(&mut self, prefer: bool) {
         self.data.prefer_intra_word_break_over_hanging_space = prefer;
+    }
+
+    /// Override soft line-break decisions at selected UTF-8 byte boundaries.
+    ///
+    /// Overrides are applied after Unicode boundary analysis and before greedy
+    /// line breaking. They cannot suppress mandatory newline breaks or split a
+    /// shaped ligature. Duplicate byte indices use the last supplied decision.
+    pub fn set_line_break_overrides(&mut self, mut overrides: Vec<LineBreakOverride>) {
+        overrides.sort_by_key(|entry| entry.byte_index);
+        let mut canonical: Vec<LineBreakOverride> = Vec::with_capacity(overrides.len());
+        for entry in overrides {
+            if entry.byte_index > self.data.text_len {
+                continue;
+            }
+            if let Some(previous) = canonical.last_mut() {
+                if previous.byte_index == entry.byte_index {
+                    *previous = entry;
+                    continue;
+                }
+            }
+            canonical.push(entry);
+        }
+        self.data.line_break_overrides = canonical;
     }
 
     /// Returns the style collection for the layout.

@@ -4,6 +4,15 @@
 use crate::inline_box::InlineBox;
 use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
+
+/// A caller-supplied soft line-break decision at one UTF-8 byte boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineBreakOverride {
+    /// Byte index of the boundary in the layout's source text.
+    pub byte_index: usize,
+    /// `true` adds an opportunity; `false` suppresses the Unicode opportunity.
+    pub opportunity: bool,
+}
 use crate::util::nearly_zero;
 use crate::{
     FontData, FontMetricAdvanceQuantization, IndentOptions, LineHeight, OverflowWrap, TextWrapMode,
@@ -288,6 +297,10 @@ pub(crate) struct LayoutData<B: Brush> {
     /// dash-balancing behavior unless a caller explicitly selects strict
     /// greedy wrapping.
     pub(crate) prefer_intra_word_break_over_hanging_space: bool,
+    /// Caller-supplied decisions for specific UTF-8 byte boundaries. Entries
+    /// are sorted by `byte_index`; `opportunity = true` adds a soft break and
+    /// `false` suppresses the Unicode soft break at that boundary.
+    pub(crate) line_break_overrides: Vec<LineBreakOverride>,
     pub(crate) base_level: u8,
     pub(crate) text_len: usize,
     pub(crate) width: f32,
@@ -342,6 +355,7 @@ impl<B: Brush> Default for LayoutData<B> {
             nominal_font_metric_line_breaks: false,
             reclaim_space_before_inline_box: false,
             prefer_intra_word_break_over_hanging_space: true,
+            line_break_overrides: Vec::new(),
             base_level: 0,
             text_len: 0,
             width: 0.,
@@ -377,6 +391,7 @@ impl<B: Brush> LayoutData<B> {
         self.nominal_font_metric_line_breaks = false;
         self.reclaim_space_before_inline_box = false;
         self.prefer_intra_word_break_over_hanging_space = true;
+        self.line_break_overrides.clear();
         self.base_level = 0;
         self.text_len = 0;
         self.width = 0.;

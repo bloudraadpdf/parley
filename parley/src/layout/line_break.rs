@@ -465,13 +465,23 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let is_newline = whitespace == Whitespace::Newline;
                         let is_space = whitespace.is_space_or_nbsp();
                         let boundary = cluster.info().boundary();
+                        let byte_index = cluster.text_range().start;
+                        let boundary_override = self
+                            .layout
+                            .data
+                            .line_break_overrides
+                            .binary_search_by_key(&byte_index, |entry| entry.byte_index)
+                            .ok()
+                            .map(|index| self.layout.data.line_break_overrides[index].opportunity);
                         let style = &self.layout.data.styles[cluster.data.style_index as usize];
 
                         // Lag text_wrap_mode style by one cluster
                         let text_wrap_mode = self.state.line.text_wrap_mode;
                         self.state.line.text_wrap_mode = style.text_wrap_mode;
 
-                        if boundary == Boundary::Line && text_wrap_mode == TextWrapMode::Wrap {
+                        if boundary_override.unwrap_or(boundary == Boundary::Line)
+                            && text_wrap_mode == TextWrapMode::Wrap
+                        {
                             // We do not currently handle breaking within a ligature, so we ignore boundaries in such a position.
                             //
                             // We also don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
