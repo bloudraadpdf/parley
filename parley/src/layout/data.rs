@@ -133,6 +133,19 @@ impl ClusterInfo {
     pub(crate) fn source_char(self) -> char {
         self.source_char
     }
+
+    /// Returns whether this cluster is absent from the default visual
+    /// rendering and therefore is not a typographic character unit for
+    /// letter spacing.
+    ///
+    /// CSS Text applies tracking to typographic character units, not to
+    /// default-ignorable format controls. This includes an unselected soft
+    /// hyphen: its visible replacement is discretionary material and is
+    /// measured separately only when the line actually breaks there.
+    pub(crate) fn is_default_ignorable(self) -> bool {
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>()
+            .contains(self.source_char)
+    }
 }
 
 const fn to_whitespace(c: char) -> Whitespace {
@@ -660,7 +673,11 @@ impl<B: Brush> LayoutData<B> {
             }
             let clusters = &mut self.clusters[run.cluster_range.clone()];
             for cluster in clusters {
-                let mut spacing = letter;
+                let mut spacing = if cluster.info.is_default_ignorable() {
+                    0.0
+                } else {
+                    letter
+                };
                 if !nearly_zero(word) && cluster.info.whitespace().is_space_or_nbsp() {
                     spacing += word;
                 }
