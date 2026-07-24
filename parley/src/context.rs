@@ -68,9 +68,6 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     // Whether line fit uses nominal font metrics while glyph positioning and
     // emitted advances retain shaping adjustments such as kerning.
     pub(crate) nominal_font_metric_line_breaks: bool,
-    // Whether a discretionary break that fits the unprojected shaped metrics
-    // takes precedence over an otherwise fitting fixed-grid projection.
-    pub(crate) prefer_natural_metric_discretionary_breaks: bool,
 }
 
 impl<B: Brush> LayoutContext<B> {
@@ -89,7 +86,6 @@ impl<B: Brush> LayoutContext<B> {
             scx: ShapeContext::default(),
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
-            prefer_natural_metric_discretionary_breaks: false,
         }
     }
 
@@ -115,17 +111,6 @@ impl<B: Brush> LayoutContext<B> {
     /// advances use that same grid.
     pub fn set_nominal_font_metric_line_breaks(&mut self, enabled: bool) {
         self.nominal_font_metric_line_breaks = enabled;
-    }
-
-    /// Prefer a fitting discretionary boundary when the unprojected shaped
-    /// metrics overflow, even if fixed-grid projected advances would keep the
-    /// complete word on the line.
-    ///
-    /// This preserves the conventional ordering of word hyphenation before a
-    /// serializer-specific width residual is reclaimed. It has no effect
-    /// unless font-metric advance quantization is also configured.
-    pub fn set_prefer_natural_metric_discretionary_breaks(&mut self, enabled: bool) {
-        self.prefer_natural_metric_discretionary_breaks = enabled;
     }
 
     fn resolve_style_set(
@@ -274,8 +259,6 @@ impl<B: Brush> Clone for LayoutContext<B> {
         let mut cloned = Self::new();
         cloned.font_metric_advance_quantization = self.font_metric_advance_quantization;
         cloned.nominal_font_metric_line_breaks = self.nominal_font_metric_line_breaks;
-        cloned.prefer_natural_metric_discretionary_breaks =
-            self.prefer_natural_metric_discretionary_breaks;
         cloned
     }
 }

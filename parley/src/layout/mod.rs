@@ -66,6 +66,9 @@ pub struct Style<B: Brush> {
     pub(crate) tab_size: TabSize,
     /// Hyphenate character.
     pub(crate) hyphenate_character: HyphenateCharacter,
+    /// Whether the consumer-selected fixed font-metric grid applies to this
+    /// style run.
+    pub(crate) font_metric_advance_quantization: bool,
     #[cfg(feature = "accesskit")]
     /// Locale if any, so we can set the corresponding AccessKit property
     pub(crate) locale: Option<fontique::Language>,

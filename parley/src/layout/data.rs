@@ -66,10 +66,6 @@ pub(crate) struct ClusterData {
     /// `advance`; nominal-metric line breaking excludes shaping adjustments
     /// such as kerning while the rendered cluster retains them.
     pub(crate) line_break_advance: f32,
-    /// Shaped advance before any consumer-selected fixed-grid projection.
-    /// Used only to order a fitting discretionary break ahead of reclaiming
-    /// the projection residual for the complete word.
-    pub(crate) natural_advance: f32,
 }
 
 impl ClusterData {
@@ -314,7 +310,6 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) quantize: bool,
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
     pub(crate) nominal_font_metric_line_breaks: bool,
-    pub(crate) prefer_natural_metric_discretionary_breaks: bool,
     /// When `true`, the line breaker reclaims the advance of collapsible
     /// trailing whitespace when doing so lets the following inline box fit
     /// on the current line (PDFreactor's model) instead of wrapping the
@@ -378,7 +373,6 @@ impl<B: Brush> Default for LayoutData<B> {
             quantize: true,
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
-            prefer_natural_metric_discretionary_breaks: false,
             reclaim_space_before_inline_box: false,
             line_break_overrides: Vec::new(),
             discretionary_breaks: Vec::new(),
@@ -415,7 +409,6 @@ impl<B: Brush> LayoutData<B> {
         self.quantize = true;
         self.font_metric_advance_quantization = None;
         self.nominal_font_metric_line_breaks = false;
-        self.prefer_natural_metric_discretionary_breaks = false;
         self.reclaim_space_before_inline_box = false;
         self.line_break_overrides.clear();
         self.base_level = 0;
@@ -512,7 +505,10 @@ impl<B: Brush> LayoutData<B> {
         let glyph_metrics = skrifa::metrics::GlyphMetrics::new(&font_ref, size, coords);
         let advance_projection = self
             .font_metric_advance_quantization
-            .filter(|quantization| quantization.applies_to_script(script))
+            .filter(|quantization| {
+                self.styles[style_index as usize].font_metric_advance_quantization
+                    && quantization.applies_to_script(script)
+            })
             .map(|quantization| {
                 FontMetricAdvanceProjection::new(
                     &font_ref,
@@ -671,7 +667,6 @@ impl<B: Brush> LayoutData<B> {
                 if !nearly_zero(spacing) {
                     cluster.advance += spacing;
                     cluster.line_break_advance += spacing;
-                    cluster.natural_advance += spacing;
                     if cluster.glyph_len != 0xFF {
                         let start = run.glyph_start + cluster.glyph_offset as usize;
                         let end = start + cluster.glyph_len as usize;
@@ -857,7 +852,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
     let mut run_advance = 0.0;
     let mut cluster_advance = 0.0;
     let mut cluster_line_break_advance = 0.0;
-    let mut cluster_natural_advance = 0.0;
     // If the current cluster might be a single-glyph, zero-offset cluster, we defer
     // pushing the first glyph to `glyphs` because it might be inlined into `ClusterData`.
     let mut pending_inline_glyph: Option<Glyph> = None;
@@ -905,7 +899,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
             let num_components = num_components(glyph_info.cluster, cluster_id, last_cluster_id);
             cluster_advance /= num_components as f32;
             cluster_line_break_advance /= num_components as f32;
-            cluster_natural_advance /= num_components as f32;
             let is_newline = to_whitespace(cluster_start_char.1) == Whitespace::Newline;
             let cluster_type = if num_components > 1 {
                 debug_assert!(!is_newline);
@@ -935,7 +928,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                 cluster_glyph_offset,
                 cluster_advance,
                 cluster_line_break_advance,
-                cluster_natural_advance,
                 total_glyphs,
                 cluster_type,
                 inline_glyph_id,
@@ -960,7 +952,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                         cluster_glyph_offset,
                         cluster_advance,
                         cluster_line_break_advance,
-                        cluster_natural_advance,
                         total_glyphs,
                         ClusterType::LigatureComponent,
                         None,
@@ -971,7 +962,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
 
             cluster_advance = 0.0;
             cluster_line_break_advance = 0.0;
-            cluster_natural_advance = 0.0;
             last_cluster_id = cluster_id;
             cluster_id = glyph_info.cluster;
             char_info = char_infos[cluster_id as usize];
@@ -1001,7 +991,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
         };
         cluster_advance += glyph.advance;
         cluster_line_break_advance += line_break_advance;
-        cluster_natural_advance += shaped_advance;
         // Push any pending glyph. If it was a zero-offset, single glyph cluster, it would
         // have been pushed in the first `if` block.
         if let Some(pending) = pending_inline_glyph.take() {
@@ -1034,7 +1023,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
             }
             let ligature_advance = cluster_advance / num_components as f32;
             let ligature_line_break_advance = cluster_line_break_advance / num_components as f32;
-            let ligature_natural_advance = cluster_natural_advance / num_components as f32;
             push_cluster(
                 clusters,
                 char_info,
@@ -1042,7 +1030,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                 cluster_glyph_offset,
                 ligature_advance,
                 ligature_line_break_advance,
-                ligature_natural_advance,
                 total_glyphs,
                 ClusterType::LigatureStart,
                 None,
@@ -1067,7 +1054,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                     cluster_glyph_offset,
                     ligature_advance,
                     ligature_line_break_advance,
-                    ligature_natural_advance,
                     total_glyphs,
                     ClusterType::LigatureComponent,
                     None,
@@ -1104,7 +1090,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                 cluster_glyph_offset,
                 cluster_advance,
                 cluster_line_break_advance,
-                cluster_natural_advance,
                 total_glyphs,
                 cluster_type,
                 inline_glyph_id,
@@ -1195,53 +1180,40 @@ fn push_cluster(
     glyph_offset: u32,
     advance: f32,
     line_break_advance: f32,
-    natural_advance: f32,
     total_glyphs: u32,
     cluster_type: ClusterType,
     inline_glyph_id: Option<u32>,
 ) {
     let glyph_len = (total_glyphs - glyph_offset) as u8;
 
-    let (
-        final_glyph_len,
-        final_glyph_offset,
-        final_advance,
-        final_line_break_advance,
-        final_natural_advance,
-    ) = match cluster_type {
-        ClusterType::LigatureComponent => {
-            // Ligature components have no glyphs, only advance.
-            debug_assert_eq!(glyph_len, 0);
-            (0_u8, 0_u32, advance, line_break_advance, natural_advance)
-        }
-        ClusterType::Newline => {
-            // Newline clusters are stripped of their glyph contribution.
-            debug_assert_eq!(glyph_len, 1);
-            (0_u8, 0_u32, 0.0, 0.0, 0.0)
-        }
-        _ if inline_glyph_id.is_some() => {
-            // Inline glyphs are stored inline within `ClusterData`
-            debug_assert_eq!(glyph_len, 0);
-            (
-                0xFF_u8,
-                inline_glyph_id.unwrap(),
-                advance,
-                line_break_advance,
-                natural_advance,
-            )
-        }
-        ClusterType::Regular | ClusterType::LigatureStart => {
-            // Regular and ligature start clusters maintain their glyphs and advance.
-            debug_assert_ne!(glyph_len, 0);
-            (
-                glyph_len,
-                glyph_offset,
-                advance,
-                line_break_advance,
-                natural_advance,
-            )
-        }
-    };
+    let (final_glyph_len, final_glyph_offset, final_advance, final_line_break_advance) =
+        match cluster_type {
+            ClusterType::LigatureComponent => {
+                // Ligature components have no glyphs, only advance.
+                debug_assert_eq!(glyph_len, 0);
+                (0_u8, 0_u32, advance, line_break_advance)
+            }
+            ClusterType::Newline => {
+                // Newline clusters are stripped of their glyph contribution.
+                debug_assert_eq!(glyph_len, 1);
+                (0_u8, 0_u32, 0.0, 0.0)
+            }
+            _ if inline_glyph_id.is_some() => {
+                // Inline glyphs are stored inline within `ClusterData`
+                debug_assert_eq!(glyph_len, 0);
+                (
+                    0xFF_u8,
+                    inline_glyph_id.unwrap(),
+                    advance,
+                    line_break_advance,
+                )
+            }
+            ClusterType::Regular | ClusterType::LigatureStart => {
+                // Regular and ligature start clusters maintain their glyphs and advance.
+                debug_assert_ne!(glyph_len, 0);
+                (glyph_len, glyph_offset, advance, line_break_advance)
+            }
+        };
 
     clusters.push(ClusterData {
         info: ClusterInfo::new(char_info.0.boundary, cluster_start_char.1),
@@ -1253,6 +1225,5 @@ fn push_cluster(
         text_offset: cluster_start_char.0 as u16,
         advance: final_advance,
         line_break_advance: final_line_break_advance,
-        natural_advance: final_natural_advance,
     });
 }

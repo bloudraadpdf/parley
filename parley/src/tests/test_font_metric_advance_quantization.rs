@@ -3,14 +3,13 @@
 
 //! Projection of shaped base advances onto a consumer's fixed font-width grid.
 
-use alloc::{format, vec};
+use alloc::format;
 use core::num::NonZeroU16;
 
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
 use crate::{
     FontFamily, FontMetricAdvanceQuantization, LayoutContext, PositionedLayoutItem, StyleProperty,
-    layout::DiscretionaryBreak,
 };
 
 const FIXED_WIDTH_DENOMINATOR: NonZeroU16 = NonZeroU16::new(1000).unwrap();
@@ -97,19 +96,20 @@ fn projected_font_metric_advances_drive_the_line_break() {
 }
 
 #[test]
-fn natural_metric_overflow_prefers_a_fitting_discretionary_break_before_projected_fit() {
+fn style_run_can_opt_out_of_consumer_metric_projection() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-    let text = "alpha\u{00AD}beta";
+    let text = "alpha beta";
 
-    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext| {
+    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext, project| {
         let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
         builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
         builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push_default(StyleProperty::FontMetricAdvanceQuantization(project));
         builder.build(text)
     };
 
-    let mut natural = build(&mut lcx, &mut fcx);
+    let mut natural = build(&mut lcx, &mut fcx, true);
     natural.break_all_lines(None);
     let natural_advance = natural
         .lines()
@@ -121,7 +121,7 @@ fn natural_metric_overflow_prefers_a_fitting_discretionary_break_before_projecte
     lcx.set_font_metric_advance_quantization(Some(FontMetricAdvanceQuantization::All(
         FIXED_WIDTH_DENOMINATOR,
     )));
-    let mut projected = build(&mut lcx, &mut fcx);
+    let mut projected = build(&mut lcx, &mut fcx, true);
     projected.break_all_lines(None);
     let projected_advance = projected
         .lines()
@@ -132,19 +132,21 @@ fn natural_metric_overflow_prefers_a_fitting_discretionary_break_before_projecte
     assert!(projected_advance < natural_advance);
     let width = (projected_advance + natural_advance) * 0.5;
 
-    lcx.set_prefer_natural_metric_discretionary_breaks(true);
-    let mut preferred = build(&mut lcx, &mut fcx);
-    preferred.set_discretionary_breaks(vec![DiscretionaryBreak {
-        byte_index: "alpha\u{00AD}".len(),
-        advance: 0.0,
-        max_consecutive_lines: None,
-    }]);
-    preferred.break_all_lines(Some(width));
+    let mut projected_fit = build(&mut lcx, &mut fcx, true);
+    projected_fit.break_all_lines(Some(width));
+    assert_eq!(
+        projected_fit.len(),
+        1,
+        "the projected run fits the intermediate measure"
+    );
 
-    let first = preferred.lines().next().expect("discretionary first line");
-    assert_eq!(&text[first.text_range()], "alpha\u{00AD}");
-    assert!(first.ends_at_discretionary_break());
-    assert_eq!(preferred.len(), 2);
+    let mut natural_wrap = build(&mut lcx, &mut fcx, false);
+    natural_wrap.break_all_lines(Some(width));
+    assert_eq!(
+        natural_wrap.len(),
+        2,
+        "a run that opts out must keep its natural metrics and wrap",
+    );
 }
 
 #[test]

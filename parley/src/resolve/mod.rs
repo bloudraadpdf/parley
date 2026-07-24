@@ -150,6 +150,9 @@ impl ResolveContext {
             StyleProperty::FontSynthesisStyle(value) => FontSynthesisStyle(*value),
             StyleProperty::FontVariations(value) => FontVariations(self.resolve_variations(value)),
             StyleProperty::FontFeatures(value) => FontFeatures(self.resolve_features(value)),
+            StyleProperty::FontMetricAdvanceQuantization(value) => {
+                FontMetricAdvanceQuantization(*value)
+            }
             StyleProperty::Locale(value) => Locale(*value),
             StyleProperty::Brush(value) => Brush(value.clone()),
             StyleProperty::Underline(value) => Underline(*value),
@@ -193,6 +196,9 @@ impl ResolveContext {
             font_synthesis_style: raw_style.font_synthesis_style,
             font_variations: self.resolve_variations(&raw_style.font_variations),
             font_features: self.resolve_features(&raw_style.font_features),
+            font_metric_advance_quantization: FontMetricAdvanceProjection(
+                raw_style.font_metric_advance_quantization,
+            ),
             locale: raw_style.locale,
             brush: raw_style.brush.clone(),
             underline: ResolvedDecoration {
@@ -377,6 +383,9 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     FontVariations(Resolved<FontVariation>),
     /// Font feature settings.
     FontFeatures(Resolved<FontFeature>),
+    /// Whether the consumer-selected fixed font-metric grid applies to this
+    /// style run.
+    FontMetricAdvanceQuantization(bool),
     /// Locale.
     Locale(Option<Language>),
     /// Brush for rendering text.
@@ -423,6 +432,16 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     HyphenateCharacter(HyphenateCharacter),
 }
 
+/// Boolean style state whose semantic default is enabled.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct FontMetricAdvanceProjection(bool);
+
+impl Default for FontMetricAdvanceProjection {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
 /// Flattened group of style properties.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub(crate) struct ResolvedStyle<B: Brush> {
@@ -444,6 +463,9 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) font_variations: Resolved<FontVariation>,
     /// Font feature settings.
     pub(crate) font_features: Resolved<FontFeature>,
+    /// Whether the consumer-selected fixed font-metric grid applies to this
+    /// style run.
+    font_metric_advance_quantization: FontMetricAdvanceProjection,
     /// Locale.
     pub(crate) locale: Option<Language>,
     /// Brush for rendering text.
@@ -486,6 +508,9 @@ impl<B: Brush> ResolvedStyle<B> {
             FontSynthesisStyle(value) => self.font_synthesis_style = value,
             FontVariations(value) => self.font_variations = value,
             FontFeatures(value) => self.font_features = value,
+            FontMetricAdvanceQuantization(value) => {
+                self.font_metric_advance_quantization = FontMetricAdvanceProjection(value);
+            }
             Locale(value) => self.locale = value,
             Brush(value) => self.brush = value,
             Underline(value) => self.underline.enabled = value,
@@ -523,6 +548,9 @@ impl<B: Brush> ResolvedStyle<B> {
             FontSynthesisStyle(value) => self.font_synthesis_style == *value,
             FontVariations(value) => self.font_variations == *value,
             FontFeatures(value) => self.font_features == *value,
+            FontMetricAdvanceQuantization(value) => {
+                self.font_metric_advance_quantization.0 == *value
+            }
             Locale(value) => self.locale == *value,
             Brush(value) => self.brush == *value,
             Underline(value) => self.underline.enabled == *value,
@@ -559,6 +587,7 @@ impl<B: Brush> ResolvedStyle<B> {
             text_wrap_mode: self.text_wrap_mode,
             tab_size: self.tab_size,
             hyphenate_character: self.hyphenate_character,
+            font_metric_advance_quantization: self.font_metric_advance_quantization.0,
             #[cfg(feature = "accesskit")]
             locale: self.locale,
         }

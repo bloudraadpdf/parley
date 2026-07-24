@@ -15,7 +15,9 @@ pub use font::{
     FontVariations, FontWeight, FontWidth, GenericFamily,
 };
 pub use fontique::Language;
-pub use parlance::{BaseDirection, HyphenateCharacter, OverflowWrap, TabSize, TextWrapMode, WordBreak};
+pub use parlance::{
+    BaseDirection, HyphenateCharacter, OverflowWrap, TabSize, TextWrapMode, WordBreak,
+};
 pub use styleset::StyleSet;
 
 use crate::util::nearly_eq;
@@ -104,6 +106,9 @@ pub enum StyleProperty<'a, B: Brush> {
     FontVariations(FontVariations<'a>),
     /// Font feature settings.
     FontFeatures(FontFeatures<'a>),
+    /// Whether the consumer-selected fixed font-metric grid applies to this
+    /// style run.
+    FontMetricAdvanceQuantization(bool),
     /// Locale.
     Locale(Option<Language>),
     /// Brush for rendering text.
@@ -171,6 +176,9 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub font_variations: FontVariations<'settings>,
     /// Font feature settings.
     pub font_features: FontFeatures<'settings>,
+    /// Whether the consumer-selected fixed font-metric grid applies to this
+    /// style run.
+    pub font_metric_advance_quantization: bool,
     /// Locale.
     pub locale: Option<Language>,
     /// Brush for rendering text.
@@ -229,6 +237,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             font_synthesis_style: FontSynthesisStyle::default(),
             font_variations: FontVariations::empty(),
             font_features: FontFeatures::empty(),
+            font_metric_advance_quantization: true,
             locale: None,
             brush: B::default(),
             has_underline: false,

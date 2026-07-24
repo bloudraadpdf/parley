@@ -241,6 +241,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         font_synthesis_style: FontSynthesisStyle::ObliqueOnly,
         font_variations: FontVariations::empty(), // TODO: Set a non-default value
         font_features: FontFeatures::empty(),     // TODO: Set a non-default value
+        font_metric_advance_quantization: true,
         locale: Some("en-US".parse().unwrap()),
         brush: ColorBrush::new(palette::css::GREEN),
         has_underline: true,
