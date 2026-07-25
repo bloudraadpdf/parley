@@ -375,18 +375,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.mark_line_break_opportunity(None);
                         }
                     } else {
-                        // If we're at the start of the line, this box will never fit, so consume it and accept the overflow.
+                        // If we're at the start of the line, this box will
+                        // never fit, so consume it and accept the overflow.
+                        // Do not commit the line yet: following collapsible
+                        // whitespace belongs to this line and must be allowed
+                        // to hang before the next break opportunity is used.
                         if self.state.line.fit_x == 0.0 {
-                            // println!("BOX EMERGENCY BREAK");
-                            self.state.append_inline_box_to_line(
-                                next_x,
-                                next_fit_x,
-                                inline_box.height,
-                            );
-                            if try_commit_line!(BreakReason::Emergency) {
-                                self.state.item_idx += 1;
-                                return self.start_new_line();
-                            }
+                            self.state.item_idx += 1;
+                            self.state
+                                .append_inline_box_to_line(next_x, next_fit_x, inline_box.height);
+                            self.state.mark_line_break_opportunity(None);
                         } else if inline_box.glue {
                             // A glued box (inline border/padding shim) binds
                             // to the adjacent text: no break exists before

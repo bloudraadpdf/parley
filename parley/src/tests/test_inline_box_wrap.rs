@@ -53,6 +53,43 @@ fn spaces_between_full_width_inline_boxes_hang_instead_of_wrapping() {
     );
 }
 
+#[test]
+fn spaces_after_overwide_inline_boxes_hang_instead_of_forming_lines() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+
+    // Content-box sizing can make a replaced inline's margin box slightly
+    // wider than the line. The overflow does not change CSS Text's
+    // whitespace rule: the following collapsible space still hangs from
+    // the box's line and must not become a line by itself.
+    let text = "  ";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    for (id, index) in [(0_u64, 0_usize), (1, 1), (2, 2)] {
+        builder.push_inline_box(InlineBox {
+            id,
+            index,
+            width: 201.0,
+            height: 8.0,
+            glue: false,
+        });
+    }
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(200.0));
+
+    assert_eq!(
+        layout.len(),
+        3,
+        "three overwide boxes with collapsible spaces between them \
+         must produce exactly three overflowing lines; lines: {:?}",
+        layout
+            .lines()
+            .map(|line| (line.text_range(), line.metrics().advance))
+            .collect::<Vec<_>>(),
+    );
+}
+
 /// PDFreactor-parity trailing-space reclaim: `[text][space][box]` where
 /// text + space + box overflows but text + box fits. Browsers wrap the
 /// box; with `set_reclaim_space_before_inline_box(true)` the space's
