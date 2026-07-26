@@ -3,6 +3,7 @@
 
 use alloc::vec::Vec;
 use icu_normalizer::properties::Decomposed;
+use icu_properties::{CodePointSetData, props::DefaultIgnorableCodePoint};
 
 use crate::analysis::AnalysisDataSources;
 
@@ -43,10 +44,11 @@ pub(crate) struct SourceRange {
 pub(crate) struct Char {
     /// The character.
     pub ch: char,
-    /// Whether the character
-    pub is_control_character: bool,
-    /// True if the character should be considered when mapping glyphs.
-    pub contributes_to_shaping: bool,
+    /// True if font selection requires a nominal glyph for this character.
+    ///
+    /// Default-ignorable shaping controls still reach the shaper but do not
+    /// disqualify a face whose cmap omits them.
+    pub contributes_to_font_coverage: bool,
     /// Nominal glyph identifier.
     pub glyph_id: GlyphId,
     /// Indexes into the list of styles for the containing text run, to find the style applicable
@@ -121,6 +123,15 @@ impl CharCluster {
         crate::analysis::contributes_to_shaping(props.general_category(), props.script())
     }
 
+    #[inline(always)]
+    pub(crate) fn contributes_to_font_coverage(
+        ch: char,
+        analysis_data_sources: &AnalysisDataSources,
+    ) -> bool {
+        Self::contributes_to_shaping(ch, analysis_data_sources)
+            && !const { CodePointSetData::new::<DefaultIgnorableCodePoint>() }.contains(ch)
+    }
+
     fn decomposed(&mut self, analysis_data_sources: &AnalysisDataSources) -> Option<&[Char]> {
         match self.decomp.state {
             FormState::Invalid => None,
@@ -141,13 +152,13 @@ impl CharCluster {
                     Decomposed::Expansion(a, b) => {
                         let mut copy = self.chars[0];
                         copy.ch = a;
-                        copy.contributes_to_shaping =
-                            Self::contributes_to_shaping(a, analysis_data_sources);
+                        copy.contributes_to_font_coverage =
+                            Self::contributes_to_font_coverage(a, analysis_data_sources);
                         self.decomp.chars[0] = copy;
 
                         copy.ch = b;
-                        copy.contributes_to_shaping =
-                            Self::contributes_to_shaping(b, analysis_data_sources);
+                        copy.contributes_to_font_coverage =
+                            Self::contributes_to_font_coverage(b, analysis_data_sources);
                         self.decomp.chars[1] = copy;
 
                         self.decomp.len = 2;
@@ -180,8 +191,8 @@ impl CharCluster {
                     Some(ch) => {
                         let mut copy = self.chars[0];
                         copy.ch = ch;
-                        copy.contributes_to_shaping =
-                            Self::contributes_to_shaping(ch, analysis_data_sources);
+                        copy.contributes_to_font_coverage =
+                            Self::contributes_to_font_coverage(ch, analysis_data_sources);
                         self.comp.chars[0] = copy;
                         self.comp.len = 1;
                     }
@@ -311,12 +322,11 @@ impl Form {
 
     #[inline(always)]
     fn setup(&mut self) {
-        self.map_len = (self
+        self.map_len = self
             .chars()
             .iter()
-            .filter(|c| !c.is_control_character)
-            .count() as u8)
-            .max(1);
+            .filter(|c| c.contributes_to_font_coverage)
+            .count() as u8;
     }
 
     #[inline(always)]
@@ -351,11 +361,8 @@ impl<'a> Mapper<'a> {
         }
         let mut mapped = 0;
         for (c, g) in self.chars.iter().zip(glyphs.iter_mut()) {
-            if !c.contributes_to_shaping {
+            if !c.contributes_to_font_coverage {
                 *g = f(c.ch);
-                if self.map_len == 1 {
-                    mapped += 1;
-                }
             } else {
                 let gid = f(c.ch);
                 *g = gid;
@@ -371,5 +378,46 @@ impl<'a> Mapper<'a> {
             }
         }
         ratio
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_ignorables_do_not_reduce_emoji_cluster_font_coverage() {
+        let data = AnalysisDataSources::new();
+        let mut cluster = CharCluster::default();
+        let sequence =
+            "\u{1F469}\u{1F3FF}\u{200D}\u{2764}\u{FE0F}\u{200D}\u{1F48B}\u{200D}\u{1F468}\u{1F3FB}";
+
+        for ch in sequence.chars() {
+            let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, &data);
+            cluster.map_len += u8::from(contributes_to_font_coverage);
+            cluster.chars.push(Char {
+                ch,
+                contributes_to_font_coverage,
+                glyph_id: 0,
+                style_index: 0,
+            });
+        }
+
+        let status = cluster.map(
+            |ch| {
+                if matches!(ch, '\u{200D}' | '\u{FE0F}') {
+                    0
+                } else {
+                    1
+                }
+            },
+            &data,
+        );
+
+        assert_eq!(
+            status,
+            Status::Complete,
+            "ZWJ and variation selectors are shaping controls, not nominal-glyph coverage requirements",
+        );
     }
 }

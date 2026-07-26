@@ -243,6 +243,7 @@ fn fill_cluster_in_place(
     item_infos_iter: &mut core::slice::Iter<'_, (CharInfo, u16)>,
     code_unit_offset_in_string: &mut usize,
     char_cluster: &mut CharCluster,
+    analysis_data_sources: &AnalysisDataSources,
 ) {
     // Reset cluster but keep allocation
     char_cluster.clear();
@@ -261,17 +262,17 @@ fn fill_cluster_in_place(
         is_emoji_or_pictograph |= info.is_emoji_or_pictograph();
         *code_unit_offset_in_string += ch.len_utf8();
 
-        let contributes_to_shaping = info.contributes_to_shaping();
-        if contributes_to_shaping {
+        let contributes_to_font_coverage =
+            CharCluster::contributes_to_font_coverage(ch, analysis_data_sources);
+        if contributes_to_font_coverage {
             map_len += 1;
         }
 
         char_cluster.chars.push(Char {
             ch,
-            contributes_to_shaping,
+            contributes_to_font_coverage,
             glyph_id: 0,
             style_index: *style_index,
-            is_control_character: info.is_control(),
         });
     }
 
@@ -323,6 +324,7 @@ fn shape_item<'a, B: Brush>(
         &mut item_infos_iter,
         &mut code_unit_offset_in_string,
         char_cluster,
+        analysis_data_sources,
     );
 
     let mut current_font = font_selector.select_font(char_cluster, analysis_data_sources);
@@ -343,6 +345,7 @@ fn shape_item<'a, B: Brush>(
                 &mut item_infos_iter,
                 &mut code_unit_offset_in_string,
                 char_cluster,
+                analysis_data_sources,
             );
 
             if let Some(next_font) = font_selector.select_font(char_cluster, analysis_data_sources)

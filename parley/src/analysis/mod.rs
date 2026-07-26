@@ -129,8 +129,10 @@ impl CharInfo {
         reason = "To be used in more complete emoji checking, in select_font"
     )]
     const REGION_INDICATOR_MASK: u8 = 1 << Self::REGION_INDICATOR_SHIFT;
+    #[allow(dead_code, reason = "retained for analysis diagnostics and invariant tests")]
     const CONTROL_MASK: u8 = 1 << Self::CONTROL_SHIFT;
     const EMOJI_OR_PICTOGRAPH_MASK: u8 = 1 << Self::EMOJI_OR_PICTOGRAPH_SHIFT;
+    #[allow(dead_code, reason = "retained for analysis diagnostics and invariant tests")]
     const CONTRIBUTES_TO_SHAPING_MASK: u8 = 1 << Self::CONTRIBUTES_TO_SHAPING_SHIFT;
     const FORCE_NORMALIZE_MASK: u8 = 1 << Self::FORCE_NORMALIZE_SHIFT;
 
@@ -181,6 +183,7 @@ impl CharInfo {
     }
 
     #[inline(always)]
+    #[allow(dead_code, reason = "retained for analysis diagnostics and invariant tests")]
     pub(crate) fn is_control(self) -> bool {
         self.flags & Self::CONTROL_MASK != 0
     }
@@ -191,6 +194,7 @@ impl CharInfo {
     }
 
     #[inline(always)]
+    #[allow(dead_code, reason = "retained for analysis diagnostics and invariant tests")]
     pub(crate) fn contributes_to_shaping(self) -> bool {
         self.flags & Self::CONTRIBUTES_TO_SHAPING_MASK != 0
     }
