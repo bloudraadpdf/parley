@@ -12,7 +12,7 @@ use alloc::{vec, vec::Vec};
 
 use super::style::{
     Brush, FontFamily, FontFamilyName, FontFeature, FontFeatures, FontStyle, FontVariation,
-    FontVariations, FontWeight, FontWidth, StyleProperty,
+    FontVariations, FontWeight, FontWidth, LineBreakMode, SoftBreakPolicy, StyleProperty,
 };
 use crate::font::FontContext;
 use crate::style::TextStyle;
@@ -173,6 +173,7 @@ impl ResolveContext {
             StyleProperty::WordSpacing(value) => WordSpacing(*value * scale),
             StyleProperty::LetterSpacing(value) => LetterSpacing(*value * scale),
             StyleProperty::WordBreak(value) => WordBreak(*value),
+            StyleProperty::LineBreakMode(value) => LineBreakMode(*value),
             StyleProperty::OverflowWrap(value) => OverflowWrap(*value),
             StyleProperty::TextWrapMode(value) => TextWrapMode(*value),
             StyleProperty::TabSize(value) => TabSize(value.scale(scale)),
@@ -223,6 +224,7 @@ impl ResolveContext {
             word_spacing: raw_style.word_spacing * scale,
             letter_spacing: raw_style.letter_spacing * scale,
             word_break: raw_style.word_break,
+            line_break_mode: raw_style.line_break_mode,
             overflow_wrap: raw_style.overflow_wrap,
             text_wrap_mode: raw_style.text_wrap_mode,
             tab_size: raw_style.tab_size.scale(scale),
@@ -422,6 +424,8 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     LetterSpacing(f32),
     /// Control over where words can wrap.
     WordBreak(WordBreak),
+    /// Control over normal line-breaking opportunities and their priority.
+    LineBreakMode(LineBreakMode),
     /// Control over "emergency" line-breaking.
     OverflowWrap(OverflowWrap),
     /// Control over non-"emergency" line-breaking.
@@ -484,6 +488,8 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) letter_spacing: f32,
     /// Control over where words can wrap.
     pub(crate) word_break: WordBreak,
+    /// Control over normal line-breaking opportunities and their priority.
+    pub(crate) line_break_mode: LineBreakMode,
     /// Control over "emergency" line-breaking.
     pub(crate) overflow_wrap: OverflowWrap,
     /// Control over non-"emergency" line-breaking.
@@ -529,6 +535,7 @@ impl<B: Brush> ResolvedStyle<B> {
             WordSpacing(value) => self.word_spacing = value,
             LetterSpacing(value) => self.letter_spacing = value,
             WordBreak(value) => self.word_break = value,
+            LineBreakMode(value) => self.line_break_mode = value,
             OverflowWrap(value) => self.overflow_wrap = value,
             TextWrapMode(value) => self.text_wrap_mode = value,
             TabSize(value) => self.tab_size = value,
@@ -569,6 +576,7 @@ impl<B: Brush> ResolvedStyle<B> {
             WordSpacing(value) => nearly_eq(self.word_spacing, *value),
             LetterSpacing(value) => nearly_eq(self.letter_spacing, *value),
             WordBreak(value) => self.word_break == *value,
+            LineBreakMode(value) => self.line_break_mode == *value,
             OverflowWrap(value) => self.overflow_wrap == *value,
             TextWrapMode(value) => self.text_wrap_mode == *value,
             TabSize(value) => self.tab_size.nearly_eq(*value),
@@ -583,6 +591,7 @@ impl<B: Brush> ResolvedStyle<B> {
             strikethrough: self.strikethrough.as_layout_decoration(&self.brush),
             overline: self.overline.as_layout_decoration(&self.brush),
             line_height: self.line_height,
+            soft_break_policy: self.soft_break_policy(),
             overflow_wrap: self.overflow_wrap,
             text_wrap_mode: self.text_wrap_mode,
             tab_size: self.tab_size,
@@ -591,6 +600,10 @@ impl<B: Brush> ResolvedStyle<B> {
             #[cfg(feature = "accesskit")]
             locale: self.locale,
         }
+    }
+
+    pub(crate) const fn soft_break_policy(&self) -> SoftBreakPolicy {
+        SoftBreakPolicy::resolve(self.word_break, self.line_break_mode)
     }
 }
 

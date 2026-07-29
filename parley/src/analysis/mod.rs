@@ -14,7 +14,9 @@ use icu_normalizer::properties::{
     CanonicalComposition, CanonicalCompositionBorrowed, CanonicalDecomposition,
     CanonicalDecompositionBorrowed,
 };
-use icu_properties::props::{BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script};
+use icu_properties::props::{
+    BidiMirroringGlyph, GeneralCategory, GeneralCategoryGroup, GraphemeClusterBreak, Script,
+};
 use icu_properties::{
     CodePointMapData, CodePointMapDataBorrowed, PropertyNamesShort, PropertyNamesShortBorrowed,
 };
@@ -24,6 +26,8 @@ use icu_segmenter::{
     LineSegmenterBorrowed, WordSegmenter, WordSegmenterBorrowed,
 };
 use parley_data::Properties;
+
+use crate::style::SoftBreakPolicy;
 
 pub(crate) struct AnalysisDataSources;
 
@@ -48,8 +52,8 @@ impl AnalysisDataSources {
     }
 
     #[inline(always)]
-    fn line_segmenter(&self, word_break_strength: WordBreak) -> LineSegmenterBorrowed<'static> {
-        match word_break_strength {
+    fn line_segmenter(&self, policy: SoftBreakPolicy) -> LineSegmenterBorrowed<'static> {
+        match policy.segmentation_word_break() {
             WordBreak::Normal => {
                 const {
                     let mut opt = LineBreakOptions::default();
@@ -95,6 +99,29 @@ impl AnalysisDataSources {
     }
 }
 
+/// Semantic class of an authored typographic unit immediately before a soft
+/// break boundary.
+///
+/// The line breaker consumes this classification instead of inspecting source
+/// characters. General-category dash punctuation includes both U+002D and
+/// U+2010 without encoding either code point in composition logic.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum AuthoredBreakUnit {
+    DashPunctuation,
+    #[default]
+    Other,
+}
+
+impl AuthoredBreakUnit {
+    fn from_general_category(category: GeneralCategory) -> Self {
+        if GeneralCategoryGroup::DashPunctuation.contains(category) {
+            Self::DashPunctuation
+        } else {
+            Self::Other
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CharInfo {
     /// The line/word breaking boundary classification of this character.
@@ -107,6 +134,9 @@ pub(crate) struct CharInfo {
     pub bidi_class: icu_properties::props::BidiClass,
     /// Whether or not the character is a bracket, plus mirror data if so.
     pub bracket: BidiMirroringGlyph,
+
+    /// Semantic source-unit class used to provenance normal wrap candidates.
+    pub authored_break_unit: AuthoredBreakUnit,
 
     flags: u8,
 }
@@ -142,6 +172,7 @@ impl CharInfo {
         grapheme_cluster_break: GraphemeClusterBreak,
         bidi_class: icu_properties::props::BidiClass,
         bracket: BidiMirroringGlyph,
+        authored_break_unit: AuthoredBreakUnit,
         is_variation_selector: bool,
         is_region_indicator: bool,
         is_control: bool,
@@ -155,6 +186,7 @@ impl CharInfo {
             grapheme_cluster_break,
             bidi_class,
             bracket,
+            authored_break_unit,
             flags: (is_variation_selector as u8) << Self::VARIATION_SELECTOR_SHIFT
                 | (is_region_indicator as u8) << Self::REGION_INDICATOR_SHIFT
                 | (is_control as u8) << Self::CONTROL_SHIFT
@@ -220,19 +252,19 @@ pub(crate) enum Boundary {
 }
 
 pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str) {
-    struct WordBreakSegmentIter<'a, I: Iterator, B: Brush> {
+    struct SoftBreakSegmentIter<'a, I: Iterator, B: Brush> {
         text: &'a str,
         style_runs: I,
         lcx: &'a LayoutContext<B>,
         char_indices: core::str::CharIndices<'a>,
         current_char: (usize, char),
         building_range_start: usize,
-        previous_word_break_style: WordBreak,
+        previous_soft_break_policy: SoftBreakPolicy,
         done: bool,
         _phantom: PhantomData<B>,
     }
 
-    impl<'a, I, B: Brush + 'a> WordBreakSegmentIter<'a, I, B>
+    impl<'a, I, B: Brush + 'a> SoftBreakSegmentIter<'a, I, B>
     where
         I: Iterator<Item = &'a StyleRun>,
     {
@@ -253,18 +285,18 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
                 char_indices,
                 current_char: current_char_len,
                 building_range_start: first_style_run.range.start,
-                previous_word_break_style: first_style.word_break,
+                previous_soft_break_policy: first_style.soft_break_policy(),
                 done: false,
                 _phantom: PhantomData,
             }
         }
     }
 
-    impl<'a, I, B: Brush + 'a> Iterator for WordBreakSegmentIter<'a, I, B>
+    impl<'a, I, B: Brush + 'a> Iterator for SoftBreakSegmentIter<'a, I, B>
     where
         I: Iterator<Item = &'a StyleRun>,
     {
-        type Item = (&'a str, WordBreak, bool);
+        type Item = (&'a str, SoftBreakPolicy, bool);
 
         fn next(&mut self) -> Option<Self::Item> {
             if self.done {
@@ -284,9 +316,9 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
                     self.current_char = self.char_indices.next().unwrap();
                 }
 
-                let current_word_break_style =
-                    self.lcx.style_table[style_run.style_index as usize].word_break;
-                if self.previous_word_break_style == current_word_break_style {
+                let current_soft_break_policy =
+                    self.lcx.style_table[style_run.style_index as usize].soft_break_policy();
+                if self.previous_soft_break_policy == current_soft_break_policy {
                     continue;
                 }
 
@@ -295,10 +327,10 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
                 let size = self.current_char.1.len_utf8();
 
                 let substring = &self.text[self.building_range_start..style_start_index + size];
-                let result_style = self.previous_word_break_style;
+                let result_style = self.previous_soft_break_policy;
 
                 self.building_range_start = style_start_index - prev_size;
-                self.previous_word_break_style = current_word_break_style;
+                self.previous_soft_break_policy = current_soft_break_policy;
 
                 return Some((substring, result_style, false));
             }
@@ -306,7 +338,7 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
             // Final segment
             self.done = true;
             let last_substring = &self.text[self.building_range_start..self.text.len()];
-            Some((last_substring, self.previous_word_break_style, true))
+            Some((last_substring, self.previous_soft_break_policy, true))
         }
     }
 
@@ -323,18 +355,18 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
         .split_first()
         .expect("analyze_text requires at least one style run");
 
-    let contiguous_word_break_substrings =
-        WordBreakSegmentIter::new(text, rest_runs.iter(), lcx, first_style_run);
+    let contiguous_soft_break_substrings =
+        SoftBreakSegmentIter::new(text, rest_runs.iter(), lcx, first_style_run);
     let mut global_offset = 0;
     let mut line_boundary_positions: Vec<usize> = Vec::new();
-    for (substring_index, (substring, word_break_strength, last)) in
-        contiguous_word_break_substrings.enumerate()
+    for (substring_index, (substring, soft_break_policy, last)) in
+        contiguous_soft_break_substrings.enumerate()
     {
         // Fast path for text with a single word-break option.
         if substring_index == 0 && last {
             let mut lb_iter = lcx
                 .analysis_data_sources
-                .line_segmenter(word_break_strength)
+                .line_segmenter(soft_break_policy)
                 .segment_str(substring);
 
             let _first = lb_iter.next();
@@ -357,7 +389,7 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
 
         let line_boundaries_iter = lcx
             .analysis_data_sources
-            .line_segmenter(word_break_strength)
+            .line_segmenter(soft_break_policy)
             .segment_str(substring);
 
         let mut substring_chars = substring.chars();
@@ -484,6 +516,7 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
                     grapheme_cluster_break,
                     bidi_class,
                     bracket,
+                    AuthoredBreakUnit::from_general_category(general_category),
                     is_variation_selector,
                     is_region_indicator,
                     general_category == GeneralCategory::Control,

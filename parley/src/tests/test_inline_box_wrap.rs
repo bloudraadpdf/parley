@@ -10,10 +10,13 @@
 //! after each box hangs on that box's line instead of wrapping into a
 //! line of its own.
 
-use alloc::{vec, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
 
 use super::test_builders::create_font_context;
-use crate::{FontFamily, InlineBox, LayoutContext, StyleProperty, layout::DiscretionaryBreak};
+use crate::{
+    FontFamily, FontWeight, InlineBox, LayoutContext, LineBreakMode, LineBreakOverride,
+    OverflowWrap, RangedBuilder, StyleProperty, WordBreak, layout::DiscretionaryBreak,
+};
 
 use super::utils::ColorBrush;
 
@@ -154,13 +157,128 @@ fn reclaimed_trailing_space_keeps_the_following_box_on_the_line() {
     );
 }
 
-/// First-fit composition keeps a complete fitting word intact when only its
-/// following collapsible space exceeds the measure.
-#[test]
-fn fitting_word_wins_over_earlier_dash_break_when_trailing_space_hangs() {
+/// CSS Text permits UA-defined priority classes for punctuation and word
+/// separators. Parley's normal composition policy selects an authored
+/// punctuation opportunity ahead of a following separator that only fails
+/// because its collapsible advance crosses the measure.
+fn first_line_with_overflowing_trailing_space(
+    text: &str,
+    configure: impl Fn(&mut RangedBuilder<'_, ColorBrush>),
+) -> String {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+
+    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext| {
+        let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        configure(&mut builder);
+        builder.build(text)
+    };
+
+    let mut probe = build(&mut lcx, &mut fcx);
+    probe.break_all_lines(None);
+    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let word_advance = metrics.advance - metrics.trailing_whitespace;
+    let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
+
+    let mut layout = build(&mut lcx, &mut fcx);
+    layout.break_all_lines(Some(max_advance));
+    let first_line = layout
+        .lines()
+        .next()
+        .map(|line| String::from(&text[line.text_range()]))
+        .unwrap();
+    first_line
+}
+
+fn first_line_with_overflowing_space_after_punctuation(punctuation: char) -> String {
+    let text = format!("alpha{punctuation}beta ");
+    first_line_with_overflowing_trailing_space(&text, |_| {})
+}
+
+#[test]
+fn authored_hyphen_minus_wins_when_the_following_collapsible_space_overflows() {
+    assert_eq!(
+        first_line_with_overflowing_space_after_punctuation('-'),
+        "alpha-",
+        "authored U+002D punctuation must remain distinct from the overflowing word separator"
+    );
+}
+
+#[test]
+fn authored_unicode_hyphen_wins_when_the_following_collapsible_space_overflows() {
+    assert_eq!(
+        first_line_with_overflowing_space_after_punctuation('\u{2010}'),
+        "alpha\u{2010}",
+        "authored U+2010 punctuation must remain distinct from the overflowing word separator"
+    );
+}
+
+#[test]
+fn authored_dash_provenance_crosses_a_pure_style_boundary() {
     let text = "alpha-beta ";
+    assert_eq!(
+        first_line_with_overflowing_trailing_space(text, |builder| {
+            builder.push(
+                StyleProperty::FontWeight(FontWeight::BOLD),
+                0.."alpha-".len(),
+            );
+        }),
+        "alpha-",
+        "a style-run boundary must not erase the authored unit that created the boundary"
+    );
+}
+
+#[test]
+fn atomic_inline_box_ends_authored_dash_provenance() {
+    let text = "alpha-beta ";
+    assert_eq!(
+        first_line_with_overflowing_trailing_space(text, |builder| {
+            builder.push_inline_box(InlineBox {
+                id: 41,
+                index: "alpha-".len(),
+                width: 1.0,
+                height: 8.0,
+                glue: true,
+            });
+        }),
+        text,
+        "an atomic inline between the dash and boundary must make that candidate ordinary"
+    );
+}
+
+#[test]
+fn word_break_break_all_opportunities_are_not_prioritized() {
+    let text = "alpha-beta ";
+    assert_eq!(
+        first_line_with_overflowing_trailing_space(text, |builder| {
+            builder.push_default(StyleProperty::WordBreak(WordBreak::BreakAll));
+        }),
+        text,
+        "word-break: break-all does not use word-separator-based priority classes"
+    );
+}
+
+#[test]
+fn overflow_wrap_anywhere_remains_an_emergency_policy() {
+    let text = "alpha-beta ";
+    assert_eq!(
+        first_line_with_overflowing_trailing_space(text, |builder| {
+            builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
+        }),
+        "alpha-",
+        "overflow-wrap: anywhere must not erase normal authored-dash priority"
+    );
+}
+
+/// An ordinary earlier inter-word boundary is not eligible for punctuation
+/// preference when a later collapsible space overflows.
+#[test]
+fn ordinary_inter_word_boundary_does_not_displace_a_fitting_word() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "alpha beta ";
 
     let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext| {
         let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
@@ -175,21 +293,21 @@ fn fitting_word_wins_over_earlier_dash_break_when_trailing_space_hangs() {
     let word_advance = metrics.advance - metrics.trailing_whitespace;
     let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
 
-    let mut greedy = build(&mut lcx, &mut fcx);
-    greedy.break_all_lines(Some(max_advance));
-    let greedy_first = greedy.lines().next().map(|line| &text[line.text_range()]);
+    let mut layout = build(&mut lcx, &mut fcx);
+    layout.break_all_lines(Some(max_advance));
+
     assert_eq!(
-        greedy_first,
+        layout.lines().next().map(|line| &text[line.text_range()]),
         Some(text),
-        "the fitting word stays whole and its trailing space hangs"
+        "an ordinary inter-word candidate cannot be selected by punctuation preference"
     );
 }
 
-/// A discretionary boundary does not displace a complete fitting word merely
-/// because its following collapsible space overflows. The space hangs at the
-/// line edge; the hyphen is considered only when the word itself does not fit.
+/// Inserted conditional material remains distinct from authored punctuation.
+/// It is considered when the word itself overflows, not merely because the
+/// following collapsible space does.
 #[test]
-fn fitting_word_wins_over_earlier_discretionary_break_when_trailing_space_hangs() {
+fn inserted_discretionary_hyphen_does_not_displace_a_fitting_word() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let text = "alpha\u{00AD}beta ";
@@ -207,12 +325,115 @@ fn fitting_word_wins_over_earlier_discretionary_break_when_trailing_space_hangs(
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(10.0));
     let mut layout = builder.build(text);
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: "alpha\u{00AD}".len(),
+        advance: 4.0,
+        max_consecutive_lines: None,
+    }]);
     layout.break_all_lines(Some(max_advance));
 
     assert_eq!(
         layout.lines().next().map(|line| &text[line.text_range()]),
         Some(text),
         "the complete fitting word must remain intact while its trailing space hangs"
+    );
+}
+
+/// CSS Text's `line-break: anywhere` opportunities are not prioritized.
+#[test]
+fn anywhere_opportunities_are_not_prioritized() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "alpha-beta ";
+
+    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext| {
+        let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push_default(StyleProperty::LineBreakMode(LineBreakMode::Anywhere));
+        builder.push(
+            StyleProperty::FontWeight(FontWeight::BOLD),
+            0.."alpha-".len(),
+        );
+        builder.build(text)
+    };
+
+    let mut probe = build(&mut lcx, &mut fcx);
+    probe.break_all_lines(None);
+    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let word_advance = metrics.advance - metrics.trailing_whitespace;
+    let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
+
+    let mut layout = build(&mut lcx, &mut fcx);
+    layout.break_all_lines(Some(max_advance));
+
+    assert_eq!(
+        layout.lines().next().map(|line| &text[line.text_range()]),
+        Some(text),
+        "line-break: anywhere opportunities must not be prioritized"
+    );
+}
+
+/// Caller-created equal-priority opportunities carry their provenance through
+/// the public override API instead of being inferred from a boolean override.
+#[test]
+fn explicitly_unprioritized_overrides_are_not_prioritized() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "alpha-beta ";
+
+    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext| {
+        let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        let mut layout = builder.build(text);
+        layout.set_line_break_overrides(
+            text.char_indices()
+                .skip(1)
+                .map(|(byte_index, _)| LineBreakOverride::unprioritized_opportunity(byte_index))
+                .collect(),
+        );
+        layout
+    };
+
+    let mut probe = build(&mut lcx, &mut fcx);
+    probe.break_all_lines(None);
+    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let word_advance = metrics.advance - metrics.trailing_whitespace;
+    let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
+
+    let mut layout = build(&mut lcx, &mut fcx);
+    layout.break_all_lines(Some(max_advance));
+
+    assert_eq!(
+        layout.lines().next().map(|line| &text[line.text_range()]),
+        Some(text),
+        "explicitly unprioritized opportunities must not be promoted by authored punctuation"
+    );
+}
+
+/// Exact cached visual regression from
+/// `writing-modes/writing-mode/nested-writing-modes`: 12pt Arimo in a
+/// 52.5pt measure previously ended the first affected line at `Vertical-`.
+#[test]
+fn nested_writing_modes_cached_measure_breaks_after_authored_hyphen() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "Vertical-lr inside horizontal inside vertical-rl.";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Arimo")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(52.5));
+
+    let first = layout
+        .lines()
+        .next()
+        .map(|line| text[line.text_range()].trim_end());
+    assert_eq!(
+        first,
+        Some("Vertical-"),
+        "the cached 52.5pt scenario must retain the authored-punctuation line ending"
     );
 }
 

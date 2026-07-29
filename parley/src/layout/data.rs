@@ -8,10 +8,62 @@ use crate::style::Brush;
 /// A caller-supplied soft line-break decision at one UTF-8 byte boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LineBreakOverride {
-    /// Byte index of the boundary in the layout's source text.
-    pub byte_index: usize,
-    /// `true` adds an opportunity; `false` suppresses the Unicode opportunity.
-    pub opportunity: bool,
+    byte_index: usize,
+    disposition: LineBreakOverrideDisposition,
+}
+
+/// Provenance-preserving override disposition.
+///
+/// This is deliberately private: callers choose one of the semantic
+/// constructors on [`LineBreakOverride`] and cannot fabricate a boolean
+/// opportunity that silently loses its priority contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LineBreakOverrideDisposition {
+    Suppress,
+    NormalOpportunity,
+    UnprioritizedOpportunity,
+}
+
+impl LineBreakOverride {
+    /// Suppress a Unicode soft-wrap opportunity at `byte_index`.
+    pub const fn suppress(byte_index: usize) -> Self {
+        Self {
+            byte_index,
+            disposition: LineBreakOverrideDisposition::Suppress,
+        }
+    }
+
+    /// Add a normal opportunity whose priority is derived from its authored
+    /// source unit and the resolved line-breaking policy.
+    pub const fn opportunity(byte_index: usize) -> Self {
+        Self {
+            byte_index,
+            disposition: LineBreakOverrideDisposition::NormalOpportunity,
+        }
+    }
+
+    /// Add an explicitly equal-priority opportunity, as required for
+    /// `line-break: anywhere`-style caller policies.
+    pub const fn unprioritized_opportunity(byte_index: usize) -> Self {
+        Self {
+            byte_index,
+            disposition: LineBreakOverrideDisposition::UnprioritizedOpportunity,
+        }
+    }
+
+    /// UTF-8 byte index of the affected boundary.
+    pub const fn byte_index(self) -> usize {
+        self.byte_index
+    }
+
+    /// Whether the override adds rather than suppresses an opportunity.
+    pub const fn allows_break(self) -> bool {
+        !matches!(self.disposition, LineBreakOverrideDisposition::Suppress)
+    }
+
+    pub(crate) const fn disposition(self) -> LineBreakOverrideDisposition {
+        self.disposition
+    }
 }
 
 /// Material inserted only when a discretionary line break is taken.
@@ -41,7 +93,7 @@ use skrifa::MetadataProvider as _;
 use alloc::vec::Vec;
 
 use crate::analysis::cluster::Whitespace;
-use crate::analysis::{Boundary, CharInfo};
+use crate::analysis::{AuthoredBreakUnit, Boundary, CharInfo};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) struct ClusterData {
@@ -93,13 +145,19 @@ impl ClusterData {
 pub(crate) struct ClusterInfo {
     boundary: Boundary,
     source_char: char,
+    authored_break_unit: AuthoredBreakUnit,
 }
 
 impl ClusterInfo {
-    pub(crate) fn new(boundary: Boundary, source_char: char) -> Self {
+    pub(crate) fn new(
+        boundary: Boundary,
+        source_char: char,
+        authored_break_unit: AuthoredBreakUnit,
+    ) -> Self {
         Self {
             boundary,
             source_char,
+            authored_break_unit,
         }
     }
 
@@ -132,6 +190,12 @@ impl ClusterInfo {
     /// Returns the cluster's original character.
     pub(crate) fn source_char(self) -> char {
         self.source_char
+    }
+
+    /// Returns the semantic source-unit class used for wrap-candidate
+    /// provenance.
+    pub(crate) fn authored_break_unit(self) -> AuthoredBreakUnit {
+        self.authored_break_unit
     }
 
     /// Returns whether this cluster is absent from the default visual
@@ -1233,7 +1297,11 @@ fn push_cluster(
         };
 
     clusters.push(ClusterData {
-        info: ClusterInfo::new(char_info.0.boundary, cluster_start_char.1),
+        info: ClusterInfo::new(
+            char_info.0.boundary,
+            cluster_start_char.1,
+            char_info.0.authored_break_unit,
+        ),
         flags: (&cluster_type).into(),
         style_index: char_info.1,
         glyph_len: final_glyph_len,

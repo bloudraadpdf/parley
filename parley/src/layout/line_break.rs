@@ -9,15 +9,17 @@ use alloc::vec::Vec;
 #[allow(unused_imports)]
 use core_maths::CoreFloat;
 
-use crate::analysis::Boundary;
 use crate::analysis::cluster::Whitespace;
+use crate::analysis::{AuthoredBreakUnit, Boundary};
 use crate::data::ClusterData;
+use crate::layout::data::LineBreakOverrideDisposition;
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
     LineMetrics, Run,
 };
 use crate::style::Brush;
-use crate::{OverflowWrap, TextWrapMode};
+use crate::style::SoftBreakPolicy;
+use crate::{OverflowWrap, TextWrapMode, WordBreak};
 
 use core::ops::Range;
 
@@ -48,6 +50,8 @@ struct LineState {
     /// We lag the text-wrap-mode by one cluster due to line-breaking boundaries only
     /// being triggered on the cluster after the linebreak.
     text_wrap_mode: TextWrapMode,
+    /// We lag the resolved soft-break policy for the same boundary reason.
+    soft_break_policy: SoftBreakPolicy,
     /// Material charged only when the selected line ending is
     /// discretionary. It is absent from the unbroken flow.
     discretionary_advance: f32,
@@ -55,11 +59,51 @@ struct LineState {
 }
 
 #[derive(Clone, Default)]
-struct PrevBoundaryState {
+struct BoundarySnapshot {
     item_idx: usize,
     run_idx: usize,
     cluster_idx: usize,
     state: LineState,
+}
+
+/// A registered, non-negative advance that exists only when its conditional boundary is
+/// selected. Private construction prevents ordinary authored punctuation from
+/// being represented as inserted discretionary material.
+#[derive(Clone, Copy)]
+struct DiscretionaryAdvance(f32);
+
+#[derive(Clone)]
+enum RegularBreakCandidate {
+    AuthoredDashPunctuation(BoundarySnapshot),
+    Ordinary(BoundarySnapshot),
+    ConditionalMaterial(BoundarySnapshot),
+    Unprioritized(BoundarySnapshot),
+}
+
+impl RegularBreakCandidate {
+    fn into_snapshot(self) -> BoundarySnapshot {
+        match self {
+            Self::AuthoredDashPunctuation(snapshot)
+            | Self::Ordinary(snapshot)
+            | Self::ConditionalMaterial(snapshot)
+            | Self::Unprioritized(snapshot) => snapshot,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RegularBreakKind {
+    AuthoredDashPunctuation,
+    Ordinary,
+    ConditionalMaterial(DiscretionaryAdvance),
+    Unprioritized,
+}
+
+#[derive(Clone, Copy)]
+enum LineFit {
+    Fits,
+    TrailingCollapsibleSpaceOverflow,
+    ContentOverflow,
 }
 
 #[derive(Clone, Default)]
@@ -81,20 +125,28 @@ struct BreakerState {
     committed_y: f64,
 
     line: LineState,
-    prev_boundary: Option<PrevBoundaryState>,
-    emergency_boundary: Option<PrevBoundaryState>,
+    prev_boundary: Option<RegularBreakCandidate>,
+    emergency_boundary: Option<BoundarySnapshot>,
+    last_appended_authored_unit: AuthoredBreakUnit,
     /// Consecutive committed lines ending at discretionary boundaries.
     consecutive_discretionary_lines: u32,
 }
 
 impl BreakerState {
     /// Add the cluster(s) currently being evaluated to the current line
-    fn append_cluster_to_line(&mut self, next_x: f32, next_fit_x: f32, clusters_height: f32) {
+    fn append_cluster_to_line(
+        &mut self,
+        next_x: f32,
+        next_fit_x: f32,
+        clusters_height: f32,
+        authored_break_unit: AuthoredBreakUnit,
+    ) {
         self.line.items.end = self.item_idx + 1;
         self.line.clusters.end = self.cluster_idx + 1;
         self.line.x = next_x;
         self.line.fit_x = next_fit_x;
         self.add_line_height(clusters_height);
+        self.last_appended_authored_unit = authored_break_unit;
         // Would like to add:
         // self.cluster_idx += 1;
     }
@@ -106,32 +158,43 @@ impl BreakerState {
         self.line.x = next_x;
         self.line.fit_x = next_fit_x;
         self.add_line_height(box_height);
+        self.last_appended_authored_unit = AuthoredBreakUnit::Other;
         // Would like to add:
         // self.item_idx += 1;
     }
 
     /// Store the current iteration state so that we can revert to it if we later want to take
     /// the line breaking opportunity at this point.
-    fn mark_line_break_opportunity(&mut self, discretionary_advance: Option<f32>) {
+    fn mark_line_break_opportunity(&mut self, kind: RegularBreakKind) {
         let mut state = self.line.clone();
-        if let Some(discretionary_advance) = discretionary_advance {
-            state.x += discretionary_advance;
-            state.fit_x += discretionary_advance;
-            state.discretionary_advance = discretionary_advance;
+        if let RegularBreakKind::ConditionalMaterial(DiscretionaryAdvance(advance)) = kind {
+            state.x += advance;
+            state.fit_x += advance;
+            state.discretionary_advance = advance;
             state.discretionary_break = true;
         }
-        self.prev_boundary = Some(PrevBoundaryState {
+        let snapshot = BoundarySnapshot {
             item_idx: self.item_idx,
             run_idx: self.run_idx,
             cluster_idx: self.cluster_idx,
             state,
+        };
+        self.prev_boundary = Some(match kind {
+            RegularBreakKind::AuthoredDashPunctuation => {
+                RegularBreakCandidate::AuthoredDashPunctuation(snapshot)
+            }
+            RegularBreakKind::Ordinary => RegularBreakCandidate::Ordinary(snapshot),
+            RegularBreakKind::ConditionalMaterial(_) => {
+                RegularBreakCandidate::ConditionalMaterial(snapshot)
+            }
+            RegularBreakKind::Unprioritized => RegularBreakCandidate::Unprioritized(snapshot),
         });
     }
 
     /// Store the current iteration state so that we can revert to it if we later want to take
     /// an *emergency* line breaking opportunity at this point.
     fn mark_emergency_break_opportunity(&mut self) {
-        self.emergency_boundary = Some(PrevBoundaryState {
+        self.emergency_boundary = Some(BoundarySnapshot {
             item_idx: self.item_idx,
             run_idx: self.run_idx,
             cluster_idx: self.cluster_idx,
@@ -211,6 +274,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.discretionary_break = false;
         self.state.prev_boundary = None; // Added by Nico
         self.state.emergency_boundary = None;
+        self.state.last_appended_authored_unit = AuthoredBreakUnit::Other;
 
         self.state.consecutive_discretionary_lines = if ended_at_discretionary {
             self.state.consecutive_discretionary_lines.saturating_add(1)
@@ -372,7 +436,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // opportunity (CSS forbids a break between an
                         // inline's padding and its adjacent glyph).
                         if !box_is_glued {
-                            self.state.mark_line_break_opportunity(None);
+                            self.state
+                                .mark_line_break_opportunity(RegularBreakKind::Ordinary);
                         }
                     } else {
                         // If we're at the start of the line, this box will
@@ -382,9 +447,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // to hang before the next break opportunity is used.
                         if self.state.line.fit_x == 0.0 {
                             self.state.item_idx += 1;
+                            self.state.append_inline_box_to_line(
+                                next_x,
+                                next_fit_x,
+                                inline_box.height,
+                            );
                             self.state
-                                .append_inline_box_to_line(next_x, next_fit_x, inline_box.height);
-                            self.state.mark_line_break_opportunity(None);
+                                .mark_line_break_opportunity(RegularBreakKind::Ordinary);
                         } else if inline_box.glue {
                             // A glued box (inline border/padding shim) binds
                             // to the adjacent text: no break exists before
@@ -416,7 +485,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.item_idx += 1;
                             self.state
                                 .append_inline_box_to_line(next_x, next_fit_x, box_height);
-                            self.state.mark_line_break_opportunity(None);
+                            self.state
+                                .mark_line_break_opportunity(RegularBreakKind::Ordinary);
                         } else {
                             // println!("BOX BREAK");
                             if try_commit_line!(BreakReason::Regular) {
@@ -450,18 +520,29 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             .layout
                             .data
                             .line_break_overrides
-                            .binary_search_by_key(&byte_index, |entry| entry.byte_index)
+                            .binary_search_by_key(&byte_index, |entry| entry.byte_index())
                             .ok()
-                            .map(|index| self.layout.data.line_break_overrides[index].opportunity);
+                            .map(|index| {
+                                self.layout.data.line_break_overrides[index].disposition()
+                            });
                         let style = &self.layout.data.styles[cluster.data.style_index as usize];
 
                         // Lag text_wrap_mode style by one cluster
                         let text_wrap_mode = self.state.line.text_wrap_mode;
                         self.state.line.text_wrap_mode = style.text_wrap_mode;
+                        let soft_break_policy = self.state.line.soft_break_policy;
+                        self.state.line.soft_break_policy = style.soft_break_policy;
 
-                        if boundary_override.unwrap_or(boundary == Boundary::Line)
-                            && text_wrap_mode == TextWrapMode::Wrap
-                        {
+                        let has_soft_break_opportunity = match boundary_override {
+                            Some(LineBreakOverrideDisposition::Suppress) => false,
+                            Some(
+                                LineBreakOverrideDisposition::NormalOpportunity
+                                | LineBreakOverrideDisposition::UnprioritizedOpportunity,
+                            ) => true,
+                            None => boundary == Boundary::Line,
+                        };
+
+                        if has_soft_break_opportunity && text_wrap_mode == TextWrapMode::Wrap {
                             // We do not currently handle breaking within a ligature, so we ignore boundaries in such a position.
                             //
                             // We also don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
@@ -474,23 +555,56 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     .binary_search_by_key(&byte_index, |entry| entry.byte_index)
                                     .ok()
                                     .map(|index| self.layout.data.discretionary_breaks[index]);
-                                let discretionary_advance =
-                                    discretionary.map_or(0.0, |entry| entry.advance);
-                                let consecutive_limit_allows = discretionary.is_none_or(|entry| {
-                                    entry.max_consecutive_lines.is_none_or(|limit| {
-                                        self.state.consecutive_discretionary_lines < limit
-                                    })
-                                });
-                                if consecutive_limit_allows
-                                    && (discretionary_advance == 0.0
-                                        || self.advance_fits(
-                                            self.state.line.fit_x + discretionary_advance,
-                                            max_advance,
-                                        ))
-                                {
-                                    self.state.mark_line_break_opportunity(
-                                        discretionary.map(|entry| entry.advance),
-                                    );
+                                let candidate_kind = match (
+                                    soft_break_policy,
+                                    boundary_override,
+                                    discretionary,
+                                ) {
+                                    (SoftBreakPolicy::Anywhere, _, _) => {
+                                        Some(RegularBreakKind::Unprioritized)
+                                    }
+                                    (
+                                        _,
+                                        Some(
+                                            LineBreakOverrideDisposition::UnprioritizedOpportunity,
+                                        ),
+                                        _,
+                                    ) => Some(RegularBreakKind::Unprioritized),
+                                    (_, Some(LineBreakOverrideDisposition::Suppress), _) => None,
+                                    (_, _, Some(entry)) => {
+                                        let consecutive_limit_allows =
+                                            entry.max_consecutive_lines.is_none_or(|limit| {
+                                                self.state.consecutive_discretionary_lines < limit
+                                            });
+                                        (consecutive_limit_allows
+                                            && self.advance_fits(
+                                                self.state.line.fit_x + entry.advance,
+                                                max_advance,
+                                            ))
+                                        .then_some(
+                                            RegularBreakKind::ConditionalMaterial(
+                                                DiscretionaryAdvance(entry.advance),
+                                            ),
+                                        )
+                                    }
+                                    (SoftBreakPolicy::Unicode(WordBreak::BreakAll), _, None) => {
+                                        Some(RegularBreakKind::Unprioritized)
+                                    }
+                                    (
+                                        SoftBreakPolicy::Unicode(
+                                            WordBreak::Normal | WordBreak::KeepAll,
+                                        ),
+                                        _,
+                                        None,
+                                    ) => Some(match self.state.last_appended_authored_unit {
+                                        AuthoredBreakUnit::DashPunctuation => {
+                                            RegularBreakKind::AuthoredDashPunctuation
+                                        }
+                                        AuthoredBreakUnit::Other => RegularBreakKind::Ordinary,
+                                    }),
+                                };
+                                if let Some(candidate_kind) = candidate_kind {
+                                    self.state.mark_line_break_opportunity(candidate_kind);
                                 }
                                 // break_opportunity = true;
                             }
@@ -499,6 +613,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.x,
                                 self.state.line.fit_x,
                                 run.metrics().line_height,
+                                cluster.info().authored_break_unit(),
                             );
                             if try_commit_line!(BreakReason::Explicit) {
                                 // TODO: can this be hoisted out of the conditional?
@@ -555,88 +670,92 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // println!("Cluster {} next_x: {}", self.state.cluster_idx, next_x);
 
-                        // If the content fits (the x position does NOT exceed max_advance)
-                        //
-                        // We simply append the cluster(s) to the current line
-                        if self.advance_fits(next_fit_x, max_advance) {
-                            let line_height = run.metrics().line_height;
-                            self.state
-                                .append_cluster_to_line(next_x, next_fit_x, line_height);
-                            self.state.cluster_idx += 1;
-                            if is_space {
-                                self.state.line.num_spaces += 1;
-                            }
-                        }
-                        // Else we attempt to line break:
-                        //
-                        // This will only succeed if there is an available line-break opportunity that has been marked earlier
-                        // in the line. If there is no such line-breaking opportunity (such as if wrapping is disabled), then
-                        // we fall back to appending the content to the line anyway.
-                        else {
-                            // Case: cluster is a space character (and wrapping is enabled)
-                            //
-                            // Collapsible whitespace may hang outside the line measure. If the
-                            // complete preceding word fits, an earlier intra-word opportunity
-                            // is not reconsidered merely because this following space does not.
-                            // This is ordinary first-fit greedy composition: discretionary
-                            // boundaries participate when content itself overflows.
-                            if is_space && text_wrap_mode == TextWrapMode::Wrap {
+                        let line_fit = if self.advance_fits(next_fit_x, max_advance) {
+                            LineFit::Fits
+                        } else if is_space && text_wrap_mode == TextWrapMode::Wrap {
+                            LineFit::TrailingCollapsibleSpaceOverflow
+                        } else {
+                            LineFit::ContentOverflow
+                        };
+
+                        match line_fit {
+                            LineFit::Fits => {
                                 let line_height = run.metrics().line_height;
-                                self.state
-                                    .append_cluster_to_line(next_x, next_fit_x, line_height);
-                                if try_commit_line!(BreakReason::Regular) {
-                                    // TODO: can this be hoisted out of the conditional?
-                                    self.state.cluster_idx += 1;
-                                    return self.start_new_line();
-                                }
-                            }
-                            // Case: we have previously encountered a REGULAR line-breaking opportunity in the current line
-                            //
-                            // We "take" the line-breaking opportunity by starting a new line and resetting our
-                            // item/run/cluster iteration state back to how it was when the line-breaking opportunity was encountered
-                            else if let Some(prev) = self.state.prev_boundary.take() {
-                                // println!("REVERT");
-                                // debug_assert!(prev.state.x != 0.0);
-
-                                // Q: Why do we revert the line state here, but only revert the indexes if the commit succeeds?
-                                self.state.line = prev.state;
-                                if try_commit_line!(BreakReason::Regular) {
-                                    // Revert boundary state to prev state
-                                    self.state.item_idx = prev.item_idx;
-                                    self.state.run_idx = prev.run_idx;
-                                    self.state.cluster_idx = prev.cluster_idx;
-
-                                    return self.start_new_line();
-                                }
-                            }
-                            // Case: we have previously encountered an EMERGENCY line-breaking opportunity in the current line
-                            //
-                            // We "take" the line-breaking opportunity by starting a new line and resetting our
-                            // item/run/cluster iteration state back to how it was when the line-breaking opportunity was encountered
-                            else if let Some(prev_emergency) =
-                                self.state.emergency_boundary.take()
-                            {
-                                self.state.line = prev_emergency.state;
-                                if try_commit_line!(BreakReason::Emergency) {
-                                    // Revert boundary state to prev state
-                                    self.state.item_idx = prev_emergency.item_idx;
-                                    self.state.run_idx = prev_emergency.run_idx;
-                                    self.state.cluster_idx = prev_emergency.cluster_idx;
-
-                                    return self.start_new_line();
-                                }
-                            }
-                            // Case: no line-breaking opportunities available
-                            //
-                            // This can happen when wrapping is disabled (TextWrapMode::NoWrap) or when no wrapping opportunities
-                            // (according to our `OverflowWrap` and `WordBreak` styles) have yet been encountered.
-                            //
-                            // We fall back to appending the content to the line.
-                            else {
-                                let line_height = run.metrics().line_height;
-                                self.state
-                                    .append_cluster_to_line(next_x, next_fit_x, line_height);
+                                self.state.append_cluster_to_line(
+                                    next_x,
+                                    next_fit_x,
+                                    line_height,
+                                    cluster.info().authored_break_unit(),
+                                );
                                 self.state.cluster_idx += 1;
+                                if is_space {
+                                    self.state.line.num_spaces += 1;
+                                }
+                            }
+                            LineFit::TrailingCollapsibleSpaceOverflow => {
+                                // Parley's normal priority policy may select an authored dash
+                                // before this later word separator. Every other provenance keeps
+                                // ordinary first-fit composition: the complete word remains on
+                                // the line and the collapsible space hangs.
+                                match self.state.prev_boundary.take() {
+                                    Some(RegularBreakCandidate::AuthoredDashPunctuation(prev)) => {
+                                        self.state.line = prev.state;
+                                        if try_commit_line!(BreakReason::Regular) {
+                                            self.state.item_idx = prev.item_idx;
+                                            self.state.run_idx = prev.run_idx;
+                                            self.state.cluster_idx = prev.cluster_idx;
+                                            return self.start_new_line();
+                                        }
+                                    }
+                                    candidate => {
+                                        self.state.prev_boundary = candidate;
+                                        let line_height = run.metrics().line_height;
+                                        self.state.append_cluster_to_line(
+                                            next_x,
+                                            next_fit_x,
+                                            line_height,
+                                            cluster.info().authored_break_unit(),
+                                        );
+                                        if try_commit_line!(BreakReason::Regular) {
+                                            self.state.cluster_idx += 1;
+                                            return self.start_new_line();
+                                        }
+                                    }
+                                }
+                            }
+                            LineFit::ContentOverflow => {
+                                // Take the most recent regular candidate regardless of its
+                                // provenance. Priority only changes the overflowing-separator
+                                // case above; actual content overflow remains greedy.
+                                if let Some(candidate) = self.state.prev_boundary.take() {
+                                    let prev = candidate.into_snapshot();
+                                    self.state.line = prev.state;
+                                    if try_commit_line!(BreakReason::Regular) {
+                                        self.state.item_idx = prev.item_idx;
+                                        self.state.run_idx = prev.run_idx;
+                                        self.state.cluster_idx = prev.cluster_idx;
+                                        return self.start_new_line();
+                                    }
+                                } else if let Some(prev_emergency) =
+                                    self.state.emergency_boundary.take()
+                                {
+                                    self.state.line = prev_emergency.state;
+                                    if try_commit_line!(BreakReason::Emergency) {
+                                        self.state.item_idx = prev_emergency.item_idx;
+                                        self.state.run_idx = prev_emergency.run_idx;
+                                        self.state.cluster_idx = prev_emergency.cluster_idx;
+                                        return self.start_new_line();
+                                    }
+                                } else {
+                                    let line_height = run.metrics().line_height;
+                                    self.state.append_cluster_to_line(
+                                        next_x,
+                                        next_fit_x,
+                                        line_height,
+                                        cluster.info().authored_break_unit(),
+                                    );
+                                    self.state.cluster_idx += 1;
+                                }
                             }
                         }
                     }
@@ -793,8 +912,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.line.fit_x + fit_advance
                         };
                         let line_height = run.metrics().line_height;
-                        self.state
-                            .append_cluster_to_line(next_x, next_fit_x, line_height);
+                        self.state.append_cluster_to_line(
+                            next_x,
+                            next_fit_x,
+                            line_height,
+                            cluster.info().authored_break_unit(),
+                        );
                         self.state.cluster_idx += 1;
                         char_count += 1;
 

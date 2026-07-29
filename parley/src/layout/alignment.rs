@@ -344,7 +344,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::{Alignment, AlignmentOptions, JustificationMode, align};
-    use crate::analysis::Boundary;
+    use crate::analysis::{AuthoredBreakUnit, Boundary};
     use crate::layout::LineMetrics;
     use crate::layout::data::{
         BreakReason, ClusterData, ClusterInfo, LayoutData, LayoutItemKind, LineData, LineItemData,
@@ -352,7 +352,7 @@ mod tests {
 
     fn test_cluster(ch: char, advance: f32) -> ClusterData {
         ClusterData {
-            info: ClusterInfo::new(Boundary::Word, ch),
+            info: ClusterInfo::new(Boundary::Word, ch, AuthoredBreakUnit::Other),
             flags: 0,
             style_index: 0,
             glyph_len: 0xFF,

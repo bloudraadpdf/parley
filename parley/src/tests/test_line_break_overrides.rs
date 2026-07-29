@@ -19,22 +19,10 @@ fn caller_overrides_replace_unicode_slash_opportunities() {
     // Suppress the Unicode opportunities after each slash and add the custom
     // opportunities immediately before them.
     layout.set_line_break_overrides(vec![
-        LineBreakOverride {
-            byte_index: 2,
-            opportunity: true,
-        },
-        LineBreakOverride {
-            byte_index: 3,
-            opportunity: false,
-        },
-        LineBreakOverride {
-            byte_index: 5,
-            opportunity: true,
-        },
-        LineBreakOverride {
-            byte_index: 6,
-            opportunity: false,
-        },
+        LineBreakOverride::opportunity(2),
+        LineBreakOverride::suppress(3),
+        LineBreakOverride::opportunity(5),
+        LineBreakOverride::suppress(6),
     ]);
     layout.break_all_lines(Some(20.0));
 

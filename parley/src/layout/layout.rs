@@ -52,14 +52,14 @@ impl<B: Brush> Layout<B> {
     /// line breaking. They cannot suppress mandatory newline breaks or split a
     /// shaped ligature. Duplicate byte indices use the last supplied decision.
     pub fn set_line_break_overrides(&mut self, mut overrides: Vec<LineBreakOverride>) {
-        overrides.sort_by_key(|entry| entry.byte_index);
+        overrides.sort_by_key(|entry| entry.byte_index());
         let mut canonical: Vec<LineBreakOverride> = Vec::with_capacity(overrides.len());
         for entry in overrides {
-            if entry.byte_index > self.data.text_len {
+            if entry.byte_index() > self.data.text_len {
                 continue;
             }
             if let Some(previous) = canonical.last_mut() {
-                if previous.byte_index == entry.byte_index {
+                if previous.byte_index() == entry.byte_index() {
                     *previous = entry;
                     continue;
                 }

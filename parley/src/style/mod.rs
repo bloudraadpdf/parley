@@ -28,6 +28,55 @@ pub enum WhiteSpaceCollapse {
     Preserve,
 }
 
+/// How normal soft-wrap opportunities are constructed and prioritized.
+///
+/// CSS `line-break: anywhere` is not an emergency overflow policy: it creates
+/// a normal opportunity around every typographic character unit and forbids
+/// prioritizing those opportunities. Keeping that mode distinct from
+/// [`OverflowWrap`] prevents callers from representing it as an emergency
+/// break policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineBreakMode {
+    /// Use Unicode line-breaking opportunities and normal UA prioritization.
+    #[default]
+    Normal,
+    /// Create equal-priority opportunities around every character unit.
+    Anywhere,
+}
+
+/// Fully-resolved normal line-breaking behavior.
+///
+/// This private carrier is constructed only from the two independent authored
+/// controls. Once text reaches analysis/layout, an `Anywhere` paragraph cannot
+/// accidentally retain a normal Unicode priority policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SoftBreakPolicy {
+    Unicode(WordBreak),
+    Anywhere,
+}
+
+impl Default for SoftBreakPolicy {
+    fn default() -> Self {
+        Self::Unicode(WordBreak::Normal)
+    }
+}
+
+impl SoftBreakPolicy {
+    pub(crate) const fn resolve(word_break: WordBreak, line_break_mode: LineBreakMode) -> Self {
+        match line_break_mode {
+            LineBreakMode::Normal => Self::Unicode(word_break),
+            LineBreakMode::Anywhere => Self::Anywhere,
+        }
+    }
+
+    pub(crate) const fn segmentation_word_break(self) -> WordBreak {
+        match self {
+            Self::Unicode(word_break) => word_break,
+            Self::Anywhere => WordBreak::BreakAll,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FontSynthesis {
     #[default]
@@ -145,6 +194,8 @@ pub enum StyleProperty<'a, B: Brush> {
     LetterSpacing(f32),
     /// Control over where words can wrap.
     WordBreak(WordBreak),
+    /// Control over normal line-breaking opportunities and their priority.
+    LineBreakMode(LineBreakMode),
     /// Control over "emergency" line-breaking.
     OverflowWrap(OverflowWrap),
     /// Control over non-"emergency" line-breaking.
@@ -215,6 +266,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub letter_spacing: f32,
     /// Control over where words can wrap.
     pub word_break: WordBreak,
+    /// Control over normal line-breaking opportunities and their priority.
+    pub line_break_mode: LineBreakMode,
     /// Control over "emergency" line-breaking.
     pub overflow_wrap: OverflowWrap,
     /// Control over non-"emergency" line-breaking.
@@ -256,6 +309,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             word_spacing: 0.0,
             letter_spacing: 0.0,
             word_break: WordBreak::default(),
+            line_break_mode: LineBreakMode::default(),
             overflow_wrap: OverflowWrap::default(),
             text_wrap_mode: TextWrapMode::default(),
             tab_size: TabSize::default(),
