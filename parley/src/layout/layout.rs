@@ -6,7 +6,7 @@ use crate::layout::alignment::align;
 use crate::layout::alignment::align_per_line;
 use crate::layout::alignment::unjustify;
 use crate::layout::data::LayoutData;
-use crate::layout::{DiscretionaryBreak, LineBreakOverride};
+use crate::layout::{DiscretionaryBreak, LineBreakOverride, NormalSoftWrapSelection};
 use crate::style::Brush;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -44,6 +44,16 @@ impl<B: Brush> Layout<B> {
     /// set before calling [`break_all_lines`](Self::break_all_lines).
     pub fn set_reclaim_space_before_inline_box(&mut self, reclaim: bool) {
         self.data.reclaim_space_before_inline_box = reclaim;
+    }
+
+    /// Select how normal soft-wrap opportunities compete when a complete word
+    /// fits but its following collapsible space does not.
+    ///
+    /// This does not affect content overflow, emergency opportunities,
+    /// discretionary material, `line-break: anywhere`, or
+    /// `word-break: break-all`.
+    pub fn set_normal_soft_wrap_selection(&mut self, selection: NormalSoftWrapSelection) {
+        self.data.normal_soft_wrap_selection = selection;
     }
 
     /// Override soft line-break decisions at selected UTF-8 byte boundaries.

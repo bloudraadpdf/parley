@@ -12,7 +12,7 @@ use core_maths::CoreFloat;
 use crate::analysis::cluster::Whitespace;
 use crate::analysis::{AuthoredBreakUnit, Boundary};
 use crate::data::ClusterData;
-use crate::layout::data::LineBreakOverrideDisposition;
+use crate::layout::data::{LineBreakOverrideDisposition, NormalSoftWrapSelection};
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
     LineMetrics, Run,
@@ -693,12 +693,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 }
                             }
                             LineFit::TrailingCollapsibleSpaceOverflow => {
-                                // Parley's normal priority policy may select an authored dash
-                                // before this later word separator. Every other provenance keeps
-                                // ordinary first-fit composition: the complete word remains on
-                                // the line and the collapsible space hangs.
-                                match self.state.prev_boundary.take() {
-                                    Some(RegularBreakCandidate::AuthoredDashPunctuation(prev)) => {
+                                // Normal priority composition may select an authored dash before
+                                // this later word separator. Greedy composition keeps the complete
+                                // fitting word and hangs the collapsible space.
+                                match (
+                                    self.layout.data.normal_soft_wrap_selection,
+                                    self.state.prev_boundary.take(),
+                                ) {
+                                    (
+                                        NormalSoftWrapSelection::PriorityClasses,
+                                        Some(RegularBreakCandidate::AuthoredDashPunctuation(prev)),
+                                    ) => {
                                         self.state.line = prev.state;
                                         if try_commit_line!(BreakReason::Regular) {
                                             self.state.item_idx = prev.item_idx;
@@ -707,7 +712,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             return self.start_new_line();
                                         }
                                     }
-                                    candidate => {
+                                    (_, candidate) => {
                                         self.state.prev_boundary = candidate;
                                         let line_height = run.metrics().line_height;
                                         self.state.append_cluster_to_line(

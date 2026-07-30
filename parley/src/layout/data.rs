@@ -5,6 +5,20 @@ use crate::inline_box::InlineBox;
 use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
 
+/// Selection policy among normal soft-wrap opportunities.
+///
+/// This does not create or suppress opportunities. It only decides whether
+/// normal punctuation priority classes may displace a later fitting boundary,
+/// or whether composition always keeps the latest fitting normal boundary.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NormalSoftWrapSelection {
+    /// Apply the normal UA punctuation priority classes.
+    #[default]
+    PriorityClasses,
+    /// Keep the latest fitting normal boundary.
+    GreedyLatest,
+}
+
 /// A caller-supplied soft line-break decision at one UTF-8 byte boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LineBreakOverride {
@@ -387,6 +401,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) quantize: bool,
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
     pub(crate) nominal_font_metric_line_breaks: bool,
+    pub(crate) normal_soft_wrap_selection: NormalSoftWrapSelection,
     /// When `true`, the line breaker reclaims the advance of collapsible
     /// trailing whitespace when doing so lets the following inline box fit
     /// on the current line (PDFreactor's model) instead of wrapping the
@@ -450,6 +465,7 @@ impl<B: Brush> Default for LayoutData<B> {
             quantize: true,
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
+            normal_soft_wrap_selection: NormalSoftWrapSelection::default(),
             reclaim_space_before_inline_box: false,
             line_break_overrides: Vec::new(),
             discretionary_breaks: Vec::new(),
@@ -486,6 +502,7 @@ impl<B: Brush> LayoutData<B> {
         self.quantize = true;
         self.font_metric_advance_quantization = None;
         self.nominal_font_metric_line_breaks = false;
+        self.normal_soft_wrap_selection = NormalSoftWrapSelection::default();
         self.reclaim_space_before_inline_box = false;
         self.line_break_overrides.clear();
         self.base_level = 0;

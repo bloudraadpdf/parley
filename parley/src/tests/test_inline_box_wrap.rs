@@ -15,7 +15,8 @@ use alloc::{format, string::String, vec, vec::Vec};
 use super::test_builders::create_font_context;
 use crate::{
     FontFamily, FontWeight, InlineBox, LayoutContext, LineBreakMode, LineBreakOverride,
-    OverflowWrap, RangedBuilder, StyleProperty, WordBreak, layout::DiscretionaryBreak,
+    NormalSoftWrapSelection, OverflowWrap, RangedBuilder, StyleProperty, WordBreak,
+    layout::DiscretionaryBreak,
 };
 
 use super::utils::ColorBrush;
@@ -165,6 +166,18 @@ fn first_line_with_overflowing_trailing_space(
     text: &str,
     configure: impl Fn(&mut RangedBuilder<'_, ColorBrush>),
 ) -> String {
+    first_line_with_overflowing_trailing_space_and_selection(
+        text,
+        configure,
+        NormalSoftWrapSelection::PriorityClasses,
+    )
+}
+
+fn first_line_with_overflowing_trailing_space_and_selection(
+    text: &str,
+    configure: impl Fn(&mut RangedBuilder<'_, ColorBrush>),
+    selection: NormalSoftWrapSelection,
+) -> String {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
 
@@ -183,6 +196,7 @@ fn first_line_with_overflowing_trailing_space(
     let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
 
     let mut layout = build(&mut lcx, &mut fcx);
+    layout.set_normal_soft_wrap_selection(selection);
     layout.break_all_lines(Some(max_advance));
     let first_line = layout
         .lines()
@@ -190,6 +204,51 @@ fn first_line_with_overflowing_trailing_space(
         .map(|line| String::from(&text[line.text_range()]))
         .unwrap();
     first_line
+}
+
+#[test]
+fn greedy_latest_keeps_a_complete_fitting_word_when_only_its_space_overflows() {
+    let text = "alpha-beta ";
+    assert_eq!(
+        first_line_with_overflowing_trailing_space_and_selection(
+            text,
+            |_| {},
+            NormalSoftWrapSelection::GreedyLatest,
+        ),
+        text,
+        "greedy normal composition must keep the later fitting word separator"
+    );
+}
+
+#[test]
+fn greedy_latest_still_uses_the_authored_dash_on_real_content_overflow() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "alpha-beta ";
+
+    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext| {
+        let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.build(text)
+    };
+
+    let mut prefix_builder = lcx.ranged_builder(&mut fcx, "alpha-", 1.0, false);
+    prefix_builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    prefix_builder.push_default(StyleProperty::FontSize(10.0));
+    let mut prefix = prefix_builder.build("alpha-");
+    prefix.break_all_lines(None);
+    let prefix_advance = prefix.lines().next().unwrap().metrics().advance;
+
+    let mut layout = build(&mut lcx, &mut fcx);
+    layout.set_normal_soft_wrap_selection(NormalSoftWrapSelection::GreedyLatest);
+    layout.break_all_lines(Some(prefix_advance + 0.01));
+
+    assert_eq!(
+        layout.lines().next().map(|line| &text[line.text_range()]),
+        Some("alpha-"),
+        "greedy selection changes only trailing-space overflow, not real content overflow"
+    );
 }
 
 fn first_line_with_overflowing_space_after_punctuation(punctuation: char) -> String {
