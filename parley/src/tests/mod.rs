@@ -4,6 +4,7 @@
 mod test_analysis;
 mod test_builders;
 mod test_font_metric_advance_quantization;
+mod test_font_synthesis;
 mod test_inline_box_wrap;
 mod test_letter_spacing;
 mod test_line_break_overrides;

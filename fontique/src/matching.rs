@@ -4,7 +4,7 @@
 //! Implementation of the CSS font matching algorithm.
 
 use super::font::FontInfo;
-use crate::{FontStyle, FontWeight, FontWidth};
+use crate::{FontStyle, FontStyleSynthesis, FontWeight, FontWidth};
 use smallvec::SmallVec;
 
 const DEFAULT_OBLIQUE_ANGLE: f32 = 14.0;
@@ -14,7 +14,7 @@ pub fn match_font(
     width: FontWidth,
     style: FontStyle,
     weight: FontWeight,
-    synthesize_style: bool,
+    style_synthesis: FontStyleSynthesis,
 ) -> Option<usize> {
     const OBLIQUE_THRESHOLD: f32 = DEFAULT_OBLIQUE_ANGLE;
     match set.len() {
@@ -158,7 +158,7 @@ pub fn match_font(
                     // value with the specified oblique value; otherwise, a fallback
                     // match is produced by geometric shearing to the specified
                     // oblique value.
-                    if synthesize_style {
+                    if style_synthesis == FontStyleSynthesis::Allowed {
                         if set.iter().any(|f| f.has_slnt) {
                             _use_slnt = true;
                         } else {
@@ -211,7 +211,7 @@ pub fn match_font(
                     // value with the specified oblique value; otherwise, a fallback
                     // match is produced by geometric shearing to the specified
                     // oblique value.
-                    if synthesize_style {
+                    if style_synthesis == FontStyleSynthesis::Allowed {
                         if set.iter().any(|f| f.has_slnt) {
                             _use_slnt = true;
                         } else {
@@ -263,7 +263,7 @@ pub fn match_font(
                     // value with the specified oblique value; otherwise, a fallback
                     // match is produced by geometric shearing to the specified
                     // oblique value.
-                    if synthesize_style {
+                    if style_synthesis == FontStyleSynthesis::Allowed {
                         if set.iter().any(|f| f.has_slnt) {
                             _use_slnt = true;
                         } else {
@@ -315,7 +315,7 @@ pub fn match_font(
                     // value with the specified oblique value; otherwise, a fallback
                     // match is produced by geometric shearing to the specified
                     // oblique value.
-                    if synthesize_style {
+                    if style_synthesis == FontStyleSynthesis::Allowed {
                         if set.iter().any(|f| f.has_slnt) {
                             _use_slnt = true;
                         } else {

@@ -7,7 +7,7 @@ use crate::CharmapIndex;
 
 use super::source::{SourceInfo, SourceKind};
 use super::{Blob, source_cache::SourceCache};
-use crate::{FontStyle, FontWeight, FontWidth};
+use crate::{FontStyle, FontStyleSynthesis, FontWeight, FontWidth};
 use core::fmt;
 use read_fonts::{FontRef, TableProvider as _, types::Tag};
 use smallvec::SmallVec;
@@ -86,8 +86,14 @@ impl FontInfo {
         self.weight
     }
 
-    /// Returns synthesis suggestions for this font with the given attributes.
-    pub fn synthesis(&self, width: FontWidth, style: FontStyle, weight: FontWeight) -> Synthesis {
+    /// Returns permitted synthesis suggestions for this font with the given attributes.
+    pub fn synthesis(
+        &self,
+        width: FontWidth,
+        style: FontStyle,
+        weight: FontWeight,
+        style_synthesis: FontStyleSynthesis,
+    ) -> Synthesis {
         let mut synth = Synthesis::default();
         let mut len = 0_usize;
         if self.has_width_axis() && self.width != width {
@@ -102,7 +108,7 @@ impl FontInfo {
                 synth.embolden = true;
             }
         }
-        if self.style != style {
+        if self.style != style && style_synthesis == FontStyleSynthesis::Allowed {
             match style {
                 FontStyle::Normal => {}
                 FontStyle::Italic => {

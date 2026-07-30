@@ -7,6 +7,20 @@ use core::fmt;
 
 use parlance::{FontStyle, FontWeight, FontWidth};
 
+/// Whether a font query may synthesize the requested font style.
+///
+/// This is an input to face matching. When synthesis is forbidden, matching
+/// must select the closest concrete face instead of selecting a regular face
+/// on the assumption that it can be skewed later.
+#[derive(Copy, Clone, PartialEq, Eq, Default, Debug)]
+pub enum FontStyleSynthesis {
+    /// Face matching may select a face that requires synthetic style.
+    #[default]
+    Allowed,
+    /// Face matching must select a concrete face without synthetic style.
+    Forbidden,
+}
+
 /// Primary attributes for font matching: [`FontWidth`], [`FontStyle`] and [`FontWeight`].
 ///
 /// These are used to [configure] a [`Query`].

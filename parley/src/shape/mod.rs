@@ -10,7 +10,7 @@ use core::ops::RangeInclusive;
 
 use super::layout::Layout;
 use super::resolve::{ResolveContext, Resolved, ResolvedStyle};
-use super::style::{Brush, FontFeature, FontSynthesis, FontSynthesisStyle, FontVariation};
+use super::style::{Brush, FontFeature, FontSynthesis, FontVariation};
 use crate::analysis::cluster::{Char, CharCluster, Status};
 use crate::analysis::{AnalysisDataSources, CharInfo};
 use crate::convert::script_to_harfrust;
@@ -525,11 +525,36 @@ struct FontSelector<'a, 'b, B: Brush> {
     rcx: &'a ResolveContext,
     styles: &'a [ResolvedStyle<B>],
     style_index: u16,
-    attrs: fontique::Attributes,
+    query_attributes: FontQueryAttributes,
     font_synthesis_weight: FontSynthesis,
-    font_synthesis_style: FontSynthesisStyle,
     variations: &'a [FontVariation],
     features: &'a [FontFeature],
+}
+
+#[derive(Copy, Clone, PartialEq)]
+struct FontQueryAttributes {
+    primary: fontique::Attributes,
+    style_synthesis: fontique::FontStyleSynthesis,
+}
+
+impl FontQueryAttributes {
+    fn from_style<B: Brush>(style: &ResolvedStyle<B>) -> Self {
+        let primary = fontique::Attributes {
+            width: style.font_width,
+            weight: style.font_weight,
+            style: style.font_style,
+        };
+        Self {
+            primary,
+            style_synthesis: style
+                .font_synthesis_style
+                .face_query_synthesis(primary.style),
+        }
+    }
+
+    fn configure(self, query: &mut Query<'_>) {
+        query.set_attributes(self.primary, self.style_synthesis);
+    }
 }
 
 impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
@@ -544,19 +569,14 @@ impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
         let style = &styles[style_index as usize];
         let fonts_id = style.font_family.id();
         let fonts = rcx.stack(style.font_family).unwrap_or(&[]);
-        let attrs = fontique::Attributes {
-            width: style.font_width,
-            weight: style.font_weight,
-            style: style.font_style,
-        };
+        let query_attributes = FontQueryAttributes::from_style(style);
         let font_synthesis_weight = style.font_synthesis_weight;
-        let font_synthesis_style = style.font_synthesis_style;
         let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
         let features = rcx.features(style.font_features).unwrap_or(&[]);
         query.set_families(fonts.iter().copied());
 
         query.set_fallbacks(fontique::FallbackKey::new(fb_script, locale.as_ref()));
-        query.set_attributes(attrs);
+        query_attributes.configure(query);
 
         Self {
             query,
@@ -564,9 +584,8 @@ impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
             rcx,
             styles,
             style_index,
-            attrs,
+            query_attributes,
             font_synthesis_weight,
-            font_synthesis_style,
             variations,
             features,
         }
@@ -596,17 +615,12 @@ impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
                 self.fonts_id = Some(fonts_id);
             }
 
-            let attrs = fontique::Attributes {
-                width: style.font_width,
-                weight: style.font_weight,
-                style: style.font_style,
-            };
-            if self.attrs != attrs {
-                self.query.set_attributes(attrs);
-                self.attrs = attrs;
+            let query_attributes = FontQueryAttributes::from_style(style);
+            if self.query_attributes != query_attributes {
+                query_attributes.configure(self.query);
+                self.query_attributes = query_attributes;
             }
             self.font_synthesis_weight = style.font_synthesis_weight;
-            self.font_synthesis_style = style.font_synthesis_style;
             self.variations = self.rcx.variations(style.font_variations).unwrap_or(&[]);
             self.features = self.rcx.features(style.font_features).unwrap_or(&[]);
         }
@@ -637,18 +651,16 @@ impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
                 Status::Complete => {
                     selected_font = Some(SelectedFont::from_query_font(
                         font,
-                        self.attrs,
+                        self.query_attributes.primary,
                         self.font_synthesis_weight,
-                        self.font_synthesis_style,
                     ));
                     fontique::QueryStatus::Stop
                 }
                 Status::Keep => {
                     selected_font = Some(SelectedFont::from_query_font(
                         font,
-                        self.attrs,
+                        self.query_attributes.primary,
                         self.font_synthesis_weight,
-                        self.font_synthesis_style,
                     ));
                     fontique::QueryStatus::Continue
                 }
@@ -656,9 +668,8 @@ impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
                     if selected_font.is_none() {
                         selected_font = Some(SelectedFont::from_query_font(
                             font,
-                            self.attrs,
+                            self.query_attributes.primary,
                             self.font_synthesis_weight,
-                            self.font_synthesis_style,
                         ));
                     }
                     fontique::QueryStatus::Continue
@@ -679,22 +690,10 @@ impl SelectedFont {
         font: &QueryFont,
         attrs: fontique::Attributes,
         weight_policy: FontSynthesis,
-        style_policy: FontSynthesisStyle,
     ) -> Self {
         let mut font = font.clone();
         if matches!(weight_policy, FontSynthesis::None) {
             font.synthesis = font.synthesis.without_weight_synthesis();
-        }
-
-        let allow_style_synthesis = match style_policy {
-            FontSynthesisStyle::Auto => true,
-            FontSynthesisStyle::None => false,
-            FontSynthesisStyle::ObliqueOnly => {
-                matches!(attrs.style, fontique::FontStyle::Oblique(_))
-            }
-        };
-        if !allow_style_synthesis {
-            font.synthesis = font.synthesis.without_style_synthesis();
         }
 
         Self { font, attrs }

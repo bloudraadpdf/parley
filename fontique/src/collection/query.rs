@@ -10,7 +10,10 @@ use super::super::{Collection, SourceCache};
 use alloc::vec::Vec;
 
 use super::{
-    super::{Attributes, Blob, FallbackKey, FamilyId, FamilyInfo, GenericFamily, Synthesis},
+    super::{
+        Attributes, Blob, FallbackKey, FamilyId, FamilyInfo, FontStyleSynthesis, GenericFamily,
+        Synthesis,
+    },
     Inner,
 };
 
@@ -34,8 +37,14 @@ pub struct Query<'a> {
     collection: &'a mut Inner,
     state: &'a mut QueryState,
     source_cache: &'a mut SourceCache,
-    attributes: Attributes,
+    attributes: QueryAttributes,
     fallbacks: Option<FallbackKey>,
+}
+
+#[derive(Copy, Clone, Default, PartialEq)]
+struct QueryAttributes {
+    primary: Attributes,
+    style_synthesis: FontStyleSynthesis,
 }
 
 impl<'a> Query<'a> {
@@ -45,7 +54,7 @@ impl<'a> Query<'a> {
             collection: &mut collection.inner,
             state: &mut collection.query_state,
             source_cache,
-            attributes: Attributes::default(),
+            attributes: QueryAttributes::default(),
             fallbacks: None,
         }
     }
@@ -78,7 +87,11 @@ impl<'a> Query<'a> {
     }
 
     /// Sets the primary attributes to match against.
-    pub fn set_attributes(&mut self, attributes: Attributes) {
+    pub fn set_attributes(&mut self, attributes: Attributes, style_synthesis: FontStyleSynthesis) {
+        let attributes = QueryAttributes {
+            primary: attributes,
+            style_synthesis,
+        };
         if self.attributes != attributes {
             for family in &mut self.state.families {
                 family.clear_fonts();
@@ -237,7 +250,7 @@ impl QueryFont {
 
 fn load_font<'a>(
     family: &FamilyInfo,
-    attributes: Attributes,
+    attributes: QueryAttributes,
     font: &'a mut Entry<QueryFont>,
     is_default: bool,
     source_cache: &mut SourceCache,
@@ -252,13 +265,22 @@ fn load_font<'a>(
             let family_index = if is_default {
                 family.default_font_index()
             } else {
-                family.match_index(attributes.width, attributes.style, attributes.weight, true)?
+                family.match_index(
+                    attributes.primary.width,
+                    attributes.primary.style,
+                    attributes.primary.weight,
+                    attributes.style_synthesis,
+                )?
             };
             let font_info = family.fonts().get(family_index)?;
             let blob = font_info.load(Some(source_cache))?;
             let blob_index = font_info.index();
-            let synthesis =
-                font_info.synthesis(attributes.width, attributes.style, attributes.weight);
+            let synthesis = font_info.synthesis(
+                attributes.primary.width,
+                attributes.primary.style,
+                attributes.primary.weight,
+                attributes.style_synthesis,
+            );
             *status = Entry::Ok(QueryFont {
                 family: (family.id(), family_index),
                 blob: blob.clone(),
@@ -304,4 +326,82 @@ enum Entry<T> {
     Ok(T),
     Vacant,
     Error,
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::sync::Arc;
+
+    use super::*;
+    use crate::{
+        CollectionOptions, FontInfoOverride, FontStyle, FontStyleSynthesis, FontWeight, FontWidth,
+    };
+
+    const TEST_FAMILY: &str = "Query style synthesis test";
+
+    fn test_collection() -> (Collection, Blob<u8>, Blob<u8>) {
+        let regular = Blob::new(Arc::new(
+            include_bytes!("../../../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf")
+                .to_vec(),
+        ));
+        let italic = Blob::new(Arc::new(
+            include_bytes!(
+                "../../../parley_dev/assets/fonts/arimo_fonts/Arimo-VariableFont_wght.ttf"
+            )
+            .to_vec(),
+        ));
+        let mut collection = Collection::new(CollectionOptions {
+            shared: false,
+            system_fonts: false,
+        });
+        collection.register_fonts(
+            regular.clone(),
+            Some(FontInfoOverride {
+                family_name: Some(TEST_FAMILY),
+                style: Some(FontStyle::Normal),
+                ..FontInfoOverride::default()
+            }),
+        );
+        collection.register_fonts(
+            italic.clone(),
+            Some(FontInfoOverride {
+                family_name: Some(TEST_FAMILY),
+                style: Some(FontStyle::Italic),
+                ..FontInfoOverride::default()
+            }),
+        );
+        (collection, regular, italic)
+    }
+
+    fn first_match(query: &mut Query<'_>) -> (u64, Synthesis) {
+        let mut selected = None;
+        query.matches_with(|font| {
+            selected = Some((font.blob.id(), font.synthesis));
+            QueryStatus::Stop
+        });
+        selected.expect("test family must yield a font")
+    }
+
+    #[test]
+    fn style_synthesis_is_part_of_query_cache_key() {
+        let (mut collection, regular, italic) = test_collection();
+        let mut source_cache = SourceCache::default();
+        let mut query = collection.query(&mut source_cache);
+        query.set_families([TEST_FAMILY]);
+        let attributes = Attributes {
+            width: FontWidth::NORMAL,
+            style: FontStyle::Oblique(Some(10.0)),
+            weight: FontWeight::NORMAL,
+        };
+
+        query.set_attributes(attributes, FontStyleSynthesis::Forbidden);
+        let (font_id, synthesis) = first_match(&mut query);
+        assert_eq!(font_id, italic.id());
+        assert_eq!(synthesis.skew(), None);
+
+        query.set_attributes(attributes, FontStyleSynthesis::Allowed);
+        let (font_id, synthesis) = first_match(&mut query);
+        assert_eq!(font_id, regular.id());
+        assert_eq!(synthesis.skew(), Some(10.0));
+    }
 }

@@ -3,7 +3,9 @@
 
 //! Model for font families.
 
-use super::{FontStyle, FontWeight, FontWidth, family_name::FamilyName, font::FontInfo};
+use super::{
+    FontStyle, FontStyleSynthesis, FontWeight, FontWidth, family_name::FamilyName, font::FontInfo,
+};
 use crate::AtomicCounter;
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
@@ -44,7 +46,7 @@ impl FamilyInfo {
             FontWidth::default(),
             FontStyle::default(),
             FontWeight::default(),
-            false,
+            FontStyleSynthesis::Forbidden,
         )
         .unwrap_or(0);
         Self(Arc::new(FamilyInner {
@@ -85,9 +87,9 @@ impl FamilyInfo {
         width: FontWidth,
         style: FontStyle,
         weight: FontWeight,
-        synthesize_style: bool,
+        style_synthesis: FontStyleSynthesis,
     ) -> Option<usize> {
-        super::matching::match_font(self.fonts(), width, style, weight, synthesize_style)
+        super::matching::match_font(self.fonts(), width, style, weight, style_synthesis)
     }
 
     /// Selects the best font from the family for the given attributes.
@@ -96,10 +98,10 @@ impl FamilyInfo {
         width: FontWidth,
         style: FontStyle,
         weight: FontWeight,
-        synthesize_style: bool,
+        style_synthesis: FontStyleSynthesis,
     ) -> Option<&FontInfo> {
         self.fonts()
-            .get(self.match_index(width, style, weight, synthesize_style)?)
+            .get(self.match_index(width, style, weight, style_synthesis)?)
     }
 }
 

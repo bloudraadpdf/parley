@@ -92,6 +92,20 @@ pub enum FontSynthesisStyle {
     ObliqueOnly,
 }
 
+impl FontSynthesisStyle {
+    pub(crate) const fn face_query_synthesis(
+        self,
+        requested_style: FontStyle,
+    ) -> fontique::FontStyleSynthesis {
+        match (self, requested_style) {
+            (Self::Auto, _) | (Self::ObliqueOnly, FontStyle::Oblique(_)) => {
+                fontique::FontStyleSynthesis::Allowed
+            }
+            (Self::None | Self::ObliqueOnly, _) => fontique::FontStyleSynthesis::Forbidden,
+        }
+    }
+}
+
 /// The height that this text takes up. The default is `MetricsRelative(1.0)`, which is the given
 /// font's preferred line height.
 #[derive(Debug, Clone, Copy, PartialEq)]
