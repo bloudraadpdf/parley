@@ -1021,12 +1021,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     #[inline]
     fn resolve_indent(&self) -> f32 {
         let should_indent = {
-            let is_scope_line = if self.layout.data.indent_options.each_line {
-                self.lines.lines.is_empty()
-                    || self.lines.lines.last().map(|l| l.break_reason)
-                        == Some(BreakReason::Explicit)
+            let is_scope_line = if self.lines.lines.is_empty() {
+                indent_start_is_scope_line(
+                    self.layout.data.indent_start,
+                    self.layout.data.indent_options.each_line,
+                )
             } else {
-                self.lines.lines.is_empty()
+                self.layout.data.indent_options.each_line
+                    && self.lines.lines.last().map(|line| line.break_reason)
+                        == Some(BreakReason::Explicit)
             };
             is_scope_line ^ self.layout.data.indent_options.hanging
         };
@@ -1338,6 +1341,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     }
 }
 
+#[inline]
+const fn indent_start_is_scope_line(start: crate::IndentStart, each_line: bool) -> bool {
+    match start {
+        crate::IndentStart::ElementStart => true,
+        crate::IndentStart::ContinuationAfterSoftWrap => false,
+        crate::IndentStart::ContinuationAfterExplicitBreak => each_line,
+    }
+}
+
 impl<B: Brush> Drop for BreakLines<'_, B> {
     fn drop(&mut self) {
         // Compute the overall width and height of the entire layout
@@ -1636,7 +1648,8 @@ fn reorder_line_items(runs: &mut [LineItemData]) {
 
 #[cfg(test)]
 mod tests {
-    use super::line_advance_fits;
+    use super::{indent_start_is_scope_line, line_advance_fits};
+    use crate::IndentStart;
 
     #[test]
     fn line_fit_absorbs_only_the_bound_of_float_accumulation_error() {
@@ -1648,5 +1661,25 @@ mod tests {
             !line_advance_fits(469.90, 469.8898, 115),
             "a genuine 0.01pt overflow remains a wrap",
         );
+    }
+
+    #[test]
+    fn continuation_indent_scope_depends_on_preceding_break_and_each_line() {
+        assert!(!indent_start_is_scope_line(
+            IndentStart::ContinuationAfterSoftWrap,
+            false,
+        ));
+        assert!(!indent_start_is_scope_line(
+            IndentStart::ContinuationAfterSoftWrap,
+            true,
+        ));
+        assert!(!indent_start_is_scope_line(
+            IndentStart::ContinuationAfterExplicitBreak,
+            false,
+        ));
+        assert!(indent_start_is_scope_line(
+            IndentStart::ContinuationAfterExplicitBreak,
+            true,
+        ));
     }
 }

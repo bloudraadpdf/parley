@@ -98,7 +98,8 @@ pub struct DiscretionaryBreak {
 }
 use crate::util::nearly_zero;
 use crate::{
-    FontData, FontMetricAdvanceQuantization, IndentOptions, LineHeight, OverflowWrap, TextWrapMode,
+    FontData, FontMetricAdvanceQuantization, IndentOptions, IndentStart, LineHeight, OverflowWrap,
+    TextWrapMode,
 };
 use core::num::NonZeroU16;
 use core::ops::Range;
@@ -456,6 +457,8 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) indent_amount: f32,
     /// Options controlling text-indent behavior (each-line, hanging).
     pub(crate) indent_options: IndentOptions,
+    /// Formatting-scope relationship of this layout's first line.
+    pub(crate) indent_start: IndentStart,
 }
 
 impl<B: Brush> Default for LayoutData<B> {
@@ -492,6 +495,7 @@ impl<B: Brush> Default for LayoutData<B> {
             per_line_alignment_widths: Vec::new(),
             indent_amount: 0.0,
             indent_options: IndentOptions::default(),
+            indent_start: IndentStart::default(),
         }
     }
 }
@@ -526,6 +530,7 @@ impl<B: Brush> LayoutData<B> {
         self.per_line_alignment_widths.clear();
         self.indent_amount = 0.0;
         self.indent_options = IndentOptions::default();
+        self.indent_start = IndentStart::default();
     }
 
     /// Push an inline box to the list of items.

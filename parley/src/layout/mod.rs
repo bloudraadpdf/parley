@@ -111,3 +111,22 @@ pub struct IndentOptions {
     /// instead of the first line(s). Corresponds to the CSS `hanging` keyword. Defaults to `false`.
     pub hanging: bool,
 }
+
+/// Relationship between the first line in this layout and its CSS
+/// `text-indent` formatting scope.
+///
+/// A layout of an element starts at [`Self::ElementStart`]. Fragmentation can
+/// instead re-layout a suffix whose preceding line ended in either a soft wrap
+/// or an explicit break. Keeping that predecessor state nominal lets the line
+/// breaker apply `each-line` and `hanging` without mistaking every fragment
+/// for the first formatted line of the element.
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
+pub enum IndentStart {
+    /// The layout starts with the element's first formatted line.
+    #[default]
+    ElementStart,
+    /// The layout resumes after a soft wrap break.
+    ContinuationAfterSoftWrap,
+    /// The layout resumes after an explicit line break.
+    ContinuationAfterExplicitBreak,
+}

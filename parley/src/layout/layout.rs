@@ -11,11 +11,11 @@ use crate::style::Brush;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
-use crate::IndentOptions;
 use crate::layout::{
     ContentWidths, Style, alignment::Alignment, alignment::AlignmentOptions, line::Line,
     line_break::BreakLines, run::Run,
 };
+use crate::{IndentOptions, IndentStart};
 
 /// Text layout.
 #[derive(Clone)]
@@ -207,8 +207,24 @@ impl<B: Brush> Layout<B> {
     /// This must be called before [`Layout::break_all_lines`] or [`Layout::break_lines`],
     /// and before [`Layout::align`].
     pub fn set_text_indent(&mut self, amount: f32, options: IndentOptions) {
+        self.set_text_indent_with_start(amount, options, IndentStart::ElementStart);
+    }
+
+    /// Sets text indentation for content whose first local line has a known
+    /// relationship to the element's formatting scope.
+    ///
+    /// This is the fragmentation-aware counterpart of [`Self::set_text_indent`].
+    /// `start` affects only the first local line; subsequent lines continue to
+    /// derive `each-line` behavior from their preceding break reason.
+    pub fn set_text_indent_with_start(
+        &mut self,
+        amount: f32,
+        options: IndentOptions,
+        start: IndentStart,
+    ) {
         self.data.indent_amount = amount;
         self.data.indent_options = options;
+        self.data.indent_start = start;
     }
 
     /// Returns line breaker to compute lines for the layout.

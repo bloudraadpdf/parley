@@ -5,7 +5,9 @@
 
 use crate::test_name;
 use crate::util::{ColorBrush, TestEnv};
-use parley::{Affinity, Alignment, AlignmentOptions, Cluster, Cursor, IndentOptions, Selection};
+use parley::{
+    Affinity, Alignment, AlignmentOptions, Cluster, Cursor, IndentOptions, IndentStart, Selection,
+};
 
 fn build_indented_layout(
     env: &mut TestEnv,
@@ -175,6 +177,60 @@ fn text_indent_hanging_each_line() {
     }
 
     env.check_layout_snapshot(&layout);
+}
+
+#[test]
+fn text_indent_continuation_start_obeys_preceding_break() {
+    let cases = [
+        (IndentStart::ContinuationAfterSoftWrap, false, false, false),
+        (
+            IndentStart::ContinuationAfterExplicitBreak,
+            false,
+            false,
+            false,
+        ),
+        (IndentStart::ContinuationAfterSoftWrap, true, false, false),
+        (
+            IndentStart::ContinuationAfterExplicitBreak,
+            true,
+            false,
+            true,
+        ),
+        (IndentStart::ContinuationAfterSoftWrap, false, true, true),
+        (
+            IndentStart::ContinuationAfterExplicitBreak,
+            false,
+            true,
+            true,
+        ),
+        (IndentStart::ContinuationAfterSoftWrap, true, true, true),
+        (
+            IndentStart::ContinuationAfterExplicitBreak,
+            true,
+            true,
+            false,
+        ),
+    ];
+
+    for (start, each_line, hanging, affected) in cases {
+        let mut env = TestEnv::new(test_name!(), None);
+        let text = "Continuation text that wraps onto at least one more line.";
+        let builder = env.ranged_builder(text);
+        let mut layout = builder.build(text);
+        layout.set_text_indent_with_start(40.0, IndentOptions { each_line, hanging }, start);
+        layout.break_all_lines(Some(180.0));
+        layout.align(None, Alignment::Start, AlignmentOptions::default());
+
+        assert_eq!(
+            layout
+                .get(0)
+                .expect("continuation has a first line")
+                .metrics()
+                .offset,
+            if affected { 40.0 } else { 0.0 },
+            "unexpected first-line indent for {start:?}, each_line={each_line}, hanging={hanging}",
+        );
+    }
 }
 
 #[test]
