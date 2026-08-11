@@ -209,7 +209,7 @@ pub fn build_rich_layout(
         index: 40,
         width: 50.0,
         height: 50.0,
-            glue: false,
+        break_affinity: parley::InlineBoxBreakAffinity::Independent,
     });
 
     let mut layout = builder.build(&config.text);

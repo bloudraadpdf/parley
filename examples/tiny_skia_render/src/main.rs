@@ -91,7 +91,7 @@ fn main() {
         index: 40,
         width: 50.0,
         height: 50.0,
-            glue: false,
+        break_affinity: parley::InlineBoxBreakAffinity::Independent,
     });
 
     // Build the builder into a Layout

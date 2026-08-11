@@ -1,6 +1,30 @@
 // Copyright 2024 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+/// The soft-wrap relationship between an inline box and its neighbours.
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+pub enum InlineBoxBreakAffinity {
+    /// Soft-wrap opportunities on both sides remain available.
+    #[default]
+    Independent,
+    /// The box stays with the preceding content.
+    ToPrevious,
+    /// The box stays with the following content.
+    ToNext,
+    /// The box stays with content on both sides.
+    Both,
+}
+
+impl InlineBoxBreakAffinity {
+    pub(crate) const fn allows_break_before(self) -> bool {
+        matches!(self, Self::Independent | Self::ToNext)
+    }
+
+    pub(crate) const fn allows_break_after(self) -> bool {
+        matches!(self, Self::Independent | Self::ToPrevious)
+    }
+}
+
 /// A box to be laid out inline with text
 #[derive(PartialEq, Debug, Clone)]
 pub struct InlineBox {
@@ -14,14 +38,8 @@ pub struct InlineBox {
     pub width: f32,
     /// The height of the box in pixels
     pub height: f32,
-    /// A glued box binds to the adjacent text with no soft-wrap
-    /// opportunity on either side, and contributes its width to the
-    /// surrounding unbreakable run in min-content measurement. Use for
-    /// inline border/padding shims (CSS forbids a break between an
-    /// inline's padding and its adjacent glyph). A regular replaced
-    /// box (`false`) keeps the wrap opportunities UAX #14 assigns
-    /// around objects.
-    pub glue: bool,
+    /// The soft-wrap relationship with adjacent content.
+    pub break_affinity: InlineBoxBreakAffinity,
 }
 
 impl InlineBox {
@@ -32,7 +50,7 @@ impl InlineBox {
             index,
             width,
             height,
-            glue: false,
+            break_affinity: InlineBoxBreakAffinity::Independent,
         }
     }
 }

@@ -424,7 +424,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     {
                         // println!("BOX FITS");
 
-                        let box_is_glued = inline_box.glue;
+                        let break_affinity = inline_box.break_affinity;
                         self.state.item_idx += 1;
 
                         self.state
@@ -435,7 +435,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // binds to the adjacent text and offers no
                         // opportunity (CSS forbids a break between an
                         // inline's padding and its adjacent glyph).
-                        if !box_is_glued {
+                        if break_affinity.allows_break_after() {
                             self.state
                                 .mark_line_break_opportunity(RegularBreakKind::Ordinary);
                         }
@@ -454,7 +454,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             );
                             self.state
                                 .mark_line_break_opportunity(RegularBreakKind::Ordinary);
-                        } else if inline_box.glue {
+                        } else if !inline_box.break_affinity.allows_break_before() {
                             // A glued box (inline border/padding shim) binds
                             // to the adjacent text: no break exists before
                             // it, so it overflows with its run exactly like

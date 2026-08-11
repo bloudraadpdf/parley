@@ -14,9 +14,9 @@ use alloc::{format, string::String, vec, vec::Vec};
 
 use super::test_builders::create_font_context;
 use crate::{
-    FontFamily, FontWeight, InlineBox, LayoutContext, LineBreakMode, LineBreakOverride,
-    NormalSoftWrapSelection, OverflowWrap, RangedBuilder, StyleProperty, WordBreak,
-    layout::DiscretionaryBreak,
+    FontFamily, FontWeight, InlineBox, InlineBoxBreakAffinity, LayoutContext, LineBreakMode,
+    LineBreakOverride, NormalSoftWrapSelection, OverflowWrap, RangedBuilder, StyleProperty,
+    WordBreak, layout::DiscretionaryBreak,
 };
 
 use super::utils::ColorBrush;
@@ -38,7 +38,7 @@ fn spaces_between_full_width_inline_boxes_hang_instead_of_wrapping() {
             index,
             width: 199.0,
             height: 8.0,
-            glue: false,
+            break_affinity: InlineBoxBreakAffinity::Independent,
         });
     }
     let mut layout = builder.build(text);
@@ -76,7 +76,7 @@ fn spaces_after_overwide_inline_boxes_hang_instead_of_forming_lines() {
             index,
             width: 201.0,
             height: 8.0,
-            glue: false,
+            break_affinity: InlineBoxBreakAffinity::Independent,
         });
     }
     let mut layout = builder.build(text);
@@ -116,7 +116,7 @@ fn reclaimed_trailing_space_keeps_the_following_box_on_the_line() {
             index: text.len(),
             width: 170.0,
             height: 8.0,
-            glue: false,
+            break_affinity: InlineBoxBreakAffinity::Independent,
         });
         builder.build(text)
     };
@@ -299,7 +299,7 @@ fn atomic_inline_box_ends_authored_dash_provenance() {
                 index: "alpha-".len(),
                 width: 1.0,
                 height: 8.0,
-                glue: true,
+                break_affinity: InlineBoxBreakAffinity::Both,
             });
         }),
         text,
@@ -645,20 +645,22 @@ fn glued_boxes_bind_to_text_in_measurement_and_breaking() {
     // "11" bracketed by an 8px and a 6.75px padding shim (the W8BEN
     // item-11 cell). The unit's min-content is the SUM of all three.
     let text = "11";
-    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext, glue: bool| {
+    let build = |lcx: &mut LayoutContext<ColorBrush>,
+                 fcx: &mut crate::FontContext,
+                 break_affinity: InlineBoxBreakAffinity| {
         let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
         builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
         builder.push_default(StyleProperty::FontSize(10.0));
         let mut leading = InlineBox::new(0, 0, 8.0, 0.0);
-        leading.glue = glue;
+        leading.break_affinity = break_affinity;
         let mut trailing = InlineBox::new(1, text.len(), 6.75, 0.0);
-        trailing.glue = glue;
+        trailing.break_affinity = break_affinity;
         builder.push_inline_box(leading);
         builder.push_inline_box(trailing);
         builder.build(text)
     };
 
-    let glued = build(&mut lcx, &mut fcx, true);
+    let glued = build(&mut lcx, &mut fcx, InlineBoxBreakAffinity::Both);
     let widths = glued.calculate_content_widths();
     let mut text_only_builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
     text_only_builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
@@ -674,7 +676,7 @@ fn glued_boxes_bind_to_text_in_measurement_and_breaking() {
 
     // Break at a width below the unit: the glued unit must stay on one
     // line (overflowing), never splitting between shim and glyphs.
-    let mut layout = build(&mut lcx, &mut fcx, true);
+    let mut layout = build(&mut lcx, &mut fcx, InlineBoxBreakAffinity::Both);
     layout.break_all_lines(Some(widths.min - 2.0));
     assert_eq!(
         layout.len(),
@@ -688,11 +690,72 @@ fn glued_boxes_bind_to_text_in_measurement_and_breaking() {
     );
 
     // The same shapes as REPLACED boxes keep their wrap opportunities.
-    let unglued_widths = build(&mut lcx, &mut fcx, false).calculate_content_widths();
+    let unglued_widths =
+        build(&mut lcx, &mut fcx, InlineBoxBreakAffinity::Independent).calculate_content_widths();
     assert!(
         unglued_widths.min < widths.min,
         "replaced boxes keep per-box wrap opportunities: {} vs glued {}",
         unglued_widths.min,
         widths.min,
     );
+}
+
+fn directional_affinity_layout(
+    index: usize,
+    break_affinity: InlineBoxBreakAffinity,
+) -> (Vec<String>, usize) {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "xx x xx";
+
+    let mut probe_builder = lcx.ranged_builder(&mut fcx, "x", 1.0, false);
+    probe_builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    probe_builder.push_default(StyleProperty::FontSize(10.0));
+    let mut probe = probe_builder.build("x");
+    probe.break_all_lines(None);
+    let owner_width = probe.lines().next().unwrap().metrics().advance;
+
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    let mut edge = InlineBox::new(31, index, owner_width * 2.5, 0.0);
+    edge.break_affinity = break_affinity;
+    builder.push_inline_box(edge);
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(owner_width * 3.5));
+
+    let lines = layout
+        .lines()
+        .map(|line| String::from(text[line.text_range()].trim()))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let edge_line = layout
+        .lines()
+        .enumerate()
+        .find_map(|(line_index, line)| {
+            line.items().find_map(|item| match item {
+                crate::PositionedLayoutItem::InlineBox(inline_box) if inline_box.id == 31 => {
+                    Some(line_index)
+                }
+                _ => None,
+            })
+        })
+        .expect("the directional edge must be positioned");
+    (lines, edge_line)
+}
+
+#[test]
+fn affinity_to_next_moves_a_leading_edge_with_its_text() {
+    let (lines, edge_line) = directional_affinity_layout(3, InlineBoxBreakAffinity::ToNext);
+
+    assert_eq!(lines, ["xx", "x", "xx"]);
+    assert_eq!(edge_line, 1);
+}
+
+#[test]
+fn affinity_to_previous_keeps_a_trailing_edge_with_its_text() {
+    let (lines, edge_line) = directional_affinity_layout(4, InlineBoxBreakAffinity::ToPrevious);
+
+    assert_eq!(lines, ["xx x", "xx"]);
+    assert_eq!(edge_line, 0);
 }
