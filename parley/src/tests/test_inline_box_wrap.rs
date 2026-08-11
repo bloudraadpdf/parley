@@ -759,3 +759,37 @@ fn affinity_to_previous_keeps_a_trailing_edge_with_its_text() {
     assert_eq!(lines, ["xx x", "xx"]);
     assert_eq!(edge_line, 0);
 }
+
+#[test]
+fn paired_edge_affinities_preserve_the_following_space_after_wrap() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "xx x xx";
+
+    let mut probe_builder = lcx.ranged_builder(&mut fcx, "x", 1.0, false);
+    probe_builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    probe_builder.push_default(StyleProperty::FontSize(10.0));
+    let mut probe = probe_builder.build("x");
+    probe.break_all_lines(None);
+    let owner_width = probe.lines().next().unwrap().metrics().advance;
+
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    let mut start = InlineBox::new(31, 3, owner_width * 2.5, 0.0);
+    start.break_affinity = InlineBoxBreakAffinity::ToNext;
+    let mut end = InlineBox::new(32, 4, 0.0, 0.0);
+    end.break_affinity = InlineBoxBreakAffinity::ToPrevious;
+    builder.push_inline_box(start);
+    builder.push_inline_box(end);
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(owner_width * 3.75));
+
+    assert_eq!(
+        layout
+            .lines()
+            .map(|line| String::from(&text[line.text_range()]))
+            .collect::<Vec<_>>(),
+        ["xx ", "x", " xx"],
+    );
+}

@@ -19,7 +19,7 @@ use crate::layout::{
 };
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
-use crate::{OverflowWrap, TextWrapMode, WordBreak};
+use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WordBreak};
 
 use core::ops::Range;
 
@@ -75,6 +75,7 @@ struct DiscretionaryAdvance(f32);
 #[derive(Clone)]
 enum RegularBreakCandidate {
     AuthoredDashPunctuation(BoundarySnapshot),
+    InlineBoxEdge(BoundarySnapshot),
     Ordinary(BoundarySnapshot),
     ConditionalMaterial(BoundarySnapshot),
     Unprioritized(BoundarySnapshot),
@@ -84,6 +85,7 @@ impl RegularBreakCandidate {
     fn into_snapshot(self) -> BoundarySnapshot {
         match self {
             Self::AuthoredDashPunctuation(snapshot)
+            | Self::InlineBoxEdge(snapshot)
             | Self::Ordinary(snapshot)
             | Self::ConditionalMaterial(snapshot)
             | Self::Unprioritized(snapshot) => snapshot,
@@ -94,6 +96,7 @@ impl RegularBreakCandidate {
 #[derive(Clone, Copy)]
 enum RegularBreakKind {
     AuthoredDashPunctuation,
+    InlineBoxEdge,
     Ordinary,
     ConditionalMaterial(DiscretionaryAdvance),
     Unprioritized,
@@ -183,12 +186,25 @@ impl BreakerState {
             RegularBreakKind::AuthoredDashPunctuation => {
                 RegularBreakCandidate::AuthoredDashPunctuation(snapshot)
             }
+            RegularBreakKind::InlineBoxEdge => RegularBreakCandidate::InlineBoxEdge(snapshot),
             RegularBreakKind::Ordinary => RegularBreakCandidate::Ordinary(snapshot),
             RegularBreakKind::ConditionalMaterial(_) => {
                 RegularBreakCandidate::ConditionalMaterial(snapshot)
             }
             RegularBreakKind::Unprioritized => RegularBreakCandidate::Unprioritized(snapshot),
         });
+    }
+
+    fn mark_inline_box_break_after(&mut self, affinity: InlineBoxBreakAffinity) {
+        match affinity {
+            InlineBoxBreakAffinity::Independent => {
+                self.mark_line_break_opportunity(RegularBreakKind::Ordinary);
+            }
+            InlineBoxBreakAffinity::ToPrevious => {
+                self.mark_line_break_opportunity(RegularBreakKind::InlineBoxEdge);
+            }
+            InlineBoxBreakAffinity::ToNext | InlineBoxBreakAffinity::Both => {}
+        }
     }
 
     /// Store the current iteration state so that we can revert to it if we later want to take
@@ -410,6 +426,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             match item.kind {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
+                    let break_affinity = inline_box.break_affinity;
 
                     // Compute the x position of the content being currently processed
                     let next_x = self.state.line.x + inline_box.width;
@@ -424,7 +441,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     {
                         // println!("BOX FITS");
 
-                        let break_affinity = inline_box.break_affinity;
                         self.state.item_idx += 1;
 
                         self.state
@@ -435,10 +451,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // binds to the adjacent text and offers no
                         // opportunity (CSS forbids a break between an
                         // inline's padding and its adjacent glyph).
-                        if break_affinity.allows_break_after() {
-                            self.state
-                                .mark_line_break_opportunity(RegularBreakKind::Ordinary);
-                        }
+                        self.state.mark_inline_box_break_after(break_affinity);
                     } else {
                         // If we're at the start of the line, this box will
                         // never fit, so consume it and accept the overflow.
@@ -452,9 +465,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 next_fit_x,
                                 inline_box.height,
                             );
-                            self.state
-                                .mark_line_break_opportunity(RegularBreakKind::Ordinary);
-                        } else if !inline_box.break_affinity.allows_break_before() {
+                            self.state.mark_inline_box_break_after(break_affinity);
+                        } else if !break_affinity.allows_break_before() {
                             // A glued box (inline border/padding shim) binds
                             // to the adjacent text: no break exists before
                             // it, so it overflows with its run exactly like
@@ -463,6 +475,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.item_idx += 1;
                             self.state
                                 .append_inline_box_to_line(next_x, next_fit_x, box_height);
+                            self.state.mark_inline_box_break_after(break_affinity);
                         } else if let Some(reclaimed_x) = {
                             let (box_width, box_height) = (inline_box.width, inline_box.height);
                             self.reclaim_trailing_space_for_box(box_width, max_advance)
@@ -485,8 +498,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.item_idx += 1;
                             self.state
                                 .append_inline_box_to_line(next_x, next_fit_x, box_height);
-                            self.state
-                                .mark_line_break_opportunity(RegularBreakKind::Ordinary);
+                            self.state.mark_inline_box_break_after(break_affinity);
                         } else {
                             // println!("BOX BREAK");
                             if try_commit_line!(BreakReason::Regular) {
@@ -704,6 +716,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                         NormalSoftWrapSelection::PriorityClasses,
                                         Some(RegularBreakCandidate::AuthoredDashPunctuation(prev)),
                                     ) => {
+                                        self.state.line = prev.state;
+                                        if try_commit_line!(BreakReason::Regular) {
+                                            self.state.item_idx = prev.item_idx;
+                                            self.state.run_idx = prev.run_idx;
+                                            self.state.cluster_idx = prev.cluster_idx;
+                                            return self.start_new_line();
+                                        }
+                                    }
+                                    (_, Some(RegularBreakCandidate::InlineBoxEdge(prev))) => {
                                         self.state.line = prev.state;
                                         if try_commit_line!(BreakReason::Regular) {
                                             self.state.item_idx = prev.item_idx;
