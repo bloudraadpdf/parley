@@ -204,13 +204,7 @@ pub fn build_rich_layout(
     builder.push(StyleProperty::Underline(true), underline_range);
     builder.push(StyleProperty::Strikethrough(true), strikethrough_range);
     builder.push(FontFamily::named("Noto Color Emoji"), party_emoji_range);
-    builder.push_inline_box(InlineBox {
-        id: 0,
-        index: 40,
-        width: 50.0,
-        height: 50.0,
-        break_affinity: parley::InlineBoxBreakAffinity::Independent,
-    });
+    builder.push_inline_box(InlineBox::new(0, 40, 50.0, 50.0));
 
     let mut layout = builder.build(&config.text);
     layout.break_all_lines(config.max_advance);

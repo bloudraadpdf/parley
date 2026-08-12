@@ -86,13 +86,7 @@ fn main() {
     builder.push(StyleProperty::Underline(true), 141..150);
     builder.push(StyleProperty::Strikethrough(true), 155..168);
 
-    builder.push_inline_box(InlineBox {
-        id: 0,
-        index: 40,
-        width: 50.0,
-        height: 50.0,
-        break_affinity: parley::InlineBoxBreakAffinity::Independent,
-    });
+    builder.push_inline_box(InlineBox::new(0, 40, 50.0, 50.0));
 
     // Build the builder into a Layout
     let mut layout: Layout<ColorBrush> = builder.build(&text);

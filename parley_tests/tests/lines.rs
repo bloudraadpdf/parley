@@ -106,18 +106,8 @@ fn build_layout<A: Into<Option<f32>>>(
     let pos_s = TEXT.find("strikethrough").unwrap();
     builder.push(strikethrough_style, pos_s..pos_s + "strikethrough".len());
 
-    builder.push_inline_box(InlineBox {
-        id: 0,
-        index: 40,
-        width: 50.0,
-        height: 5.0,
-    });
-    builder.push_inline_box(InlineBox {
-        id: 1,
-        index: 51,
-        width: 50.0,
-        height: 3.0,
-    });
+    builder.push_inline_box(InlineBox::new(0, 40, 50.0, 5.0));
+    builder.push_inline_box(InlineBox::new(1, 51, 50.0, 3.0));
 
     let mut layout = builder.build(TEXT);
     layout.break_all_lines(max_advance.into());

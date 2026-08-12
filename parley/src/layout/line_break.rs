@@ -426,11 +426,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             match item.kind {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
-                    let break_affinity = inline_box.break_affinity;
+                    let Some(break_affinity) = inline_box.break_affinity() else {
+                        self.state.item_idx += 1;
+                        self.state.append_inline_box_to_line(
+                            self.state.line.x,
+                            self.state.line.fit_x,
+                            0.0,
+                        );
+                        continue;
+                    };
+                    let width = inline_box.width();
+                    let height = inline_box.height();
 
                     // Compute the x position of the content being currently processed
-                    let next_x = self.state.line.x + inline_box.width;
-                    let next_fit_x = self.state.line.fit_x + inline_box.width;
+                    let next_x = self.state.line.x + width;
+                    let next_fit_x = self.state.line.fit_x + width;
 
                     // println!("BOX next_x: {}", next_x);
 
@@ -444,7 +454,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         self.state.item_idx += 1;
 
                         self.state
-                            .append_inline_box_to_line(next_x, next_fit_x, inline_box.height);
+                            .append_inline_box_to_line(next_x, next_fit_x, height);
 
                         // We can always line break after a REPLACED inline
                         // box; a glued box (inline border/padding shim)
@@ -460,24 +470,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // to hang before the next break opportunity is used.
                         if self.state.line.fit_x == 0.0 {
                             self.state.item_idx += 1;
-                            self.state.append_inline_box_to_line(
-                                next_x,
-                                next_fit_x,
-                                inline_box.height,
-                            );
+                            self.state
+                                .append_inline_box_to_line(next_x, next_fit_x, height);
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if !break_affinity.allows_break_before() {
                             // A glued box (inline border/padding shim) binds
                             // to the adjacent text: no break exists before
                             // it, so it overflows with its run exactly like
                             // the tail of an unbreakable word.
-                            let (next_x, box_height) = (next_x, inline_box.height);
+                            let (next_x, box_height) = (next_x, height);
                             self.state.item_idx += 1;
                             self.state
                                 .append_inline_box_to_line(next_x, next_fit_x, box_height);
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if let Some(reclaimed_x) = {
-                            let (box_width, box_height) = (inline_box.width, inline_box.height);
+                            let (box_width, box_height) = (width, height);
                             self.reclaim_trailing_space_for_box(box_width, max_advance)
                                 .map(|_| {
                                     (
@@ -864,6 +871,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
 
+                    if inline_box.is_transparent_anchor() {
+                        self.state.item_idx += 1;
+                        self.state.append_inline_box_to_line(
+                            self.state.line.x,
+                            self.state.line.fit_x,
+                            0.0,
+                        );
+                        continue;
+                    }
+
                     // Check if adding this box would exceed the limit
                     if char_count >= max_chars && max_chars != 0 {
                         // Break before this box
@@ -874,12 +891,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     }
 
                     // Compute the x position for the line width tracking
-                    let next_x = self.state.line.x + inline_box.width;
-                    let next_fit_x = self.state.line.fit_x + inline_box.width;
+                    let next_x = self.state.line.x + inline_box.width();
+                    let next_fit_x = self.state.line.fit_x + inline_box.width();
                     self.state.item_idx += 1;
                     self.state
-                        .append_inline_box_to_line(next_x, next_fit_x, inline_box.height);
-                    char_count += 1;
+                        .append_inline_box_to_line(next_x, next_fit_x, inline_box.height());
+                    char_count += u32::from(inline_box.break_affinity().is_some());
 
                     // Check if we've reached the limit after adding this box
                     if char_count >= max_chars {
@@ -1089,7 +1106,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             for line_item in &self.lines.line_items[line.item_range.clone()] {
                 match line_item.kind {
                     LayoutItemKind::InlineBox => {
-                        line_x += self.layout.data.inline_boxes[line_item.index].width;
+                        line_x += self.layout.data.inline_boxes[line_item.index].width();
                     }
                     LayoutItemKind::TextRun => {
                         let run = &self.layout.data.runs[line_item.index];
@@ -1158,8 +1175,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Default vertical alignment is to align the bottom of boxes with the text baseline.
                     // This is equivalent to the entire height of the box being "ascent"
-                    line.metrics.ascent = line.metrics.ascent.max(item.height);
-                    max_above = max_above.max(item.height);
+                    line.metrics.ascent = line.metrics.ascent.max(item.height());
+                    max_above = max_above.max(item.height());
                     have_extents = true;
 
                     // Mark us as having seen non-whitespace content on this line
@@ -1497,7 +1514,7 @@ fn try_commit_line<B: Brush>(
                     kind: LayoutItemKind::InlineBox,
                     index: item.index,
                     bidi_level: item.bidi_level,
-                    advance: inline_box.width,
+                    advance: inline_box.width(),
 
                     // These properties are ignored for inline boxes. So we just put a dummy value.
                     is_whitespace: false,

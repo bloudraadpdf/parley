@@ -886,15 +886,19 @@ impl<B: Brush> LayoutData<B> {
                 }
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
-                    running_max_width += ibox.width;
+                    let Some(break_affinity) = ibox.break_affinity() else {
+                        continue;
+                    };
+                    let width = ibox.width();
+                    running_max_width += width;
                     let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
-                    if can_wrap && ibox.break_affinity.allows_break_before() {
+                    if can_wrap && break_affinity.allows_break_before() {
                         let trailing_whitespace = whitespace_advance(prev_cluster);
                         min_width = min_width.max(running_min_width - trailing_whitespace);
                         running_min_width = 0.0;
                     }
-                    running_min_width += ibox.width;
-                    if can_wrap && ibox.break_affinity.allows_break_after() {
+                    running_min_width += width;
+                    if can_wrap && break_affinity.allows_break_after() {
                         min_width = min_width.max(running_min_width);
                         running_min_width = 0.0;
                     }

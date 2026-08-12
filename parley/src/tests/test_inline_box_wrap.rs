@@ -21,6 +21,76 @@ use crate::{
 
 use super::utils::ColorBrush;
 
+fn build_transparent_anchor_layout(
+    lcx: &mut LayoutContext<ColorBrush>,
+    fcx: &mut crate::FontContext,
+    text: &str,
+    inline_box: InlineBox,
+) -> crate::Layout<ColorBrush> {
+    let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_inline_box(inline_box);
+    builder.build(text)
+}
+
+#[test]
+fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "XXXXXX";
+
+    let mut text_only_builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    text_only_builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    text_only_builder.push_default(StyleProperty::FontSize(10.0));
+    let text_only = text_only_builder.build(text);
+    let text_widths = text_only.calculate_content_widths();
+
+    let mut transparent = build_transparent_anchor_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        InlineBox::transparent_anchor(73, 3),
+    );
+    let transparent_widths = transparent.calculate_content_widths();
+    assert!((transparent_widths.min - text_widths.min).abs() < 0.01);
+    assert!((transparent_widths.max - text_widths.max).abs() < 0.01);
+    transparent.break_all_lines(Some(text_widths.max - 1.0));
+
+    assert_eq!(transparent.len(), 1);
+    assert_eq!(
+        transparent
+            .lines()
+            .flat_map(|line| line.items())
+            .filter(|item| matches!(item, crate::PositionedLayoutItem::InlineBox(_)))
+            .count(),
+        1,
+    );
+
+    let mut atomic =
+        build_transparent_anchor_layout(&mut lcx, &mut fcx, text, InlineBox::new(74, 3, 0.0, 0.0));
+    assert!(atomic.calculate_content_widths().min < text_widths.min);
+    atomic.break_all_lines(Some(text_widths.max - 1.0));
+    assert_eq!(atomic.len(), 2);
+}
+
+#[test]
+fn transparent_anchor_preserves_a_mandatory_break() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "XXX\nXXX";
+    let mut layout = build_transparent_anchor_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        InlineBox::transparent_anchor(75, 3),
+    );
+
+    layout.break_all_lines(None);
+
+    assert_eq!(layout.len(), 2);
+}
+
 #[test]
 fn spaces_between_full_width_inline_boxes_hang_instead_of_wrapping() {
     let mut fcx = create_font_context();
@@ -33,13 +103,7 @@ fn spaces_between_full_width_inline_boxes_hang_instead_of_wrapping() {
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(10.0));
     for (id, index) in [(0_u64, 0_usize), (1, 1), (2, 2)] {
-        builder.push_inline_box(InlineBox {
-            id,
-            index,
-            width: 199.0,
-            height: 8.0,
-            break_affinity: InlineBoxBreakAffinity::Independent,
-        });
+        builder.push_inline_box(InlineBox::new(id, index, 199.0, 8.0));
     }
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(200.0));
@@ -71,13 +135,7 @@ fn spaces_after_overwide_inline_boxes_hang_instead_of_forming_lines() {
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(10.0));
     for (id, index) in [(0_u64, 0_usize), (1, 1), (2, 2)] {
-        builder.push_inline_box(InlineBox {
-            id,
-            index,
-            width: 201.0,
-            height: 8.0,
-            break_affinity: InlineBoxBreakAffinity::Independent,
-        });
+        builder.push_inline_box(InlineBox::new(id, index, 201.0, 8.0));
     }
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(200.0));
@@ -111,13 +169,7 @@ fn reclaimed_trailing_space_keeps_the_following_box_on_the_line() {
         let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
         builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
         builder.push_default(StyleProperty::FontSize(10.0));
-        builder.push_inline_box(InlineBox {
-            id: 0,
-            index: text.len(),
-            width: 170.0,
-            height: 8.0,
-            break_affinity: InlineBoxBreakAffinity::Independent,
-        });
+        builder.push_inline_box(InlineBox::new(0, text.len(), 170.0, 8.0));
         builder.build(text)
     };
 
@@ -294,13 +346,13 @@ fn atomic_inline_box_ends_authored_dash_provenance() {
     let text = "alpha-beta ";
     assert_eq!(
         first_line_with_overflowing_trailing_space(text, |builder| {
-            builder.push_inline_box(InlineBox {
-                id: 41,
-                index: "alpha-".len(),
-                width: 1.0,
-                height: 8.0,
-                break_affinity: InlineBoxBreakAffinity::Both,
-            });
+            builder.push_inline_box(InlineBox::atomic_with_break_affinity(
+                41,
+                "alpha-".len(),
+                1.0,
+                8.0,
+                InlineBoxBreakAffinity::Both,
+            ));
         }),
         text,
         "an atomic inline between the dash and boundary must make that candidate ordinary"
@@ -651,10 +703,9 @@ fn glued_boxes_bind_to_text_in_measurement_and_breaking() {
         let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
         builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
         builder.push_default(StyleProperty::FontSize(10.0));
-        let mut leading = InlineBox::new(0, 0, 8.0, 0.0);
-        leading.break_affinity = break_affinity;
-        let mut trailing = InlineBox::new(1, text.len(), 6.75, 0.0);
-        trailing.break_affinity = break_affinity;
+        let leading = InlineBox::atomic_with_break_affinity(0, 0, 8.0, 0.0, break_affinity);
+        let trailing =
+            InlineBox::atomic_with_break_affinity(1, text.len(), 6.75, 0.0, break_affinity);
         builder.push_inline_box(leading);
         builder.push_inline_box(trailing);
         builder.build(text)
@@ -718,8 +769,8 @@ fn directional_affinity_layout(
     let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(10.0));
-    let mut edge = InlineBox::new(31, index, owner_width * 2.5, 0.0);
-    edge.break_affinity = break_affinity;
+    let edge =
+        InlineBox::atomic_with_break_affinity(31, index, owner_width * 2.5, 0.0, break_affinity);
     builder.push_inline_box(edge);
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(owner_width * 3.5));
@@ -776,10 +827,15 @@ fn paired_edge_affinities_preserve_the_following_space_after_wrap() {
     let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(10.0));
-    let mut start = InlineBox::new(31, 3, owner_width * 2.5, 0.0);
-    start.break_affinity = InlineBoxBreakAffinity::ToNext;
-    let mut end = InlineBox::new(32, 4, 0.0, 0.0);
-    end.break_affinity = InlineBoxBreakAffinity::ToPrevious;
+    let start = InlineBox::atomic_with_break_affinity(
+        31,
+        3,
+        owner_width * 2.5,
+        0.0,
+        InlineBoxBreakAffinity::ToNext,
+    );
+    let end =
+        InlineBox::atomic_with_break_affinity(32, 4, 0.0, 0.0, InlineBoxBreakAffinity::ToPrevious);
     builder.push_inline_box(start);
     builder.push_inline_box(end);
     let mut layout = builder.build(text);

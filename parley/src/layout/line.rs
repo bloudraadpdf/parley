@@ -269,12 +269,12 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
 
                     self.item_index += 1;
                     self.glyph_start = 0;
-                    self.offset += inline_box.width;
+                    self.offset += inline_box.width();
                     return Some(PositionedLayoutItem::InlineBox(PositionedInlineBox {
                         x,
-                        y: self.line.data.metrics.baseline - inline_box.height,
-                        width: inline_box.width,
-                        height: inline_box.height,
+                        y: self.line.data.metrics.baseline - inline_box.height(),
+                        width: inline_box.width(),
+                        height: inline_box.height(),
                         id: inline_box.id,
                     }));
                 }

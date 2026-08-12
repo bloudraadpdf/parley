@@ -64,12 +64,7 @@ fn placing_inboxes() {
     ] {
         let text = "Hello world!\nLine 2\nLine 4";
         let mut builder = env.ranged_builder(text);
-        builder.push_inline_box(InlineBox {
-            id: 0,
-            index: position,
-            width: 10.0,
-            height: 10.0,
-        });
+        builder.push_inline_box(InlineBox::new(0, position, 10.0, 10.0));
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
         layout.align(None, Alignment::Start, AlignmentOptions::default());
@@ -84,12 +79,7 @@ fn only_inboxes_wrap() {
     let text = "";
     let mut builder = env.ranged_builder(text);
     for id in 0..10 {
-        builder.push_inline_box(InlineBox {
-            id,
-            index: 0,
-            width: 10.0,
-            height: 10.0,
-        });
+        builder.push_inline_box(InlineBox::new(id, 0, 10.0, 10.0));
     }
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(40.0));
@@ -105,24 +95,9 @@ fn full_width_inbox() {
     for (width, test_case_name) in [(99., "smaller"), (100., "exact"), (101., "larger")] {
         let text = "ABC";
         let mut builder = env.ranged_builder(text);
-        builder.push_inline_box(InlineBox {
-            id: 0,
-            index: 1,
-            width: 10.,
-            height: 10.0,
-        });
-        builder.push_inline_box(InlineBox {
-            id: 1,
-            index: 1,
-            width,
-            height: 10.0,
-        });
-        builder.push_inline_box(InlineBox {
-            id: 2,
-            index: 2,
-            width,
-            height: 10.0,
-        });
+        builder.push_inline_box(InlineBox::new(0, 1, 10.0, 10.0));
+        builder.push_inline_box(InlineBox::new(1, 1, width, 10.0));
+        builder.push_inline_box(InlineBox::new(2, 2, width, 10.0));
         let mut layout = builder.build(text);
         layout.break_all_lines(Some(100.));
         layout.align(None, Alignment::Start, AlignmentOptions::default());
@@ -135,33 +110,13 @@ fn inbox_separated_by_whitespace() {
     let mut env = TestEnv::new(test_name!(), None);
 
     let mut builder = env.tree_builder();
-    builder.push_inline_box(InlineBox {
-        id: 0,
-        index: 0,
-        width: 10.,
-        height: 10.0,
-    });
+    builder.push_inline_box(InlineBox::new(0, 0, 10.0, 10.0));
     builder.push_text(" ");
-    builder.push_inline_box(InlineBox {
-        id: 1,
-        index: 1,
-        width: 10.0,
-        height: 10.0,
-    });
+    builder.push_inline_box(InlineBox::new(1, 1, 10.0, 10.0));
     builder.push_text(" ");
-    builder.push_inline_box(InlineBox {
-        id: 2,
-        index: 2,
-        width: 10.0,
-        height: 10.0,
-    });
+    builder.push_inline_box(InlineBox::new(2, 2, 10.0, 10.0));
     builder.push_text(" ");
-    builder.push_inline_box(InlineBox {
-        id: 3,
-        index: 3,
-        width: 10.0,
-        height: 10.0,
-    });
+    builder.push_inline_box(InlineBox::new(3, 3, 10.0, 10.0));
     let (mut layout, _text) = builder.build();
     layout.break_all_lines(Some(100.));
     layout.align(None, Alignment::Start, AlignmentOptions::default());
@@ -437,12 +392,7 @@ fn inbox_content_width() {
     {
         let text = "Hello world!";
         let mut builder = env.ranged_builder(text);
-        builder.push_inline_box(InlineBox {
-            id: 0,
-            index: 3,
-            width: 100.0,
-            height: 10.0,
-        });
+        builder.push_inline_box(InlineBox::new(0, 3, 100.0, 10.0));
         let mut layout = builder.build(text);
         let ContentWidths {
             min: min_content_width,
@@ -457,12 +407,7 @@ fn inbox_content_width() {
     {
         let text = "A ";
         let mut builder = env.ranged_builder(text);
-        builder.push_inline_box(InlineBox {
-            id: 0,
-            index: 2,
-            width: 10.0,
-            height: 10.0,
-        });
+        builder.push_inline_box(InlineBox::new(0, 2, 10.0, 10.0));
         let mut layout = builder.build(text);
         let ContentWidths {
             max: max_content_width,

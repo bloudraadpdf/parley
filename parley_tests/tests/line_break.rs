@@ -93,12 +93,7 @@ fn break_by_length_with_inline_box() {
     // "A[box]BC" where box counts as 1 cluster
     let text = "ABC";
     let mut builder = env.ranged_builder(text);
-    builder.push_inline_box(InlineBox {
-        id: 0,
-        index: 1, // After 'A'
-        width: 10.0,
-        height: 10.0,
-    });
+    builder.push_inline_box(InlineBox::new(0, 1, 10.0, 10.0)); // After 'A'
     let mut layout = builder.build(text);
 
     // Break at 2 clusters: "A[box]" on first line, "BC" on second
@@ -119,12 +114,7 @@ fn break_by_length_multiple_inline_boxes() {
     let text = "ABC";
     let mut builder = env.ranged_builder(text);
     for id in 0..3 {
-        builder.push_inline_box(InlineBox {
-            id,
-            index: 0, // All at the start
-            width: 10.0,
-            height: 10.0,
-        });
+        builder.push_inline_box(InlineBox::new(id, 0, 10.0, 10.0)); // All at the start
     }
     let mut layout = builder.build(text);
 

@@ -575,7 +575,7 @@ impl Selection {
                             }
                         }
                         LineItem::InlineBox(inline_box) => {
-                            box_advance += inline_box.width as f64;
+                            box_advance += inline_box.width() as f64;
                             // HACK: Don't display selections for inline boxes
                             // if they're the first thing in the line. This
                             // makes the selection match the cursor position.
