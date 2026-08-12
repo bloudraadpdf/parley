@@ -83,12 +83,25 @@ fn transparent_anchor_preserves_a_mandatory_break() {
         &mut lcx,
         &mut fcx,
         text,
-        InlineBox::transparent_anchor(75, 3),
+        InlineBox::transparent_anchor(75, 4),
     );
 
     layout.break_all_lines(None);
 
     assert_eq!(layout.len(), 2);
+    let anchor_line = layout
+        .lines()
+        .enumerate()
+        .find_map(|(line_index, line)| {
+            line.items().find_map(|item| match item {
+                crate::PositionedLayoutItem::InlineBox(inline_box) if inline_box.id == 75 => {
+                    Some(line_index)
+                }
+                _ => None,
+            })
+        })
+        .expect("the transparent anchor must remain positioned");
+    assert_eq!(anchor_line, 1);
 }
 
 #[test]
