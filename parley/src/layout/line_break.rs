@@ -1171,6 +1171,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 LayoutItemKind::InlineBox => {
                     let item = &self.layout.data.inline_boxes[line_item.index];
 
+                    if line_item.bidi_level != 0 {
+                        needs_reorder = true;
+                    }
+
                     // Advance is already computed in "commit line" for items
 
                     // Default vertical alignment is to align the bottom of boxes with the text baseline.
