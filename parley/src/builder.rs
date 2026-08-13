@@ -314,6 +314,7 @@ fn build_into_layout<B: Brush>(
             &lcx.inline_boxes,
             &lcx.info,
             lcx.bidi.levels(),
+            &lcx.bidi,
             &mut lcx.scx,
             text,
             layout,

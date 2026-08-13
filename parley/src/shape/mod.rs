@@ -68,6 +68,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
     inline_boxes: &[InlineBox],
     infos: &[(CharInfo, u16)],
     levels: &[u8],
+    bidi: &crate::bidi::BidiResolver,
     scx: &mut ShapeContext,
     mut text: &str,
     layout: &mut Layout<B>,
@@ -81,11 +82,11 @@ pub(crate) fn shape_text<'a, B: Brush>(
     // Do nothing if there is no text or styles (there should always be a default style)
     if text.is_empty() || styles.is_empty() {
         // Process any remaining inline boxes whose index is greater than the length of the text
-        for box_idx in 0..inline_boxes.len() {
+        for (box_idx, inline_box) in inline_boxes.iter().enumerate() {
             // Push the box to the list of items
             layout
                 .data
-                .push_inline_box(box_idx, levels.first().copied().unwrap_or(0));
+                .push_inline_box(box_idx, bidi.level_at_boundary(inline_box.index));
         }
         return;
     }
@@ -205,7 +206,9 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
         if let Some(deferred_boxes) = deferred_boxes {
             for box_idx in deferred_boxes {
-                layout.data.push_inline_box(box_idx, item.level);
+                layout
+                    .data
+                    .push_inline_box(box_idx, bidi.level_at_boundary(inline_boxes[box_idx].index));
             }
         }
 
@@ -231,10 +234,14 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
     // Process any remaining inline boxes whose index is greater than the length of the text
     if let Some((box_idx, _inline_box)) = current_box {
-        layout.data.push_inline_box(box_idx, item.level);
+        layout
+            .data
+            .push_inline_box(box_idx, bidi.level_at_boundary(inline_boxes[box_idx].index));
     }
     for (box_idx, _inline_box) in inline_box_iter {
-        layout.data.push_inline_box(box_idx, item.level);
+        layout
+            .data
+            .push_inline_box(box_idx, bidi.level_at_boundary(inline_boxes[box_idx].index));
     }
 }
 

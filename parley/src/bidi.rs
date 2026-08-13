@@ -50,6 +50,17 @@ impl BidiResolver {
         &self.levels
     }
 
+    pub(crate) fn level_at_boundary(&self, boundary: usize) -> BidiLevel {
+        if self.levels.is_empty() {
+            return self.base_level;
+        }
+        if boundary < self.levels.len() {
+            self.levels[boundary]
+        } else {
+            self.levels.last().copied().unwrap_or(self.base_level)
+        }
+    }
+
     /// Clears the resolver state.
     pub(crate) fn clear(&mut self) {
         self.initial_types.clear();
