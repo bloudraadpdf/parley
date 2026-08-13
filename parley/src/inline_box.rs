@@ -38,6 +38,13 @@ enum InlineBoxParticipation {
     TransparentAnchor,
 }
 
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub(crate) enum InlineBoxBidiAttachment {
+    Independent,
+    ToPrevious,
+    ToNext,
+}
+
 impl InlineBoxParticipation {
     pub(crate) const fn width(self) -> f32 {
         match self {
@@ -72,6 +79,7 @@ pub struct InlineBox {
     pub index: usize,
     /// The box's closed layout participation.
     participation: InlineBoxParticipation,
+    bidi_attachment: InlineBoxBidiAttachment,
 }
 
 impl InlineBox {
@@ -85,6 +93,7 @@ impl InlineBox {
                 height,
                 break_affinity: InlineBoxBreakAffinity::Independent,
             },
+            bidi_attachment: InlineBoxBidiAttachment::Independent,
         }
     }
 
@@ -94,6 +103,7 @@ impl InlineBox {
             id,
             index,
             participation: InlineBoxParticipation::TransparentAnchor,
+            bidi_attachment: InlineBoxBidiAttachment::Independent,
         }
     }
 
@@ -113,6 +123,47 @@ impl InlineBox {
                 height,
                 break_affinity,
             },
+            bidi_attachment: InlineBoxBidiAttachment::Independent,
+        }
+    }
+
+    /// A logical inline-start edge which reorders with the following content.
+    pub fn inline_start_edge(
+        id: u64,
+        index: usize,
+        width: f32,
+        height: f32,
+        break_affinity: InlineBoxBreakAffinity,
+    ) -> Self {
+        Self {
+            id,
+            index,
+            participation: InlineBoxParticipation::Atomic {
+                width,
+                height,
+                break_affinity,
+            },
+            bidi_attachment: InlineBoxBidiAttachment::ToNext,
+        }
+    }
+
+    /// A logical inline-end edge which reorders with the preceding content.
+    pub fn inline_end_edge(
+        id: u64,
+        index: usize,
+        width: f32,
+        height: f32,
+        break_affinity: InlineBoxBreakAffinity,
+    ) -> Self {
+        Self {
+            id,
+            index,
+            participation: InlineBoxParticipation::Atomic {
+                width,
+                height,
+                break_affinity,
+            },
+            bidi_attachment: InlineBoxBidiAttachment::ToPrevious,
         }
     }
 
@@ -128,6 +179,10 @@ impl InlineBox {
 
     pub(crate) const fn break_affinity(&self) -> Option<InlineBoxBreakAffinity> {
         self.participation.break_affinity()
+    }
+
+    pub(crate) const fn bidi_attachment(&self) -> InlineBoxBidiAttachment {
+        self.bidi_attachment
     }
 
     pub(crate) const fn is_transparent_anchor(&self) -> bool {

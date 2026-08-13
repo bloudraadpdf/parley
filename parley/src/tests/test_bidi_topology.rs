@@ -162,19 +162,32 @@ fn trailing_edge_box_before_pdf_stays_in_the_override_sequence() {
 
 #[test]
 fn trailing_edge_box_is_positioned_after_the_reordered_override_text() {
+    const OWNER: core::ops::Range<usize> = 13..22;
     let mut layout = build_layout(
         " AAABBBCCC\u{202e}IIIHHHGGGFFFEEEDDD\u{202c}JJJKKKLLL",
-        [InlineBox::new(49, 20, 19.0, 0.0)],
+        [InlineBox::inline_end_edge(
+            49,
+            OWNER.end,
+            19.0,
+            0.0,
+            crate::InlineBoxBreakAffinity::ToPrevious,
+        )],
     );
     layout.break_all_lines(None);
-    let mut box_x = None;
-    for item in layout.lines().flat_map(|line| line.items()) {
-        match item {
-            PositionedLayoutItem::InlineBox(inline_box) if inline_box.id == 49 => {
-                box_x = Some(inline_box.x);
-            }
-            _ => {}
-        }
-    }
-    assert_eq!(box_x, Some(127.177_734));
+    let items = layout.lines().flat_map(|line| line.items()).collect::<Vec<_>>();
+    let owner_index = items
+        .iter()
+        .position(|item| {
+            matches!(
+                item,
+                PositionedLayoutItem::GlyphRun(run) if run.run().text_range() == OWNER
+            )
+        })
+        .expect("the overridden owner text must remain positioned");
+    let edge_index = items
+        .iter()
+        .position(|item| matches!(item, PositionedLayoutItem::InlineBox(inline_box) if inline_box.id == 49))
+        .expect("the inline-end edge must remain positioned");
+
+    assert_eq!(edge_index, owner_index + 1);
 }

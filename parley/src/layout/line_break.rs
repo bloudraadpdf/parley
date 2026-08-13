@@ -12,6 +12,8 @@ use core_maths::CoreFloat;
 use crate::analysis::cluster::Whitespace;
 use crate::analysis::{AuthoredBreakUnit, Boundary};
 use crate::data::ClusterData;
+use crate::inline_box::InlineBoxBidiAttachment;
+use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{LineBreakOverrideDisposition, NormalSoftWrapSelection};
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -1233,7 +1235,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // a mix of bidi levels (a mix of LTR and RTL text)
         let item_count = line.item_range.end - line.item_range.start;
         if needs_reorder && item_count > 1 {
-            reorder_line_items(&mut self.lines.line_items[line.item_range.clone()]);
+            reorder_line_items(
+                &mut self.lines.line_items[line.item_range.clone()],
+                &self.layout.data.inline_boxes,
+            );
         }
 
         // Compute size of line's trailing whitespace. "Trailing" is considered the right edge
@@ -1641,51 +1646,21 @@ fn try_commit_line<B: Brush>(
 }
 
 /// Reorder items within line according to the bidi levels of the items
-fn reorder_line_items(runs: &mut [LineItemData]) {
-    let run_count = runs.len();
-
-    // Find the max level and the min *odd* level
-    let mut max_level = 0;
-    let mut lowest_odd_level = 255;
-    for run in runs.iter() {
-        let level = run.bidi_level;
-        let is_odd = level & 1 != 0;
-
-        // Update max level
-        if level > max_level {
-            max_level = level;
-        }
-
-        // Update min odd level
-        if is_odd && level < lowest_odd_level {
-            lowest_odd_level = level;
-        }
-    }
-
-    // Iterate over bidi levels
-    for level in (lowest_odd_level..=max_level).rev() {
-        // Iterate over text runs
-        let mut i = 0;
-        while i < run_count {
-            if runs[i].bidi_level >= level {
-                let mut end = i + 1;
-                while end < run_count && runs[end].bidi_level >= level {
-                    end += 1;
-                }
-
-                let mut j = i;
-                let mut k = end - 1;
-                while j < k {
-                    runs.swap(j, k);
-                    j += 1;
-                    k -= 1;
-                }
-
-                i = end;
-            }
-            i += 1;
-        }
-    }
+fn reorder_line_items(runs: &mut [LineItemData], inline_boxes: &[crate::InlineBox]) {
+    let mut visual_indices = (0..runs.len()).collect::<Vec<_>>();
+    reorder_by_level_with_attachments(
+        &mut visual_indices,
+        |index| runs[index].bidi_level,
+        |index| match runs[index].kind {
+            LayoutItemKind::TextRun => InlineBoxBidiAttachment::Independent,
+            LayoutItemKind::InlineBox => inline_boxes[runs[index].index].bidi_attachment(),
+        },
+    );
+    let reordered = visual_indices
+        .into_iter()
+        .map(|index| runs[index].clone())
+        .collect::<Vec<_>>();
+    runs.clone_from_slice(&reordered);
 }
 
 #[cfg(test)]

@@ -1,10 +1,11 @@
 // Copyright 2026 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use core::ops::Range;
 
 use super::{Layout, LayoutItemKind};
+use crate::inline_box::InlineBoxBidiAttachment;
 use crate::style::Brush;
 
 /// An exact resolved Unicode bidi level.
@@ -78,9 +79,17 @@ impl<B: Brush> Layout<B> {
     /// positioned runs back to this topology through [`crate::layout::Run::bidi_atom_id`].
     pub fn bidi_topology(&self) -> BidiTopology {
         let mut visual_indices: Vec<usize> = (0..self.data.items.len()).collect();
-        reorder_by_level(&mut visual_indices, |index| {
-            self.data.items[index].bidi_level
-        });
+        reorder_by_level_with_attachments(
+            &mut visual_indices,
+            |index| self.data.items[index].bidi_level,
+            |index| {
+                let item = &self.data.items[index];
+                match item.kind {
+                    LayoutItemKind::TextRun => InlineBoxBidiAttachment::Independent,
+                    LayoutItemKind::InlineBox => self.data.inline_boxes[item.index].bidi_attachment(),
+                }
+            },
+        );
         BidiTopology(
             visual_indices
                 .into_iter()
@@ -147,6 +156,43 @@ fn reorder_by_level(indices: &mut [usize], mut level_at: impl FnMut(usize) -> u8
             start = end;
         }
     }
+}
+
+pub(crate) fn reorder_by_level_with_attachments(
+    indices: &mut [usize],
+    mut level_at: impl FnMut(usize) -> u8,
+    mut attachment_at: impl FnMut(usize) -> InlineBoxBidiAttachment,
+) {
+    let mut units: Vec<Vec<usize>> = Vec::new();
+    let mut attaches_next = false;
+    for &index in indices.iter() {
+        let attachment = attachment_at(index);
+        if attaches_next || attachment == InlineBoxBidiAttachment::ToPrevious {
+            if let Some(unit) = units.last_mut() {
+                unit.push(index);
+            } else {
+                units.push(vec![index]);
+            }
+        } else {
+            units.push(vec![index]);
+        }
+        attaches_next = attachment == InlineBoxBidiAttachment::ToNext;
+    }
+
+    let mut visual_units: Vec<usize> = (0..units.len()).collect();
+    reorder_by_level(&mut visual_units, |unit_index| {
+        units[unit_index]
+            .iter()
+            .copied()
+            .map(&mut level_at)
+            .max()
+            .unwrap_or(0)
+    });
+    let reordered = visual_units
+        .into_iter()
+        .flat_map(|unit_index| units[unit_index].iter().copied())
+        .collect::<Vec<_>>();
+    indices.copy_from_slice(&reordered);
 }
 
 #[cfg(test)]
