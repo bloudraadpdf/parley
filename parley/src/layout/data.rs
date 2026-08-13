@@ -552,17 +552,11 @@ impl<B: Brush> LayoutData<B> {
     /// left of the line — observably mismatching Chromium, PDFreactor,
     /// Prince and AHF on the `ui/accent-color/checked-checkbox-rtl`
     /// scenario family.
-    pub(crate) fn push_inline_box(&mut self, index: usize) {
-        let bidi_level = self
-            .runs
-            .last()
-            .map(|r| r.bidi_level)
-            .unwrap_or(self.base_level);
-
+    pub(crate) fn push_inline_box(&mut self, index: usize, surrounding_level: u8) {
         self.items.push(LayoutItem {
             kind: LayoutItemKind::InlineBox,
             index,
-            bidi_level,
+            bidi_level: surrounding_level,
         });
     }
     #[allow(clippy::too_many_arguments)]

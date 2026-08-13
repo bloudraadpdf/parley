@@ -83,7 +83,9 @@ pub(crate) fn shape_text<'a, B: Brush>(
         // Process any remaining inline boxes whose index is greater than the length of the text
         for box_idx in 0..inline_boxes.len() {
             // Push the box to the list of items
-            layout.data.push_inline_box(box_idx);
+            layout
+                .data
+                .push_inline_box(box_idx, levels.first().copied().unwrap_or(0));
         }
         return;
     }
@@ -203,7 +205,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
         if let Some(deferred_boxes) = deferred_boxes {
             for box_idx in deferred_boxes {
-                layout.data.push_inline_box(box_idx);
+                layout.data.push_inline_box(box_idx, item.level);
             }
         }
 
@@ -229,10 +231,10 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
     // Process any remaining inline boxes whose index is greater than the length of the text
     if let Some((box_idx, _inline_box)) = current_box {
-        layout.data.push_inline_box(box_idx);
+        layout.data.push_inline_box(box_idx, item.level);
     }
     for (box_idx, _inline_box) in inline_box_iter {
-        layout.data.push_inline_box(box_idx);
+        layout.data.push_inline_box(box_idx, item.level);
     }
 }
 
