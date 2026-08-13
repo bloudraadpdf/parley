@@ -6,6 +6,7 @@
 #[cfg(feature = "accesskit")]
 mod accessibility;
 mod alignment;
+mod bidi;
 mod cluster;
 mod glyph;
 mod line;
@@ -24,6 +25,7 @@ pub(crate) mod data;
 #[cfg(feature = "accesskit")]
 pub use accessibility::LayoutAccessibility;
 pub use alignment::{Alignment, AlignmentOptions, JustificationMode};
+pub use bidi::{BidiAtomId, BidiLevel, BidiTopology, BidiVisualAtom, BidiVisualAtomKind};
 pub use cluster::{Affinity, Cluster, ClusterPath, ClusterSide};
 pub use data::{BreakReason, DiscretionaryBreak, LineBreakOverride, NormalSoftWrapSelection};
 pub use glyph::Glyph;

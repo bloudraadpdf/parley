@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::FontData;
+use crate::layout::BidiAtomId;
 use crate::layout::cluster::{Cluster, ClusterPath};
 use crate::layout::data::{LineItemData, RunData};
 use crate::layout::layout::Layout;
@@ -89,6 +90,15 @@ impl<'a, B: Brush> Run<'a, B> {
             .map(|d| &d.text_range)
             .unwrap_or(&self.data.text_range)
             .clone()
+    }
+
+    /// Returns the stable pre-line-break visual atom identity for this run.
+    pub fn bidi_atom_id(&self) -> Option<BidiAtomId> {
+        let run_index = self
+            .line_data
+            .map(|line_data| line_data.index)
+            .unwrap_or(self.index as usize);
+        self.layout.bidi_atom_id_for_run(run_index)
     }
 
     /// Returns `true` if the run has right-to-left directionality.
