@@ -86,7 +86,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             // Push the box to the list of items
             layout
                 .data
-                .push_inline_box(box_idx, bidi.level_at_boundary(inline_box.index));
+                .push_inline_box(box_idx, bidi.level_at_byte_boundary(text, inline_box.index));
         }
         return;
     }
@@ -208,7 +208,10 @@ pub(crate) fn shape_text<'a, B: Brush>(
             for box_idx in deferred_boxes {
                 layout
                     .data
-                    .push_inline_box(box_idx, bidi.level_at_boundary(inline_boxes[box_idx].index));
+                    .push_inline_box(
+                        box_idx,
+                        bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+                    );
             }
         }
 
@@ -236,12 +239,18 @@ pub(crate) fn shape_text<'a, B: Brush>(
     if let Some((box_idx, _inline_box)) = current_box {
         layout
             .data
-            .push_inline_box(box_idx, bidi.level_at_boundary(inline_boxes[box_idx].index));
+            .push_inline_box(
+                box_idx,
+                bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+            );
     }
     for (box_idx, _inline_box) in inline_box_iter {
         layout
             .data
-            .push_inline_box(box_idx, bidi.level_at_boundary(inline_boxes[box_idx].index));
+            .push_inline_box(
+                box_idx,
+                bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+            );
     }
 }
 

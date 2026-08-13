@@ -50,12 +50,17 @@ impl BidiResolver {
         &self.levels
     }
 
-    pub(crate) fn level_at_boundary(&self, boundary: usize) -> BidiLevel {
+    pub(crate) fn level_at_byte_boundary(&self, text: &str, boundary: usize) -> BidiLevel {
+        let char_boundary = text
+            .get(..boundary)
+            .expect("inline boxes must address UTF-8 source boundaries")
+            .chars()
+            .count();
         if self.levels.is_empty() {
             return self.base_level;
         }
-        if boundary < self.levels.len() {
-            self.levels[boundary]
+        if char_boundary < self.levels.len() {
+            self.levels[char_boundary]
         } else {
             self.levels.last().copied().unwrap_or(self.base_level)
         }

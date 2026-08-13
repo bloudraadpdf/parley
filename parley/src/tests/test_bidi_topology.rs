@@ -104,6 +104,19 @@ fn inline_box_atoms_keep_caller_identity_and_source_boundary() {
 }
 
 #[test]
+fn inline_box_boundary_levels_use_utf8_byte_offsets() {
+    let layout = build_layout("éaא", [InlineBox::new(51, "é".len(), 4.0, 4.0)]);
+    let topology = layout.bidi_topology();
+    let atom = topology
+        .atoms()
+        .iter()
+        .find(|atom| matches!(atom.kind(), BidiVisualAtomKind::InlineBox { id: 51, .. }))
+        .expect("the inline box remains in the topology");
+
+    assert!(!atom.level().is_rtl());
+}
+
+#[test]
 fn positioned_runs_retain_their_pre_break_atom_identity() {
     let mut layout = build_layout("abc אבג 123", []);
     let topology_ids = text_atom_ids(&layout);

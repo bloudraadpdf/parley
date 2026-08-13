@@ -16,6 +16,11 @@ use crate::style::Brush;
 pub struct BidiLevel(u8);
 
 impl BidiLevel {
+    /// Returns the base level for a left-to-right paragraph.
+    pub const fn paragraph_ltr() -> Self {
+        Self(0)
+    }
+
     /// Returns whether this level has right-to-left directionality.
     pub const fn is_rtl(self) -> bool {
         self.0 & 1 != 0
@@ -25,6 +30,13 @@ impl BidiLevel {
 /// Stable identity of one item in the pre-line-break paragraph topology.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BidiAtomId(usize);
+
+impl BidiAtomId {
+    /// Returns the stable paragraph item index.
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
 
 /// Source identity owned by a visual bidi atom.
 #[derive(Clone, Debug, PartialEq, Eq)]
