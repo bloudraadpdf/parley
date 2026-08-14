@@ -83,6 +83,8 @@ owner edge as the missing decision would also make the second sequence wrap.
 - [x] Margin and padding end geometry retain the following source boundary.
 - [x] Caller-resolved collapsed-space opportunities survive `nowrap` owner
       boundaries.
+- [x] A retained opportunity after an exact-fit non-wrapping participant keeps
+      that participant on the preceding line.
 - [x] A retained source space breaks at its exact byte and starts the following
       line at zero rather than projecting before the visible space.
 - [x] First-line and mixed white-space style topology retain source boundaries.

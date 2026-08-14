@@ -525,6 +525,49 @@ fn retained_source_space_break_starts_the_following_owner_at_zero() {
 }
 
 #[test]
+fn retained_boundary_after_an_exact_fit_nonwrapping_participant_wins() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let prefix = "X X X X X X X X X X";
+    let mut measure = lcx.ranged_builder(&mut fcx, prefix, 1.0, false);
+    measure.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    measure.push_default(StyleProperty::FontSize(10.0));
+    let max_width = measure.build(prefix).calculate_content_widths().max;
+
+    let text = "X X X X X X X X X X 123";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+    builder.push(StyleProperty::TextWrapMode(TextWrapMode::NoWrap), 18..19);
+    let mut layout = builder.build(text);
+    layout.set_line_break_overrides(vec![
+        LineBreakOverride::resolved_retained_source_opportunity(18),
+        LineBreakOverride::resolved_retained_source_opportunity(20),
+    ]);
+    layout.break_all_lines(Some(max_width));
+
+    assert_eq!(line_text_ranges(&layout), [0..20, 20..23]);
+}
+
+#[test]
+fn overflowing_nonwrapping_space_after_wrapping_text_remains_glue() {
+    let layout = source_boundary_layout(
+        "XX XX",
+        &[
+            (0..2, TextWrapMode::Wrap),
+            (2..3, TextWrapMode::NoWrap),
+            (3..5, TextWrapMode::Wrap),
+        ],
+        &[],
+        [],
+        2.0,
+    );
+
+    assert_eq!(layout.len(), 1);
+}
+
+#[test]
 fn first_line_style_topology_retains_an_end_source_boundary() {
     let layout = resolved_source_boundary_layout(
         "XX XX",

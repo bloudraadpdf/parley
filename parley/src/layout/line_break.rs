@@ -789,7 +789,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let line_fit = if self.advance_fits(next_fit_x, max_advance) {
                             LineFit::Fits
                         } else {
-                            match OverflowingWhitespace::classify(whitespace, text_wrap_mode) {
+                            match OverflowingWhitespace::classify(whitespace, style.text_wrap_mode)
+                            {
                                 OverflowingWhitespace::CollapsibleSoftWrap(opportunity) => {
                                     LineFit::TrailingCollapsibleSpaceOverflow(opportunity)
                                 }
