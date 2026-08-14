@@ -27,6 +27,14 @@ cannot derive an opportunity from its own presence. The projection uses the
 resolved wrapping styles on both sides of the boundary; a closing `nowrap`
 owner must not suppress an opportunity in following wrapping content.
 
+CSS white-space processing can remove the run that owned an opportunity before
+Parley receives the collapsed text. A caller-resolved source opportunity must
+therefore remain distinct from a Unicode-derived opportunity. The former has
+already applied wrapping styles; the latter still requires Parley to resolve
+the adjoining styles. A logical inline-end edge can project only the first such
+boundary after immediately following collapsible space. It cannot search past
+visible content.
+
 ## Validation
 
 - [x] A same-index inline-end and inline-start pair inside `XXXXXXXXXX` does
@@ -47,5 +55,11 @@ owner must not suppress an opportunity in following wrapping content.
       opportunity.
 - [x] A positioned logical owner has the same glyph offsets as the equivalent
       atomic geometry and whitespace topology.
+- [x] Border and padding start geometry retain the atomic reference topology.
+- [x] Margin and padding end geometry retain the following source boundary.
+- [x] Caller-resolved collapsed-space opportunities survive `nowrap` owner
+      boundaries.
+- [x] First-line and mixed white-space style topology retain source boundaries.
+- [x] Word-internal owner edges remain unavailable in all source modes.
 - [x] Parley formatting, tests, changed-code Clippy audit, duplication, and
       diff checks pass.

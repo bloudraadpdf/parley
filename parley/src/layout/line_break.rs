@@ -16,7 +16,9 @@ use crate::inline_box::{
     InlineBoxBidiAttachment, InlineBoxLineBreakParticipation, LogicalInlineEdge,
 };
 use crate::layout::bidi::reorder_by_level_with_attachments;
-use crate::layout::data::{LineBreakOverrideDisposition, NormalSoftWrapSelection};
+use crate::layout::data::{
+    LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
+};
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
     LineMetrics, Run,
@@ -80,6 +82,7 @@ struct DiscretionaryAdvance(f32);
 enum RegularBreakCandidate {
     AuthoredDashPunctuation(BoundarySnapshot),
     InlineBoxEdge(BoundarySnapshot),
+    ProjectedSource(BoundarySnapshot),
     Ordinary(BoundarySnapshot),
     ConditionalMaterial(BoundarySnapshot),
     Unprioritized(BoundarySnapshot),
@@ -90,6 +93,7 @@ impl RegularBreakCandidate {
         match self {
             Self::AuthoredDashPunctuation(snapshot)
             | Self::InlineBoxEdge(snapshot)
+            | Self::ProjectedSource(snapshot)
             | Self::Ordinary(snapshot)
             | Self::ConditionalMaterial(snapshot)
             | Self::Unprioritized(snapshot) => snapshot,
@@ -101,6 +105,7 @@ impl RegularBreakCandidate {
 enum RegularBreakKind {
     AuthoredDashPunctuation,
     InlineBoxEdge,
+    ProjectedSource,
     Ordinary,
     ConditionalMaterial(DiscretionaryAdvance),
     Unprioritized,
@@ -159,7 +164,7 @@ struct BreakerState {
     line: LineState,
     prev_boundary: Option<RegularBreakCandidate>,
     emergency_boundary: Option<EmergencyBreakOpportunity>,
-    projected_source_boundary: Option<usize>,
+    projected_source_boundary: Option<ProjectedSourceBoundary>,
     last_appended_authored_unit: AuthoredBreakUnit,
     /// Consecutive committed lines ending at discretionary boundaries.
     consecutive_discretionary_lines: u32,
@@ -217,6 +222,7 @@ impl BreakerState {
                 RegularBreakCandidate::AuthoredDashPunctuation(snapshot)
             }
             RegularBreakKind::InlineBoxEdge => RegularBreakCandidate::InlineBoxEdge(snapshot),
+            RegularBreakKind::ProjectedSource => RegularBreakCandidate::ProjectedSource(snapshot),
             RegularBreakKind::Ordinary => RegularBreakCandidate::Ordinary(snapshot),
             RegularBreakKind::ConditionalMaterial(_) => {
                 RegularBreakCandidate::ConditionalMaterial(snapshot)
@@ -459,21 +465,25 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
-                            if edge == LogicalInlineEdge::Start
+                            let boundary = self.layout.data.source_soft_wrap_boundary_after(
+                                self.state.item_idx,
+                                inline_box.index,
+                                edge,
+                            );
+                            let projection = boundary.projection_from(inline_box.index);
+                            let project = projection.is_some()
                                 && self.state.line.fit_x != 0.0
-                                && self.state.projected_source_boundary != Some(inline_box.index)
-                                && self
-                                    .layout
-                                    .data
-                                    .source_soft_wrap_boundary_after(
-                                        self.state.item_idx,
-                                        inline_box.index,
-                                    )
-                                    .is_available_from(self.state.line.text_wrap_mode)
-                            {
+                                && (edge == LogicalInlineEdge::End
+                                    || self
+                                        .state
+                                        .projected_source_boundary
+                                        .map(ProjectedSourceBoundary::target)
+                                        != projection.map(ProjectedSourceBoundary::target))
+                                && boundary.is_available_from(self.state.line.text_wrap_mode);
+                            if edge == LogicalInlineEdge::Start && project {
                                 self.state
-                                    .mark_line_break_opportunity(RegularBreakKind::Ordinary);
-                                self.state.projected_source_boundary = Some(inline_box.index);
+                                    .mark_line_break_opportunity(RegularBreakKind::ProjectedSource);
+                                self.state.projected_source_boundary = projection;
                             }
                             self.state.item_idx += 1;
                             self.state.append_inline_box_to_line(
@@ -481,6 +491,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.fit_x + inline_box.width(),
                                 inline_box.height(),
                             );
+                            if edge == LogicalInlineEdge::End && project {
+                                self.state
+                                    .mark_line_break_opportunity(RegularBreakKind::ProjectedSource);
+                                self.state.projected_source_boundary = projection;
+                            }
                             continue;
                         }
                         InlineBoxLineBreakParticipation::TransparentAnchor => {
@@ -614,19 +629,31 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             Some(LineBreakOverrideDisposition::Suppress) => false,
                             Some(
                                 LineBreakOverrideDisposition::NormalOpportunity
-                                | LineBreakOverrideDisposition::UnprioritizedOpportunity,
+                                | LineBreakOverrideDisposition::UnprioritizedOpportunity
+                                | LineBreakOverrideDisposition::ResolvedSourceOpportunity,
                             ) => true,
                             None => boundary == Boundary::Line,
                         };
                         let source_boundary_was_projected = self
                             .state
                             .projected_source_boundary
-                            .take_if(|index| *index == byte_index)
-                            .is_some();
+                            .is_some_and(|projection| projection.suppresses(byte_index));
+                        if self
+                            .state
+                            .projected_source_boundary
+                            .is_some_and(|projection| projection.target() <= byte_index)
+                        {
+                            self.state.projected_source_boundary = None;
+                        }
+
+                        let resolved_source_opportunity = matches!(
+                            boundary_override,
+                            Some(LineBreakOverrideDisposition::ResolvedSourceOpportunity)
+                        );
 
                         if has_soft_break_opportunity
                             && !source_boundary_was_projected
-                            && text_wrap_mode == TextWrapMode::Wrap
+                            && (resolved_source_opportunity || text_wrap_mode == TextWrapMode::Wrap)
                         {
                             // We do not currently handle breaking within a ligature, so we ignore boundaries in such a position.
                             //
@@ -802,7 +829,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             return self.start_new_line();
                                         }
                                     }
-                                    (_, Some(RegularBreakCandidate::InlineBoxEdge(prev))) => {
+                                    (
+                                        _,
+                                        Some(
+                                            RegularBreakCandidate::InlineBoxEdge(prev)
+                                            | RegularBreakCandidate::ProjectedSource(prev),
+                                        ),
+                                    ) => {
                                         self.state.line = prev.state;
                                         if try_commit_line!(BreakReason::Regular) {
                                             self.state.item_idx = prev.item_idx;

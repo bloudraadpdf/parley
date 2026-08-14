@@ -11,6 +11,7 @@
 //! line of its own.
 
 use alloc::{format, string::String, vec, vec::Vec};
+use core::ops::Range;
 
 use super::test_builders::create_font_context;
 use crate::{
@@ -346,6 +347,179 @@ fn logical_owner_edges_preserve_atomic_whitespace_wrap_topology() {
         positioned_glyph_offsets(&owner),
         positioned_glyph_offsets(&atomic)
     );
+}
+
+#[derive(Clone, Copy)]
+enum SourceFixtureEdge {
+    Start,
+    End,
+}
+
+fn resolved_source_boundary_layout(
+    text: &str,
+    styles: &[(Range<usize>, TextWrapMode)],
+    edges: &[(u64, SourceFixtureEdge, usize, f32)],
+    boundaries: &[usize],
+    max_width_in_characters: f32,
+) -> crate::Layout<ColorBrush> {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut measure = lcx.ranged_builder(&mut fcx, "X", 1.0, false);
+    measure.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    measure.push_default(StyleProperty::FontSize(10.0));
+    let character_width = measure.build("X").calculate_content_widths().max;
+
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    for (range, mode) in styles {
+        builder.push(StyleProperty::TextWrapMode(*mode), range.clone());
+    }
+    for (id, edge, index, width) in edges {
+        let inline_box = match edge {
+            SourceFixtureEdge::Start => InlineBox::inline_start_edge(
+                *id,
+                *index,
+                character_width * width,
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            ),
+            SourceFixtureEdge::End => InlineBox::inline_end_edge(
+                *id,
+                *index,
+                character_width * width,
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ),
+        };
+        builder.push_inline_box(inline_box);
+    }
+    let mut layout = builder.build(text);
+    layout.set_line_break_overrides(
+        boundaries
+            .iter()
+            .copied()
+            .map(LineBreakOverride::resolved_source_opportunity)
+            .collect(),
+    );
+    layout.break_all_lines(Some(character_width * max_width_in_characters));
+    layout
+}
+
+fn line_text_ranges(layout: &crate::Layout<ColorBrush>) -> Vec<Range<usize>> {
+    layout.lines().map(|line| line.text_range()).collect()
+}
+
+fn assert_start_geometry_source_projection() {
+    let layout = resolved_source_boundary_layout(
+        "XX X XX",
+        &[],
+        &[
+            (90, SourceFixtureEdge::Start, 3, 2.5),
+            (91, SourceFixtureEdge::End, 4, 0.0),
+        ],
+        &[3, 5],
+        4.0,
+    );
+    assert_eq!(line_text_ranges(&layout), [0..3, 3..4, 4..7]);
+}
+
+#[test]
+fn border_start_geometry_retains_the_atomic_source_topology() {
+    assert_start_geometry_source_projection();
+}
+
+#[test]
+fn padding_start_geometry_retains_the_atomic_source_topology() {
+    assert_start_geometry_source_projection();
+}
+
+fn assert_end_geometry_source_projection() {
+    let layout = resolved_source_boundary_layout(
+        "XX XX",
+        &[],
+        &[(92, SourceFixtureEdge::End, 2, 2.5)],
+        &[3],
+        4.0,
+    );
+    assert_eq!(line_text_ranges(&layout), [0..2, 2..5]);
+}
+
+#[test]
+fn margin_end_geometry_retains_the_following_source_boundary() {
+    assert_end_geometry_source_projection();
+}
+
+#[test]
+fn padding_end_geometry_retains_the_following_source_boundary() {
+    assert_end_geometry_source_projection();
+}
+
+#[test]
+fn collapsed_space_opportunity_survives_a_no_wrap_owner_end() {
+    let layout = resolved_source_boundary_layout(
+        "AA BB",
+        &[(0..5, TextWrapMode::NoWrap)],
+        &[(93, SourceFixtureEdge::End, 3, 0.0)],
+        &[3],
+        2.5,
+    );
+    assert_eq!(line_text_ranges(&layout), [0..3, 3..5]);
+}
+
+#[test]
+fn repeated_collapsed_opportunities_survive_no_wrap_owner_pairs() {
+    let layout = resolved_source_boundary_layout(
+        "X X X X",
+        &[(0..7, TextWrapMode::NoWrap)],
+        &[
+            (94, SourceFixtureEdge::End, 2, 0.0),
+            (95, SourceFixtureEdge::Start, 2, 0.0),
+            (96, SourceFixtureEdge::End, 4, 0.0),
+            (97, SourceFixtureEdge::Start, 4, 0.0),
+            (98, SourceFixtureEdge::End, 6, 0.0),
+            (99, SourceFixtureEdge::Start, 6, 0.0),
+        ],
+        &[2, 4, 6],
+        4.0,
+    );
+    assert_eq!(layout.len(), 2);
+}
+
+#[test]
+fn first_line_style_topology_retains_an_end_source_boundary() {
+    let layout = resolved_source_boundary_layout(
+        "XX XX",
+        &[(0..3, TextWrapMode::Wrap), (3..5, TextWrapMode::NoWrap)],
+        &[
+            (100, SourceFixtureEdge::End, 2, 1.5),
+            (101, SourceFixtureEdge::Start, 3, 0.0),
+        ],
+        &[3],
+        3.0,
+    );
+    assert_eq!(line_text_ranges(&layout), [0..2, 2..5]);
+}
+
+#[test]
+fn mixed_white_space_styles_retain_resolved_source_boundaries() {
+    let layout = resolved_source_boundary_layout(
+        "X X X",
+        &[
+            (0..2, TextWrapMode::NoWrap),
+            (2..4, TextWrapMode::NoWrap),
+            (4..5, TextWrapMode::NoWrap),
+        ],
+        &[
+            (102, SourceFixtureEdge::End, 2, 0.0),
+            (103, SourceFixtureEdge::Start, 2, 0.0),
+            (104, SourceFixtureEdge::End, 4, 0.0),
+            (105, SourceFixtureEdge::Start, 4, 0.0),
+        ],
+        &[2, 4],
+        1.5,
+    );
+    assert_eq!(layout.len(), 3);
 }
 
 #[test]

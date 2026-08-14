@@ -36,12 +36,56 @@ pub(crate) enum LineBreakOverrideDisposition {
     Suppress,
     NormalOpportunity,
     UnprioritizedOpportunity,
+    ResolvedSourceOpportunity,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SourceSoftWrapBoundary {
     Absent,
-    Opportunity { following_wrap_mode: TextWrapMode },
+    Opportunity {
+        byte_index: usize,
+        authority: SourceSoftWrapAuthority,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceSoftWrapAuthority {
+    AdjoiningStyles { following_wrap_mode: TextWrapMode },
+    CallerResolved,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectedSourceBoundary {
+    Exact {
+        byte_index: usize,
+    },
+    AcrossCollapsibleSpace {
+        edge_byte_index: usize,
+        source_byte_index: usize,
+    },
+}
+
+impl ProjectedSourceBoundary {
+    pub(crate) const fn target(self) -> usize {
+        match self {
+            Self::Exact { byte_index } => byte_index,
+            Self::AcrossCollapsibleSpace {
+                source_byte_index, ..
+            } => source_byte_index,
+        }
+    }
+
+    pub(crate) const fn suppresses(self, byte_index: usize) -> bool {
+        match self {
+            Self::Exact {
+                byte_index: projected_byte_index,
+            } => byte_index == projected_byte_index,
+            Self::AcrossCollapsibleSpace {
+                edge_byte_index,
+                source_byte_index,
+            } => byte_index >= edge_byte_index && byte_index <= source_byte_index,
+        }
+    }
 }
 
 impl SourceSoftWrapBoundary {
@@ -49,11 +93,41 @@ impl SourceSoftWrapBoundary {
         match self {
             Self::Absent => false,
             Self::Opportunity {
-                following_wrap_mode,
+                authority:
+                    SourceSoftWrapAuthority::AdjoiningStyles {
+                        following_wrap_mode,
+                    },
+                ..
             } => {
                 matches!(preceding_wrap_mode, TextWrapMode::Wrap)
                     || matches!(following_wrap_mode, TextWrapMode::Wrap)
             }
+            Self::Opportunity {
+                authority: SourceSoftWrapAuthority::CallerResolved,
+                ..
+            } => true,
+        }
+    }
+
+    pub(crate) const fn projection_from(
+        self,
+        edge_byte_index: usize,
+    ) -> Option<ProjectedSourceBoundary> {
+        match self {
+            Self::Absent => None,
+            Self::Opportunity { byte_index, .. } if byte_index == edge_byte_index => {
+                Some(ProjectedSourceBoundary::Exact { byte_index })
+            }
+            Self::Opportunity {
+                byte_index,
+                authority: SourceSoftWrapAuthority::CallerResolved,
+            } if byte_index > edge_byte_index => {
+                Some(ProjectedSourceBoundary::AcrossCollapsibleSpace {
+                    edge_byte_index,
+                    source_byte_index: byte_index,
+                })
+            }
+            Self::Opportunity { .. } => None,
         }
     }
 }
@@ -82,6 +156,15 @@ impl LineBreakOverride {
         Self {
             byte_index,
             disposition: LineBreakOverrideDisposition::UnprioritizedOpportunity,
+        }
+    }
+
+    /// Add a source opportunity whose wrapping styles were resolved before
+    /// text normalisation removed its owning run.
+    pub const fn resolved_source_opportunity(byte_index: usize) -> Self {
+        Self {
+            byte_index,
+            disposition: LineBreakOverrideDisposition::ResolvedSourceOpportunity,
         }
     }
 
@@ -525,41 +608,75 @@ impl<B: Brush> LayoutData<B> {
         &self,
         item_index: usize,
         byte_index: usize,
+        edge: LogicalInlineEdge,
     ) -> SourceSoftWrapBoundary {
-        let Some((run, cluster)) = self.items[item_index + 1..]
-            .iter()
-            .find_map(|item| (item.kind == LayoutItemKind::TextRun).then(|| &self.runs[item.index]))
-            .and_then(|run| {
-                self.clusters
-                    .get(run.cluster_range.start)
-                    .map(|cluster| (run, cluster))
-            })
-        else {
-            return SourceSoftWrapBoundary::Absent;
+        let boundary_override = |index| {
+            self.line_break_overrides
+                .binary_search_by_key(&index, |entry| entry.byte_index())
+                .ok()
+                .map(|entry| self.line_break_overrides[entry].disposition())
         };
-        let boundary_override = self
-            .line_break_overrides
-            .binary_search_by_key(&byte_index, |entry| entry.byte_index())
-            .ok()
-            .map(|index| self.line_break_overrides[index].disposition());
-        let has_opportunity = match boundary_override {
-            Some(LineBreakOverrideDisposition::Suppress) => false,
-            Some(
-                LineBreakOverrideDisposition::NormalOpportunity
-                | LineBreakOverrideDisposition::UnprioritizedOpportunity,
-            ) => true,
-            None => {
-                cluster.text_range(run).start == byte_index
-                    && cluster.info.boundary() == Boundary::Line
+        for item in &self.items[item_index + 1..] {
+            match item.kind {
+                LayoutItemKind::InlineBox => {
+                    let inline_box = &self.inline_boxes[item.index];
+                    if inline_box.index < byte_index
+                        || !matches!(
+                            inline_box.line_break_participation(),
+                            InlineBoxLineBreakParticipation::LogicalOwnerEdge(_)
+                                | InlineBoxLineBreakParticipation::TransparentAnchor
+                        )
+                    {
+                        return SourceSoftWrapBoundary::Absent;
+                    }
+                }
+                LayoutItemKind::TextRun => {
+                    let run = &self.runs[item.index];
+                    for cluster in &self.clusters[run.cluster_range.clone()] {
+                        let cluster_index = cluster.text_range(run).start;
+                        if cluster_index < byte_index {
+                            continue;
+                        }
+                        let disposition = boundary_override(cluster_index);
+                        if edge == LogicalInlineEdge::End
+                            && cluster.info.whitespace() == Whitespace::Space
+                        {
+                            continue;
+                        }
+                        let authority = match disposition {
+                            Some(LineBreakOverrideDisposition::Suppress) => {
+                                return SourceSoftWrapBoundary::Absent;
+                            }
+                            Some(LineBreakOverrideDisposition::ResolvedSourceOpportunity) => {
+                                Some(SourceSoftWrapAuthority::CallerResolved)
+                            }
+                            Some(
+                                LineBreakOverrideDisposition::NormalOpportunity
+                                | LineBreakOverrideDisposition::UnprioritizedOpportunity,
+                            ) => Some(SourceSoftWrapAuthority::AdjoiningStyles {
+                                following_wrap_mode: self.styles[cluster.style_index as usize]
+                                    .text_wrap_mode,
+                            }),
+                            None if cluster.info.boundary() == Boundary::Line => {
+                                Some(SourceSoftWrapAuthority::AdjoiningStyles {
+                                    following_wrap_mode: self.styles[cluster.style_index as usize]
+                                        .text_wrap_mode,
+                                })
+                            }
+                            None => None,
+                        };
+                        if let Some(authority) = authority {
+                            return SourceSoftWrapBoundary::Opportunity {
+                                byte_index: cluster_index,
+                                authority,
+                            };
+                        }
+                        return SourceSoftWrapBoundary::Absent;
+                    }
+                }
             }
-        };
-        if has_opportunity {
-            SourceSoftWrapBoundary::Opportunity {
-                following_wrap_mode: self.styles[cluster.style_index as usize].text_wrap_mode,
-            }
-        } else {
-            SourceSoftWrapBoundary::Absent
         }
+        SourceSoftWrapBoundary::Absent
     }
 
     pub(crate) fn clear(&mut self) {
@@ -903,7 +1020,7 @@ impl<B: Brush> LayoutData<B> {
         let mut running_max_width = 0.0;
         let mut text_wrap_mode = TextWrapMode::Wrap;
         let mut prev_cluster: Option<&ClusterData> = None;
-        let mut projected_source_boundary = None;
+        let mut projected_source_boundary: Option<ProjectedSourceBoundary> = None;
         let is_rtl = self.base_level & 1 == 1;
         for (item_index, item) in self.items.iter().enumerate() {
             match item.kind {
@@ -915,17 +1032,42 @@ impl<B: Brush> LayoutData<B> {
                     }
                     for cluster in clusters {
                         let boundary = cluster.info.boundary();
+                        let byte_index = cluster.text_range(run).start;
+                        let boundary_override = self
+                            .line_break_overrides
+                            .binary_search_by_key(&byte_index, |entry| entry.byte_index())
+                            .ok()
+                            .map(|index| self.line_break_overrides[index].disposition());
                         let style = &self.styles[cluster.style_index as usize];
                         let prev_text_wrap_mode = text_wrap_mode;
                         text_wrap_mode = style.text_wrap_mode;
                         let source_boundary_was_projected = projected_source_boundary
-                            .take_if(|index| *index == cluster.text_range(run).start)
-                            .is_some();
+                            .is_some_and(|projection| projection.suppresses(byte_index));
+                        if projected_source_boundary
+                            .is_some_and(|projection| projection.target() <= byte_index)
+                        {
+                            projected_source_boundary = None;
+                        }
+                        let resolved_source_opportunity = matches!(
+                            boundary_override,
+                            Some(LineBreakOverrideDisposition::ResolvedSourceOpportunity)
+                        );
+                        let style_resolved_opportunity = !matches!(
+                            boundary_override,
+                            Some(LineBreakOverrideDisposition::Suppress)
+                        ) && (matches!(
+                            boundary_override,
+                            Some(
+                                LineBreakOverrideDisposition::NormalOpportunity
+                                    | LineBreakOverrideDisposition::UnprioritizedOpportunity
+                            )
+                        ) || boundary == Boundary::Line
+                            || style.overflow_wrap == OverflowWrap::Anywhere);
                         if boundary == Boundary::Mandatory
                             || (!source_boundary_was_projected
-                                && prev_text_wrap_mode == TextWrapMode::Wrap
-                                && (boundary == Boundary::Line
-                                    || style.overflow_wrap == OverflowWrap::Anywhere))
+                                && (resolved_source_opportunity
+                                    || (prev_text_wrap_mode == TextWrapMode::Wrap
+                                        && style_resolved_opportunity)))
                         {
                             let trailing_whitespace = whitespace_advance(prev_cluster);
                             min_width = min_width.max(running_min_width - trailing_whitespace);
@@ -964,18 +1106,27 @@ impl<B: Brush> LayoutData<B> {
                             prev_cluster = None;
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
-                            if edge == LogicalInlineEdge::Start
-                                && projected_source_boundary != Some(ibox.index)
-                                && self
-                                    .source_soft_wrap_boundary_after(item_index, ibox.index)
-                                    .is_available_from(text_wrap_mode)
-                            {
+                            let boundary =
+                                self.source_soft_wrap_boundary_after(item_index, ibox.index, edge);
+                            let projection = boundary.projection_from(ibox.index);
+                            let project = projection.is_some()
+                                && (edge == LogicalInlineEdge::End
+                                    || projected_source_boundary
+                                        .map(ProjectedSourceBoundary::target)
+                                        != projection.map(ProjectedSourceBoundary::target))
+                                && boundary.is_available_from(text_wrap_mode);
+                            if edge == LogicalInlineEdge::Start && project {
                                 let trailing_whitespace = whitespace_advance(prev_cluster);
                                 min_width = min_width.max(running_min_width - trailing_whitespace);
                                 running_min_width = 0.0;
-                                projected_source_boundary = Some(ibox.index);
+                                projected_source_boundary = projection;
                             }
                             running_min_width += width;
+                            if edge == LogicalInlineEdge::End && project {
+                                min_width = min_width.max(running_min_width);
+                                running_min_width = 0.0;
+                                projected_source_boundary = projection;
+                            }
                         }
                         InlineBoxLineBreakParticipation::TransparentAnchor => {}
                     }
