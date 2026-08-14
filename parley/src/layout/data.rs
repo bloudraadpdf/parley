@@ -1,7 +1,7 @@
 // Copyright 2021 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::inline_box::InlineBox;
+use crate::inline_box::{InlineBox, InlineBoxLineBreakParticipation, LogicalInlineEdge};
 use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
 
@@ -501,6 +501,39 @@ impl<B: Brush> Default for LayoutData<B> {
 }
 
 impl<B: Brush> LayoutData<B> {
+    pub(crate) fn source_soft_wrap_opportunity_after(
+        &self,
+        item_index: usize,
+        byte_index: usize,
+    ) -> bool {
+        let boundary_override = self
+            .line_break_overrides
+            .binary_search_by_key(&byte_index, |entry| entry.byte_index())
+            .ok()
+            .map(|index| self.line_break_overrides[index].disposition());
+        match boundary_override {
+            Some(LineBreakOverrideDisposition::Suppress) => false,
+            Some(
+                LineBreakOverrideDisposition::NormalOpportunity
+                | LineBreakOverrideDisposition::UnprioritizedOpportunity,
+            ) => true,
+            None => self.items[item_index + 1..]
+                .iter()
+                .find_map(|item| {
+                    (item.kind == LayoutItemKind::TextRun).then(|| &self.runs[item.index])
+                })
+                .and_then(|run| {
+                    self.clusters
+                        .get(run.cluster_range.start)
+                        .map(|cluster| (run, cluster))
+                })
+                .is_some_and(|(run, cluster)| {
+                    cluster.text_range(run).start == byte_index
+                        && cluster.info.boundary() == Boundary::Line
+                }),
+        }
+    }
+
     pub(crate) fn clear(&mut self) {
         self.scale = 1.;
         self.quantize = true;
@@ -842,8 +875,9 @@ impl<B: Brush> LayoutData<B> {
         let mut running_max_width = 0.0;
         let mut text_wrap_mode = TextWrapMode::Wrap;
         let mut prev_cluster: Option<&ClusterData> = None;
+        let mut projected_source_boundary = None;
         let is_rtl = self.base_level & 1 == 1;
-        for item in &self.items {
+        for (item_index, item) in self.items.iter().enumerate() {
             match item.kind {
                 LayoutItemKind::TextRun => {
                     let run = &self.runs[item.index];
@@ -856,8 +890,12 @@ impl<B: Brush> LayoutData<B> {
                         let style = &self.styles[cluster.style_index as usize];
                         let prev_text_wrap_mode = text_wrap_mode;
                         text_wrap_mode = style.text_wrap_mode;
+                        let source_boundary_was_projected = projected_source_boundary
+                            .take_if(|index| *index == cluster.text_range(run).start)
+                            .is_some();
                         if boundary == Boundary::Mandatory
-                            || (prev_text_wrap_mode == TextWrapMode::Wrap
+                            || (!source_boundary_was_projected
+                                && prev_text_wrap_mode == TextWrapMode::Wrap
                                 && (boundary == Boundary::Line
                                     || style.overflow_wrap == OverflowWrap::Anywhere))
                         {
@@ -880,23 +918,38 @@ impl<B: Brush> LayoutData<B> {
                 }
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
-                    let Some(break_affinity) = ibox.break_affinity() else {
-                        continue;
-                    };
                     let width = ibox.width();
                     running_max_width += width;
-                    let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
-                    if can_wrap && break_affinity.allows_break_before() {
-                        let trailing_whitespace = whitespace_advance(prev_cluster);
-                        min_width = min_width.max(running_min_width - trailing_whitespace);
-                        running_min_width = 0.0;
+                    match ibox.line_break_participation() {
+                        InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
+                            let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
+                            if can_wrap && break_affinity.allows_break_before() {
+                                let trailing_whitespace = whitespace_advance(prev_cluster);
+                                min_width = min_width.max(running_min_width - trailing_whitespace);
+                                running_min_width = 0.0;
+                            }
+                            running_min_width += width;
+                            if can_wrap && break_affinity.allows_break_after() {
+                                min_width = min_width.max(running_min_width);
+                                running_min_width = 0.0;
+                            }
+                            prev_cluster = None;
+                        }
+                        InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
+                            if edge == LogicalInlineEdge::Start
+                                && text_wrap_mode == TextWrapMode::Wrap
+                                && projected_source_boundary != Some(ibox.index)
+                                && self.source_soft_wrap_opportunity_after(item_index, ibox.index)
+                            {
+                                let trailing_whitespace = whitespace_advance(prev_cluster);
+                                min_width = min_width.max(running_min_width - trailing_whitespace);
+                                running_min_width = 0.0;
+                                projected_source_boundary = Some(ibox.index);
+                            }
+                            running_min_width += width;
+                        }
+                        InlineBoxLineBreakParticipation::TransparentAnchor => {}
                     }
-                    running_min_width += width;
-                    if can_wrap && break_affinity.allows_break_after() {
-                        min_width = min_width.max(running_min_width);
-                        running_min_width = 0.0;
-                    }
-                    prev_cluster = None;
                 }
             }
             let trailing_whitespace = whitespace_advance(prev_cluster);

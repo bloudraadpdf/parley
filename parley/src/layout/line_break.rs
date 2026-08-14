@@ -12,7 +12,9 @@ use core_maths::CoreFloat;
 use crate::analysis::cluster::Whitespace;
 use crate::analysis::{AuthoredBreakUnit, Boundary};
 use crate::data::ClusterData;
-use crate::inline_box::InlineBoxBidiAttachment;
+use crate::inline_box::{
+    InlineBoxBidiAttachment, InlineBoxLineBreakParticipation, LogicalInlineEdge,
+};
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{LineBreakOverrideDisposition, NormalSoftWrapSelection};
 use crate::layout::{
@@ -157,6 +159,7 @@ struct BreakerState {
     line: LineState,
     prev_boundary: Option<RegularBreakCandidate>,
     emergency_boundary: Option<EmergencyBreakOpportunity>,
+    projected_source_boundary: Option<usize>,
     last_appended_authored_unit: AuthoredBreakUnit,
     /// Consecutive committed lines ending at discretionary boundaries.
     consecutive_discretionary_lines: u32,
@@ -453,14 +456,39 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             match item.kind {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
-                    let Some(break_affinity) = inline_box.break_affinity() else {
-                        self.state.item_idx += 1;
-                        self.state.append_inline_box_to_line(
-                            self.state.line.x,
-                            self.state.line.fit_x,
-                            0.0,
-                        );
-                        continue;
+                    let break_affinity = match inline_box.line_break_participation() {
+                        InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
+                        InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
+                            if edge == LogicalInlineEdge::Start
+                                && self.state.line.text_wrap_mode == TextWrapMode::Wrap
+                                && self.state.line.fit_x != 0.0
+                                && self.state.projected_source_boundary != Some(inline_box.index)
+                                && self.layout.data.source_soft_wrap_opportunity_after(
+                                    self.state.item_idx,
+                                    inline_box.index,
+                                )
+                            {
+                                self.state
+                                    .mark_line_break_opportunity(RegularBreakKind::Ordinary);
+                                self.state.projected_source_boundary = Some(inline_box.index);
+                            }
+                            self.state.item_idx += 1;
+                            self.state.append_inline_box_to_line(
+                                self.state.line.x + inline_box.width(),
+                                self.state.line.fit_x + inline_box.width(),
+                                inline_box.height(),
+                            );
+                            continue;
+                        }
+                        InlineBoxLineBreakParticipation::TransparentAnchor => {
+                            self.state.item_idx += 1;
+                            self.state.append_inline_box_to_line(
+                                self.state.line.x,
+                                self.state.line.fit_x,
+                                0.0,
+                            );
+                            continue;
+                        }
                     };
                     let width = inline_box.width();
                     let height = inline_box.height();
@@ -587,8 +615,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             ) => true,
                             None => boundary == Boundary::Line,
                         };
+                        let source_boundary_was_projected = self
+                            .state
+                            .projected_source_boundary
+                            .take_if(|index| *index == byte_index)
+                            .is_some();
 
-                        if has_soft_break_opportunity && text_wrap_mode == TextWrapMode::Wrap {
+                        if has_soft_break_opportunity
+                            && !source_boundary_was_projected
+                            && text_wrap_mode == TextWrapMode::Wrap
+                        {
                             // We do not currently handle breaking within a ligature, so we ignore boundaries in such a position.
                             //
                             // We also don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
@@ -929,7 +965,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     self.state.item_idx += 1;
                     self.state
                         .append_inline_box_to_line(next_x, next_fit_x, inline_box.height());
-                    char_count += u32::from(inline_box.break_affinity().is_some());
+                    char_count += u32::from(matches!(
+                        inline_box.line_break_participation(),
+                        InlineBoxLineBreakParticipation::Atomic(_)
+                    ));
 
                     // Check if we've reached the limit after adding this box
                     if char_count >= max_chars {

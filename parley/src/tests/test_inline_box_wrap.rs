@@ -16,7 +16,7 @@ use super::test_builders::create_font_context;
 use crate::{
     FontFamily, FontWeight, InlineBox, InlineBoxBreakAffinity, LayoutContext, LineBreakMode,
     LineBreakOverride, NormalSoftWrapSelection, OverflowWrap, RangedBuilder, StyleProperty,
-    WordBreak, layout::DiscretionaryBreak,
+    TextWrapMode, WordBreak, layout::DiscretionaryBreak,
 };
 
 use super::utils::ColorBrush;
@@ -72,6 +72,108 @@ fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
     assert!(atomic.calculate_content_widths().min < text_widths.min);
     atomic.break_all_lines(Some(text_widths.max - 1.0));
     assert_eq!(atomic.len(), 2);
+}
+
+fn logical_inline_edge_fixture(
+    text: &str,
+    edge_index: usize,
+    edge_depth: usize,
+    text_wrap_mode: TextWrapMode,
+) -> (crate::Layout<ColorBrush>, f32, f32) {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+
+    let mut text_only_builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    text_only_builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    text_only_builder.push_default(StyleProperty::FontSize(10.0));
+    text_only_builder.push_default(StyleProperty::TextWrapMode(text_wrap_mode));
+    let text_only_widths = text_only_builder.build(text).calculate_content_widths();
+
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::TextWrapMode(text_wrap_mode));
+    for depth in 0..edge_depth {
+        builder.push_inline_box(InlineBox::inline_end_edge(
+            depth as u64,
+            edge_index,
+            0.0,
+            0.0,
+            InlineBoxBreakAffinity::ToPrevious,
+        ));
+    }
+    for depth in 0..edge_depth {
+        builder.push_inline_box(InlineBox::inline_start_edge(
+            (edge_depth + depth) as u64,
+            edge_index,
+            0.0,
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        ));
+    }
+    (
+        builder.build(text),
+        text_only_widths.min,
+        text_only_widths.max,
+    )
+}
+
+fn inline_box_line(layout: &crate::Layout<ColorBrush>, id: u64) -> usize {
+    layout
+        .lines()
+        .enumerate()
+        .find_map(|(line_index, line)| {
+            line.items().find_map(|item| match item {
+                crate::PositionedLayoutItem::InlineBox(inline_box) if inline_box.id == id => {
+                    Some(line_index)
+                }
+                _ => None,
+            })
+        })
+        .expect("the logical edge must remain positioned")
+}
+
+#[test]
+fn logical_inline_edge_pair_does_not_split_an_unbreakable_word() {
+    let (mut layout, unbroken_min, unbroken_max) =
+        logical_inline_edge_fixture("XXXXXXXXXX", 5, 1, TextWrapMode::Wrap);
+    let widths = layout.calculate_content_widths();
+    layout.break_all_lines(Some(unbroken_max * 0.55));
+
+    assert_eq!(layout.len(), 1);
+    assert!((widths.min - unbroken_min).abs() < 0.01);
+}
+
+#[test]
+fn logical_inline_edges_cannot_retain_a_no_wrap_break_snapshot() {
+    let (mut layout, _, unbroken_max) =
+        logical_inline_edge_fixture("XXXXXXXXXX", 5, 1, TextWrapMode::NoWrap);
+    layout.break_all_lines(Some(unbroken_max * 0.55));
+
+    assert_eq!(layout.len(), 1);
+}
+
+#[test]
+fn source_space_across_logical_inline_edges_remains_a_wrap_opportunity() {
+    let (mut layout, _, unbroken_max) =
+        logical_inline_edge_fixture("XXXXX XXXXX", 6, 2, TextWrapMode::Wrap);
+    layout.break_all_lines(Some(unbroken_max * 0.55));
+
+    assert_eq!(layout.len(), 2);
+    assert_eq!(inline_box_line(&layout, 0), 0);
+    assert_eq!(inline_box_line(&layout, 1), 0);
+    assert_eq!(inline_box_line(&layout, 2), 1);
+    assert_eq!(inline_box_line(&layout, 3), 1);
+}
+
+#[test]
+fn nested_logical_inline_edges_do_not_split_rtl_text() {
+    let text = "אבגדהאבגדה";
+    let (mut layout, _, unbroken_max) =
+        logical_inline_edge_fixture(text, "אבגדה".len(), 2, TextWrapMode::Wrap);
+    layout.break_all_lines(Some(unbroken_max * 0.55));
+
+    assert_eq!(layout.len(), 1);
 }
 
 #[test]

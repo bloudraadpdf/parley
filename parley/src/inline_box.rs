@@ -34,8 +34,29 @@ enum InlineBoxParticipation {
         height: f32,
         break_affinity: InlineBoxBreakAffinity,
     },
+    /// A logical owner edge which contributes geometry but no soft-wrap
+    /// opportunity of its own.
+    LogicalOwnerEdge {
+        width: f32,
+        height: f32,
+        edge: LogicalInlineEdge,
+    },
     /// A positioned anchor which is transparent to line breaking and sizing.
     TransparentAnchor,
+}
+
+/// Closed line-breaking participation for inline boxes.
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub(crate) enum InlineBoxLineBreakParticipation {
+    Atomic(InlineBoxBreakAffinity),
+    LogicalOwnerEdge(LogicalInlineEdge),
+    TransparentAnchor,
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub(crate) enum LogicalInlineEdge {
+    Start,
+    End,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -48,22 +69,36 @@ pub(crate) enum InlineBoxBidiAttachment {
 impl InlineBoxParticipation {
     pub(crate) const fn width(self) -> f32 {
         match self {
-            Self::Atomic { width, .. } => width,
+            Self::Atomic { width, .. } | Self::LogicalOwnerEdge { width, .. } => width,
             Self::TransparentAnchor => 0.0,
         }
     }
 
     pub(crate) const fn height(self) -> f32 {
         match self {
-            Self::Atomic { height, .. } => height,
+            Self::Atomic { height, .. } | Self::LogicalOwnerEdge { height, .. } => height,
             Self::TransparentAnchor => 0.0,
         }
     }
 
-    pub(crate) const fn break_affinity(self) -> Option<InlineBoxBreakAffinity> {
+    pub(crate) const fn line_break_participation(self) -> InlineBoxLineBreakParticipation {
         match self {
-            Self::Atomic { break_affinity, .. } => Some(break_affinity),
-            Self::TransparentAnchor => None,
+            Self::Atomic { break_affinity, .. } => {
+                InlineBoxLineBreakParticipation::Atomic(break_affinity)
+            }
+            Self::LogicalOwnerEdge { edge, .. } => {
+                InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge)
+            }
+            Self::TransparentAnchor => InlineBoxLineBreakParticipation::TransparentAnchor,
+        }
+    }
+}
+
+impl LogicalInlineEdge {
+    const fn bidi_attachment(self) -> InlineBoxBidiAttachment {
+        match self {
+            Self::Start => InlineBoxBidiAttachment::ToNext,
+            Self::End => InlineBoxBidiAttachment::ToPrevious,
         }
     }
 }
@@ -133,18 +168,9 @@ impl InlineBox {
         index: usize,
         width: f32,
         height: f32,
-        break_affinity: InlineBoxBreakAffinity,
+        _break_affinity: InlineBoxBreakAffinity,
     ) -> Self {
-        Self {
-            id,
-            index,
-            participation: InlineBoxParticipation::Atomic {
-                width,
-                height,
-                break_affinity,
-            },
-            bidi_attachment: InlineBoxBidiAttachment::ToNext,
-        }
+        Self::logical_edge(id, index, width, height, LogicalInlineEdge::Start)
     }
 
     /// A logical inline-end edge which reorders with the preceding content.
@@ -153,17 +179,27 @@ impl InlineBox {
         index: usize,
         width: f32,
         height: f32,
-        break_affinity: InlineBoxBreakAffinity,
+        _break_affinity: InlineBoxBreakAffinity,
+    ) -> Self {
+        Self::logical_edge(id, index, width, height, LogicalInlineEdge::End)
+    }
+
+    fn logical_edge(
+        id: u64,
+        index: usize,
+        width: f32,
+        height: f32,
+        edge: LogicalInlineEdge,
     ) -> Self {
         Self {
             id,
             index,
-            participation: InlineBoxParticipation::Atomic {
+            participation: InlineBoxParticipation::LogicalOwnerEdge {
                 width,
                 height,
-                break_affinity,
+                edge,
             },
-            bidi_attachment: InlineBoxBidiAttachment::ToPrevious,
+            bidi_attachment: edge.bidi_attachment(),
         }
     }
 
@@ -177,8 +213,8 @@ impl InlineBox {
         self.participation.height()
     }
 
-    pub(crate) const fn break_affinity(&self) -> Option<InlineBoxBreakAffinity> {
-        self.participation.break_affinity()
+    pub(crate) const fn line_break_participation(&self) -> InlineBoxLineBreakParticipation {
+        self.participation.line_break_participation()
     }
 
     pub(crate) const fn bidi_attachment(&self) -> InlineBoxBidiAttachment {
@@ -187,8 +223,8 @@ impl InlineBox {
 
     pub(crate) const fn is_transparent_anchor(&self) -> bool {
         matches!(
-            self.participation,
-            InlineBoxParticipation::TransparentAnchor
+            self.line_break_participation(),
+            InlineBoxLineBreakParticipation::TransparentAnchor
         )
     }
 }
