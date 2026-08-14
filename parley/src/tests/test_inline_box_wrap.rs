@@ -615,6 +615,19 @@ fn decorated_owner_end_leaves_the_following_space_to_unicode() {
 }
 
 #[test]
+fn zero_width_owner_start_keeps_the_latest_fitting_unicode_boundary() {
+    let layout = source_boundary_layout(
+        "XX XX XX",
+        &[],
+        &[(122, SourceFixtureEdge::Start, 3, 0.0)],
+        [],
+        4.5,
+    );
+
+    assert_eq!(line_text_ranges(&layout), [0..6, 6..8]);
+}
+
+#[test]
 fn collapsed_space_opportunity_survives_a_no_wrap_owner_end() {
     let layout = resolved_source_boundary_layout(
         "AA BB",

@@ -12,7 +12,9 @@ use core_maths::CoreFloat;
 use crate::analysis::cluster::Whitespace;
 use crate::analysis::{AuthoredBreakUnit, Boundary};
 use crate::data::ClusterData;
-use crate::inline_box::{InlineBoxBidiAttachment, InlineBoxLineBreakParticipation};
+use crate::inline_box::{
+    InlineBoxBidiAttachment, InlineBoxLineBreakParticipation, LogicalInlineEdgeSourceProjection,
+};
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
@@ -496,6 +498,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
+                            let source_projection = edge.source_projection(inline_box.width());
                             let boundary = self.layout.data.source_soft_wrap_boundary_after(
                                 self.state.item_idx,
                                 inline_box.index,
@@ -505,14 +508,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 .projection_from(inline_box.index, edge.following_source_space());
                             let project = projection.is_some()
                                 && self.state.line.fit_x != 0.0
-                                && (edge.is_end()
+                                && source_projection != LogicalInlineEdgeSourceProjection::Absent
+                                && (source_projection
+                                    == LogicalInlineEdgeSourceProjection::AfterGeometry
                                     || self
                                         .state
                                         .projected_source_boundary
                                         .map(ProjectedSourceBoundary::target)
                                         != projection.map(ProjectedSourceBoundary::target))
                                 && boundary.is_available_from(self.state.line.text_wrap_mode);
-                            if edge.is_start() && project {
+                            if source_projection
+                                == LogicalInlineEdgeSourceProjection::BeforeGeometry
+                                && project
+                            {
                                 self.state.mark_projected_source_boundary(projection);
                             }
                             self.state.item_idx += 1;
@@ -521,7 +529,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.fit_x + inline_box.width(),
                                 inline_box.height(),
                             );
-                            if edge.is_end() && project {
+                            if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
+                                && project
+                            {
                                 self.state.mark_projected_source_boundary(projection);
                             }
                             continue;

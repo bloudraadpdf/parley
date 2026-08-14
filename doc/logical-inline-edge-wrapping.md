@@ -21,6 +21,12 @@ boundary, such as U+0020 SPACE, remains available through the text analyser.
 When both adjoining text styles use `text-wrap-mode: nowrap`, that character
 boundary remains unavailable.
 
+A zero-width inline-start edge does not obscure or move its preceding source
+boundary. It therefore keeps only its bidirectional attachment. A start edge
+with positive geometry can project that boundary before its geometry. Inline
+ends project after their geometry when the supplied source authority permits
+it.
+
 The analyser remains the sole authority for a source boundary. An owner edge
 can project that existing boundary to the correct side of its geometry, but it
 cannot derive an opportunity from its own presence. The projection uses the
@@ -125,6 +131,8 @@ owner edge as the missing decision would also make the second sequence wrap.
       without mutating the shaped cluster used by relayout.
 - [x] A decorated owner can leave its following collapsible space under
       Unicode line-breaking authority.
+- [x] A zero-width owner start cannot promote an earlier Unicode boundary over
+      a later complete word that fits.
 - [x] Border and padding consumer geometry retain the projected source-space
       advance.
 - [x] The same projected space keeps its normal advance when the break is not

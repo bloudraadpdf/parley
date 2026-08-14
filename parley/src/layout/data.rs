@@ -3,6 +3,7 @@
 
 use crate::inline_box::{
     FollowingSourceSpace, InlineBox, InlineBoxLineBreakParticipation, LogicalInlineEdge,
+    LogicalInlineEdgeSourceProjection,
 };
 use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
@@ -1200,24 +1201,32 @@ impl<B: Brush> LayoutData<B> {
                             prev_cluster = None;
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
+                            let source_projection = edge.source_projection(width);
                             let boundary =
                                 self.source_soft_wrap_boundary_after(item_index, ibox.index, edge);
                             let projection =
                                 boundary.projection_from(ibox.index, edge.following_source_space());
                             let project = projection.is_some()
-                                && (edge.is_end()
+                                && source_projection != LogicalInlineEdgeSourceProjection::Absent
+                                && (source_projection
+                                    == LogicalInlineEdgeSourceProjection::AfterGeometry
                                     || projected_source_boundary
                                         .map(ProjectedSourceBoundary::target)
                                         != projection.map(ProjectedSourceBoundary::target))
                                 && boundary.is_available_from(text_wrap_mode);
-                            if edge.is_start() && project {
+                            if source_projection
+                                == LogicalInlineEdgeSourceProjection::BeforeGeometry
+                                && project
+                            {
                                 let trailing_whitespace = whitespace_advance(prev_cluster);
                                 min_width = min_width.max(running_min_width - trailing_whitespace);
                                 running_min_width = 0.0;
                                 projected_source_boundary = projection;
                             }
                             running_min_width += width;
-                            if edge.is_end() && project {
+                            if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
+                                && project
+                            {
                                 min_width = min_width.max(running_min_width);
                                 running_min_width = 0.0;
                                 projected_source_boundary = projection;

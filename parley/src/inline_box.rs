@@ -76,6 +76,13 @@ pub(crate) enum LogicalInlineEdge {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub(crate) enum LogicalInlineEdgeSourceProjection {
+    Absent,
+    BeforeGeometry,
+    AfterGeometry,
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub(crate) enum InlineBoxBidiAttachment {
     Independent,
     ToPrevious,
@@ -121,10 +128,6 @@ impl InlineBoxParticipation {
 }
 
 impl LogicalInlineEdge {
-    pub(crate) const fn is_start(self) -> bool {
-        matches!(self, Self::Start)
-    }
-
     pub(crate) const fn is_end(self) -> bool {
         matches!(self, Self::End(_))
     }
@@ -133,6 +136,14 @@ impl LogicalInlineEdge {
         match self {
             Self::Start => FollowingSourceSpace::RetainedAdvance,
             Self::End(participation) => participation,
+        }
+    }
+
+    pub(crate) fn source_projection(self, width: f32) -> LogicalInlineEdgeSourceProjection {
+        match self {
+            Self::Start if width == 0.0 => LogicalInlineEdgeSourceProjection::Absent,
+            Self::Start => LogicalInlineEdgeSourceProjection::BeforeGeometry,
+            Self::End(_) => LogicalInlineEdgeSourceProjection::AfterGeometry,
         }
     }
 }
