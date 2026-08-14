@@ -38,6 +38,26 @@ pub(crate) enum LineBreakOverrideDisposition {
     UnprioritizedOpportunity,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceSoftWrapBoundary {
+    Absent,
+    Opportunity { following_wrap_mode: TextWrapMode },
+}
+
+impl SourceSoftWrapBoundary {
+    pub(crate) const fn is_available_from(self, preceding_wrap_mode: TextWrapMode) -> bool {
+        match self {
+            Self::Absent => false,
+            Self::Opportunity {
+                following_wrap_mode,
+            } => {
+                matches!(preceding_wrap_mode, TextWrapMode::Wrap)
+                    || matches!(following_wrap_mode, TextWrapMode::Wrap)
+            }
+        }
+    }
+}
+
 impl LineBreakOverride {
     /// Suppress a Unicode soft-wrap opportunity at `byte_index`.
     pub const fn suppress(byte_index: usize) -> Self {
@@ -501,36 +521,44 @@ impl<B: Brush> Default for LayoutData<B> {
 }
 
 impl<B: Brush> LayoutData<B> {
-    pub(crate) fn source_soft_wrap_opportunity_after(
+    pub(crate) fn source_soft_wrap_boundary_after(
         &self,
         item_index: usize,
         byte_index: usize,
-    ) -> bool {
+    ) -> SourceSoftWrapBoundary {
+        let Some((run, cluster)) = self.items[item_index + 1..]
+            .iter()
+            .find_map(|item| (item.kind == LayoutItemKind::TextRun).then(|| &self.runs[item.index]))
+            .and_then(|run| {
+                self.clusters
+                    .get(run.cluster_range.start)
+                    .map(|cluster| (run, cluster))
+            })
+        else {
+            return SourceSoftWrapBoundary::Absent;
+        };
         let boundary_override = self
             .line_break_overrides
             .binary_search_by_key(&byte_index, |entry| entry.byte_index())
             .ok()
             .map(|index| self.line_break_overrides[index].disposition());
-        match boundary_override {
+        let has_opportunity = match boundary_override {
             Some(LineBreakOverrideDisposition::Suppress) => false,
             Some(
                 LineBreakOverrideDisposition::NormalOpportunity
                 | LineBreakOverrideDisposition::UnprioritizedOpportunity,
             ) => true,
-            None => self.items[item_index + 1..]
-                .iter()
-                .find_map(|item| {
-                    (item.kind == LayoutItemKind::TextRun).then(|| &self.runs[item.index])
-                })
-                .and_then(|run| {
-                    self.clusters
-                        .get(run.cluster_range.start)
-                        .map(|cluster| (run, cluster))
-                })
-                .is_some_and(|(run, cluster)| {
-                    cluster.text_range(run).start == byte_index
-                        && cluster.info.boundary() == Boundary::Line
-                }),
+            None => {
+                cluster.text_range(run).start == byte_index
+                    && cluster.info.boundary() == Boundary::Line
+            }
+        };
+        if has_opportunity {
+            SourceSoftWrapBoundary::Opportunity {
+                following_wrap_mode: self.styles[cluster.style_index as usize].text_wrap_mode,
+            }
+        } else {
+            SourceSoftWrapBoundary::Absent
         }
     }
 
@@ -937,9 +965,10 @@ impl<B: Brush> LayoutData<B> {
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             if edge == LogicalInlineEdge::Start
-                                && text_wrap_mode == TextWrapMode::Wrap
                                 && projected_source_boundary != Some(ibox.index)
-                                && self.source_soft_wrap_opportunity_after(item_index, ibox.index)
+                                && self
+                                    .source_soft_wrap_boundary_after(item_index, ibox.index)
+                                    .is_available_from(text_wrap_mode)
                             {
                                 let trailing_whitespace = whitespace_advance(prev_cluster);
                                 min_width = min_width.max(running_min_width - trailing_whitespace);

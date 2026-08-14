@@ -460,13 +460,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             if edge == LogicalInlineEdge::Start
-                                && self.state.line.text_wrap_mode == TextWrapMode::Wrap
                                 && self.state.line.fit_x != 0.0
                                 && self.state.projected_source_boundary != Some(inline_box.index)
-                                && self.layout.data.source_soft_wrap_opportunity_after(
-                                    self.state.item_idx,
-                                    inline_box.index,
-                                )
+                                && self
+                                    .layout
+                                    .data
+                                    .source_soft_wrap_boundary_after(
+                                        self.state.item_idx,
+                                        inline_box.index,
+                                    )
+                                    .is_available_from(self.state.line.text_wrap_mode)
                             {
                                 self.state
                                     .mark_line_break_opportunity(RegularBreakKind::Ordinary);

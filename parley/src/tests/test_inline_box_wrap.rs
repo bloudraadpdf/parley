@@ -176,6 +176,178 @@ fn nested_logical_inline_edges_do_not_split_rtl_text() {
     assert_eq!(layout.len(), 1);
 }
 
+fn owner_transition_layout(
+    text: &str,
+    edge_index: usize,
+    preceding_wrap_mode: TextWrapMode,
+    following_wrap_mode: TextWrapMode,
+    edge_width: f32,
+) -> (crate::Layout<ColorBrush>, f32) {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::TextWrapMode(following_wrap_mode));
+    builder.push(
+        StyleProperty::TextWrapMode(preceding_wrap_mode),
+        0..edge_index,
+    );
+    builder.push_inline_box(InlineBox::inline_end_edge(
+        80,
+        edge_index,
+        0.0,
+        0.0,
+        InlineBoxBreakAffinity::ToPrevious,
+    ));
+    builder.push_inline_box(InlineBox::inline_start_edge(
+        81,
+        edge_index,
+        edge_width,
+        0.0,
+        InlineBoxBreakAffinity::ToNext,
+    ));
+    let layout = builder.build(text);
+    let max_width = layout.calculate_content_widths().max;
+    (layout, max_width)
+}
+
+#[test]
+fn unicode_opportunity_survives_a_no_wrap_owner_boundary() {
+    let (mut layout, max_width) =
+        owner_transition_layout("X X", 2, TextWrapMode::NoWrap, TextWrapMode::Wrap, 0.0);
+    layout.break_all_lines(Some(max_width * 0.55));
+
+    assert_eq!(layout.len(), 2);
+    assert_eq!(inline_box_line(&layout, 80), 0);
+    assert_eq!(inline_box_line(&layout, 81), 1);
+}
+
+#[test]
+fn unicode_opportunity_survives_a_wrapping_to_no_wrap_boundary() {
+    let (mut layout, max_width) =
+        owner_transition_layout("X X", 2, TextWrapMode::Wrap, TextWrapMode::NoWrap, 0.0);
+    layout.break_all_lines(Some(max_width * 0.55));
+
+    assert_eq!(layout.len(), 2);
+}
+
+#[test]
+fn no_wrap_content_with_owner_edges_remains_unbreakable() {
+    let (mut layout, max_width) =
+        owner_transition_layout("X X", 2, TextWrapMode::NoWrap, TextWrapMode::NoWrap, 0.0);
+    layout.break_all_lines(Some(max_width * 0.55));
+
+    assert_eq!(layout.len(), 1);
+}
+
+#[test]
+fn logical_edge_geometry_takes_only_a_source_opportunity() {
+    let (mut breakable, breakable_width) =
+        owner_transition_layout("X X", 2, TextWrapMode::Wrap, TextWrapMode::Wrap, 2.0);
+    breakable.break_all_lines(Some(breakable_width * 0.55));
+    assert_eq!(breakable.len(), 2);
+
+    let (mut unbreakable, unbreakable_width) =
+        owner_transition_layout("XX", 1, TextWrapMode::Wrap, TextWrapMode::Wrap, 2.0);
+    unbreakable.break_all_lines(Some(unbreakable_width * 0.55));
+    assert_eq!(unbreakable.len(), 1);
+}
+
+#[test]
+fn logical_start_geometry_wraps_before_its_owner_fragment() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut measure = lcx.ranged_builder(&mut fcx, "X", 1.0, false);
+    measure.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    measure.push_default(StyleProperty::FontSize(10.0));
+    let character_width = measure.build("X").calculate_content_widths().max;
+
+    let text = "XX X XX";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_inline_box(InlineBox::inline_start_edge(
+        82,
+        3,
+        character_width * 2.5,
+        0.0,
+        InlineBoxBreakAffinity::ToNext,
+    ));
+    builder.push_inline_box(InlineBox::inline_end_edge(
+        83,
+        4,
+        0.0,
+        0.0,
+        InlineBoxBreakAffinity::ToPrevious,
+    ));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(character_width * 4.0));
+
+    assert_eq!(layout.len(), 3);
+    assert_eq!(inline_box_line(&layout, 82), 1);
+    assert_eq!(inline_box_line(&layout, 83), 1);
+}
+
+fn positioned_glyph_offsets(layout: &crate::Layout<ColorBrush>) -> Vec<Vec<f32>> {
+    layout
+        .lines()
+        .map(|line| {
+            line.items()
+                .flat_map(|item| match item {
+                    crate::PositionedLayoutItem::GlyphRun(run) => {
+                        run.positioned_glyphs().map(|glyph| glyph.x).collect()
+                    }
+                    crate::PositionedLayoutItem::InlineBox(_) => Vec::new(),
+                })
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn logical_owner_edges_preserve_atomic_whitespace_wrap_topology() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut measure = lcx.ranged_builder(&mut fcx, "X", 1.0, false);
+    measure.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    measure.push_default(StyleProperty::FontSize(10.0));
+    let character_width = measure.build("X").calculate_content_widths().max;
+
+    let mut owner = lcx.ranged_builder(&mut fcx, "XX X XX", 1.0, false);
+    owner.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    owner.push_default(StyleProperty::FontSize(10.0));
+    owner.push_inline_box(InlineBox::inline_start_edge(
+        84,
+        3,
+        character_width * 2.5,
+        0.0,
+        InlineBoxBreakAffinity::ToNext,
+    ));
+    owner.push_inline_box(InlineBox::inline_end_edge(
+        85,
+        4,
+        0.0,
+        0.0,
+        InlineBoxBreakAffinity::ToPrevious,
+    ));
+    let mut owner = owner.build("XX X XX");
+    owner.break_all_lines(Some(character_width * 4.0));
+
+    let mut atomic = lcx.ranged_builder(&mut fcx, "XX X XX", 1.0, false);
+    atomic.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    atomic.push_default(StyleProperty::FontSize(10.0));
+    atomic.push_inline_box(InlineBox::new(86, 3, character_width * 2.5, 0.0));
+    let mut atomic = atomic.build("XX X XX");
+    atomic.break_all_lines(Some(character_width * 4.0));
+
+    assert_eq!(owner.len(), atomic.len());
+    assert_eq!(
+        positioned_glyph_offsets(&owner),
+        positioned_glyph_offsets(&atomic)
+    );
+}
+
 #[test]
 fn transparent_anchor_preserves_a_mandatory_break() {
     let mut fcx = create_font_context();

@@ -18,7 +18,14 @@ Logical inline-start and inline-end edges retain their directional attachment
 for bidirectional ordering. Their line-break participation is independent:
 neither edge can create a break before or after itself. A real character
 boundary, such as U+0020 SPACE, remains available through the text analyser.
-`text-wrap-mode: nowrap` suppresses that character boundary as usual.
+When both adjoining text styles use `text-wrap-mode: nowrap`, that character
+boundary remains unavailable.
+
+The analyser remains the sole authority for a source boundary. An owner edge
+can project that existing boundary to the correct side of its geometry, but it
+cannot derive an opportunity from its own presence. The projection uses the
+resolved wrapping styles on both sides of the boundary; a closing `nowrap`
+owner must not suppress an opportunity in following wrapping content.
 
 ## Validation
 
@@ -32,5 +39,13 @@ boundary, such as U+0020 SPACE, remains available through the text analyser.
 - [x] Atomic inline boxes retain their wrap opportunities.
 - [x] Transparent anchors remain absent from line breaking and sizing.
 - [x] Directional edge and bidirectional topology controls pass.
+- [x] A Unicode opportunity survives a `nowrap` owner-to-wrapping-content
+      boundary.
+- [x] A Unicode opportunity survives a wrapping-to-`nowrap` boundary.
+- [x] An unbreakable boundary with the same owner topology stays unbreakable.
+- [x] Non-zero logical edge geometry can take, but cannot create, a source
+      opportunity.
+- [x] A positioned logical owner has the same glyph offsets as the equivalent
+      atomic geometry and whitespace topology.
 - [x] Parley formatting, tests, changed-code Clippy audit, duplication, and
       diff checks pass.
