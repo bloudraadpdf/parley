@@ -290,24 +290,32 @@ fn logical_start_geometry_wraps_before_its_owner_fragment() {
     assert_eq!(inline_box_line(&layout, 83), 1);
 }
 
-fn positioned_glyph_offsets(layout: &crate::Layout<ColorBrush>) -> Vec<Vec<f32>> {
-    layout
-        .lines()
-        .map(|line| {
-            line.items()
-                .flat_map(|item| match item {
-                    crate::PositionedLayoutItem::GlyphRun(run) => {
-                        run.positioned_glyphs().map(|glyph| glyph.x).collect()
-                    }
-                    crate::PositionedLayoutItem::InlineBox(_) => Vec::new(),
-                })
-                .collect()
-        })
-        .collect()
+fn assert_consumer_owner_geometry_retains_following_space() {
+    let layout = resolved_source_boundary_layout(
+        "XX X XX",
+        &[],
+        &[
+            (87, SourceFixtureEdge::Start, 3, 2.5),
+            (88, SourceFixtureEdge::End, 4, 0.0),
+        ],
+        &[],
+        4.0,
+    );
+    assert_eq!(line_text_ranges(&layout), [0..3, 3..4, 4..7]);
 }
 
 #[test]
-fn logical_owner_edges_preserve_atomic_whitespace_wrap_topology() {
+fn consumer_border_owner_geometry_retains_the_following_collapsed_space() {
+    assert_consumer_owner_geometry_retains_following_space();
+}
+
+#[test]
+fn consumer_padding_owner_geometry_retains_the_following_collapsed_space() {
+    assert_consumer_owner_geometry_retains_following_space();
+}
+
+#[test]
+fn logical_owner_edges_retain_the_following_space_after_wrap() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let mut measure = lcx.ranged_builder(&mut fcx, "X", 1.0, false);
@@ -332,21 +340,10 @@ fn logical_owner_edges_preserve_atomic_whitespace_wrap_topology() {
         0.0,
         InlineBoxBreakAffinity::ToPrevious,
     ));
-    let mut owner = owner.build("XX X XX");
-    owner.break_all_lines(Some(character_width * 4.0));
+    let mut layout = owner.build("XX X XX");
+    layout.break_all_lines(Some(character_width * 4.0));
 
-    let mut atomic = lcx.ranged_builder(&mut fcx, "XX X XX", 1.0, false);
-    atomic.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
-    atomic.push_default(StyleProperty::FontSize(10.0));
-    atomic.push_inline_box(InlineBox::new(86, 3, character_width * 2.5, 0.0));
-    let mut atomic = atomic.build("XX X XX");
-    atomic.break_all_lines(Some(character_width * 4.0));
-
-    assert_eq!(owner.len(), atomic.len());
-    assert_eq!(
-        positioned_glyph_offsets(&owner),
-        positioned_glyph_offsets(&atomic)
-    );
+    assert_eq!(line_text_ranges(&layout), [0..3, 3..4, 4..7]);
 }
 
 #[derive(Clone, Copy)]
@@ -520,6 +517,39 @@ fn mixed_white_space_styles_retain_resolved_source_boundaries() {
         1.5,
     );
     assert_eq!(layout.len(), 3);
+}
+
+fn collapsed_no_wrap_owner_layout(boundaries: &[usize]) -> crate::Layout<ColorBrush> {
+    let text = "X X X X X X X X X X";
+    let styles = (0..10)
+        .map(|index| {
+            let start = index * 2;
+            (start..(start + 2).min(text.len()), TextWrapMode::NoWrap)
+        })
+        .collect::<Vec<_>>();
+    let edges = (0..10)
+        .flat_map(|index| {
+            let start = index * 2;
+            let end = (start + 2).min(text.len());
+            [
+                (200 + index as u64 * 2, SourceFixtureEdge::Start, start, 0.0),
+                (201 + index as u64 * 2, SourceFixtureEdge::End, end, 0.0),
+            ]
+        })
+        .collect::<Vec<_>>();
+    resolved_source_boundary_layout(text, &styles, &edges, boundaries, 10.0)
+}
+
+#[test]
+fn consumer_resolved_parent_spaces_wrap_between_no_wrap_owners() {
+    let layout = collapsed_no_wrap_owner_layout(&[2, 4, 6, 8, 10, 12, 14, 16, 18]);
+    assert_eq!(layout.len(), 2);
+}
+
+#[test]
+fn no_wrap_owned_spaces_without_a_source_handoff_remain_unbreakable() {
+    let layout = collapsed_no_wrap_owner_layout(&[]);
+    assert_eq!(layout.len(), 1);
 }
 
 #[test]

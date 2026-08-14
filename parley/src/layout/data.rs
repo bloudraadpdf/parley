@@ -118,10 +118,7 @@ impl SourceSoftWrapBoundary {
             Self::Opportunity { byte_index, .. } if byte_index == edge_byte_index => {
                 Some(ProjectedSourceBoundary::Exact { byte_index })
             }
-            Self::Opportunity {
-                byte_index,
-                authority: SourceSoftWrapAuthority::CallerResolved,
-            } if byte_index > edge_byte_index => {
+            Self::Opportunity { byte_index, .. } if byte_index > edge_byte_index => {
                 Some(ProjectedSourceBoundary::AcrossCollapsibleSpace {
                     edge_byte_index,
                     source_byte_index: byte_index,

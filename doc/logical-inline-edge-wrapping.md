@@ -35,6 +35,20 @@ the adjoining styles. A logical inline-end edge can project only the first such
 boundary after immediately following collapsible space. It cannot search past
 visible content.
 
+The consumer must retain that source decision when collapse removes its owning
+run. Logical edges and the surviving text cannot reconstruct it. For example,
+these two source sequences have the same shaped text, styles, and edge topology:
+
+```text
+normal parent space:  <nowrap>X </nowrap> <nowrap>X</nowrap>
+nowrap-owned space:   <nowrap>X </nowrap><nowrap>X</nowrap>
+shaped input:         X X
+```
+
+Only the first sequence has the parent-owned opportunity. The consumer must use
+`LineBreakOverride::resolved_source_opportunity` for it. Treating an owner edge
+as the missing decision would also make the second sequence wrap.
+
 ## Validation
 
 - [x] A same-index inline-end and inline-start pair inside `XXXXXXXXXX` does
@@ -61,5 +75,9 @@ visible content.
       boundaries.
 - [x] First-line and mixed white-space style topology retain source boundaries.
 - [x] Word-internal owner edges remain unavailable in all source modes.
+- [x] Border and padding integration topology retains the following collapsed
+      space on the next line.
+- [x] A consumer-resolved parent space wraps between `nowrap` inline owners.
+- [x] The same shaped topology without that source decision stays unbreakable.
 - [x] Parley formatting, tests, changed-code Clippy audit, duplication, and
       diff checks pass.
