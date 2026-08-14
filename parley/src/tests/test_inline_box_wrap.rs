@@ -393,6 +393,45 @@ fn logical_owner_end_projection_collapses_the_traversed_unicode_space() {
 }
 
 #[test]
+fn taken_zero_geometry_owner_end_projection_discards_the_space_visual_advance() {
+    let control = source_boundary_layout("X X", &[], &[], [], 10.0);
+    let mut layout = source_boundary_layout(
+        "X X",
+        &[],
+        &[
+            (117, SourceFixtureEdge::Start, 0, 0.0),
+            (118, SourceFixtureEdge::CollapsingEnd, 1, 0.0),
+            (119, SourceFixtureEdge::Start, 2, 0.0),
+            (120, SourceFixtureEdge::End, 3, 0.0),
+        ],
+        [],
+        1.0,
+    );
+
+    assert_eq!(layout.len(), 2);
+    let final_glyph_offsets = layout
+        .lines()
+        .map(|line| {
+            line.items()
+                .filter_map(|item| match item {
+                    crate::PositionedLayoutItem::GlyphRun(run) => Some(run.offset()),
+                    crate::PositionedLayoutItem::InlineBox(_) => None,
+                })
+                .last()
+                .expect("each line must retain a visible glyph")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(final_glyph_offsets, [0.0, 0.0]);
+
+    layout.break_all_lines(None);
+    assert_eq!(layout.len(), 1);
+    assert_eq!(
+        layout.lines().next().unwrap().metrics().advance,
+        control.lines().next().unwrap().metrics().advance,
+    );
+}
+
+#[test]
 fn untaken_owner_end_projection_keeps_its_unicode_space_advance() {
     let text = "XX X";
     let control = source_boundary_layout(text, &[], &[], [], 10.0);

@@ -41,6 +41,11 @@ space in the next line's source range with zero advance. A selected
 whose inline geometry retains the following source space from owners whose
 block-axis-only geometry must not create visible leading space.
 
+The selected participation remains line-local through final glyph
+positioning. A collapsed source space cannot regain its natural advance when
+positioned runs are materialised, while a later relayout still starts from the
+untouched shaped cluster.
+
 CSS white-space processing can remove the run that owned an opportunity before
 Parley receives the collapsed text. Caller-resolved source opportunities must
 therefore remain distinct from Unicode-derived opportunities, and retain one
@@ -111,6 +116,8 @@ owner edge as the missing decision would also make the second sequence wrap.
       removes its trailing advance from the line snapshot.
 - [x] A collapsing inline-end projection keeps its traversed Unicode space in
       the next source range with zero advance.
+- [x] Final glyph positioning retains the selected zero-advance projection
+      without mutating the shaped cluster used by relayout.
 - [x] Border and padding consumer geometry retain the projected source-space
       advance.
 - [x] The same projected space keeps its normal advance when the break is not

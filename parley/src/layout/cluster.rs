@@ -156,7 +156,12 @@ impl<'a, B: Brush> Cluster<'a, B> {
 
     /// Returns the advance of the cluster.
     pub fn advance(&self) -> f32 {
-        self.data.advance
+        self.run.line_data.map_or(self.data.advance, |_| {
+            self.line()
+                .data
+                .selected_source_cluster_advance
+                .resolve(self.text_range().start, self.data.advance)
+        })
     }
 
     /// Returns `true` if this is a right-to-left cluster.
@@ -211,13 +216,15 @@ impl<'a, B: Brush> Cluster<'a, B> {
                 style_index: self.data.style_index,
                 x: 0.,
                 y: 0.,
-                advance: self.data.advance,
+                advance: self.advance(),
             }))
         } else {
             let start = self.run.data.glyph_start + self.data.glyph_offset as usize;
-            GlyphIter::Slice(
-                self.run.layout.data.glyphs[start..start + self.data.glyph_len as usize].iter(),
-            )
+            GlyphIter::Slice {
+                iter: self.run.layout.data.glyphs[start..start + self.data.glyph_len as usize]
+                    .iter(),
+                trailing_advance_adjustment: self.advance() - self.data.advance,
+            }
         }
     }
 
@@ -523,7 +530,10 @@ impl ClusterPath {
 #[derive(Clone)]
 enum GlyphIter<'a> {
     Single(Option<Glyph>),
-    Slice(core::slice::Iter<'a, Glyph>),
+    Slice {
+        iter: core::slice::Iter<'a, Glyph>,
+        trailing_advance_adjustment: f32,
+    },
 }
 
 impl Iterator for GlyphIter<'_> {
@@ -532,8 +542,14 @@ impl Iterator for GlyphIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Single(glyph) => glyph.take(),
-            Self::Slice(iter) => {
-                let glyph = *iter.next()?;
+            Self::Slice {
+                iter,
+                trailing_advance_adjustment,
+            } => {
+                let mut glyph = *iter.next()?;
+                if iter.len() == 0 {
+                    glyph.advance += *trailing_advance_adjustment;
+                }
                 Some(glyph)
             }
         }

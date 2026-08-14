@@ -76,6 +76,24 @@ pub(crate) enum ProjectedSourceClusterParticipation {
     CollapsedSourceSpace,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SelectedSourceClusterAdvance {
+    #[default]
+    Natural,
+    Collapsed {
+        source_range: Range<usize>,
+    },
+}
+
+impl SelectedSourceClusterAdvance {
+    pub(crate) fn resolve(&self, byte_index: usize, natural_advance: f32) -> f32 {
+        match self {
+            Self::Collapsed { source_range } if source_range.contains(&byte_index) => 0.0,
+            Self::Natural | Self::Collapsed { .. } => natural_advance,
+        }
+    }
+}
+
 impl ProjectedSourceBoundary {
     pub(crate) const fn target(self) -> usize {
         match self {
@@ -113,6 +131,21 @@ impl ProjectedSourceBoundary {
             }
             Self::Exact { .. } | Self::AcrossCollapsibleSpace { .. } => {
                 ProjectedSourceClusterParticipation::Normal
+            }
+        }
+    }
+
+    pub(crate) fn selected_source_cluster_advance(self) -> SelectedSourceClusterAdvance {
+        match self {
+            Self::AcrossCollapsibleSpace {
+                edge_byte_index,
+                source_byte_index,
+                following_source_space: FollowingSourceSpace::CollapsedAfterProjectedBreak,
+            } => SelectedSourceClusterAdvance::Collapsed {
+                source_range: edge_byte_index..source_byte_index,
+            },
+            Self::Exact { .. } | Self::AcrossCollapsibleSpace { .. } => {
+                SelectedSourceClusterAdvance::Natural
             }
         }
     }
@@ -443,6 +476,8 @@ pub(crate) struct LineData {
     pub(crate) max_advance: f32,
     /// Number of justified clusters on the line.
     pub(crate) num_spaces: usize,
+    /// Source-cluster advance selected for this materialised line.
+    pub(crate) selected_source_cluster_advance: SelectedSourceClusterAdvance,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
     /// Advance inserted only because this line ended at a discretionary

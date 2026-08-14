@@ -16,7 +16,7 @@ use crate::inline_box::{InlineBoxBidiAttachment, InlineBoxLineBreakParticipation
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
-    ProjectedSourceClusterParticipation,
+    ProjectedSourceClusterParticipation, SelectedSourceClusterAdvance,
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -57,6 +57,7 @@ struct LineState {
     text_wrap_mode: TextWrapMode,
     /// We lag the resolved soft-break policy for the same boundary reason.
     soft_break_policy: SoftBreakPolicy,
+    selected_source_cluster_advance: SelectedSourceClusterAdvance,
     /// Material charged only when the selected line ending is
     /// discretionary. It is absent from the unbroken flow.
     discretionary_advance: f32,
@@ -351,6 +352,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.prev_boundary = None; // Added by Nico
         self.state.emergency_boundary = None;
         self.state.last_appended_authored_unit = AuthoredBreakUnit::Other;
+        self.state.line.selected_source_cluster_advance = self
+            .state
+            .taken_projected_source_boundary
+            .map_or_else(SelectedSourceClusterAdvance::default, |boundary| {
+                boundary.selected_source_cluster_advance()
+            });
 
         self.state.consecutive_discretionary_lines = if ended_at_discretionary {
             self.state.consecutive_discretionary_lines.saturating_add(1)
@@ -1307,7 +1314,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 }
                                 cluster.advance = new_advance;
                             }
-                            line_x += cluster.advance;
+                            line_x += line
+                                .selected_source_cluster_advance
+                                .resolve(cluster.text_range(run).start, cluster.advance);
                         }
                     }
                 }
@@ -1367,10 +1376,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         needs_reorder = true;
                     }
 
+                    let run = &self.layout.data.runs[line_item.index];
                     // Compute the run's advance by summing the advances of its constituent clusters
                     line_item.advance = self.layout.data.clusters[line_item.cluster_range.clone()]
                         .iter()
-                        .map(|c| c.advance)
+                        .map(|cluster| {
+                            line.selected_source_cluster_advance
+                                .resolve(cluster.text_range(run).start, cluster.advance)
+                        })
                         .sum();
 
                     // Ignore trailing whitespace for metrics computation
@@ -1380,7 +1393,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     }
 
                     // Compute the run's vertical metrics
-                    let run = &self.layout.data.runs[line_item.index];
                     line.metrics.ascent = line.metrics.ascent.max(run.metrics.ascent);
                     line.metrics.descent = line.metrics.descent.max(run.metrics.descent);
                     let half_leading = (run.metrics.line_height
@@ -1781,6 +1793,7 @@ fn try_commit_line<B: Brush>(
         num_spaces,
         indent: line_indent,
         discretionary_advance: state.discretionary_advance,
+        selected_source_cluster_advance: state.selected_source_cluster_advance.clone(),
         ends_at_discretionary_break: state.discretionary_break,
         metrics: LineMetrics {
             advance: state.x,
