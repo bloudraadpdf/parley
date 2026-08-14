@@ -188,6 +188,15 @@ impl SourceSoftWrapBoundary {
                 byte_index,
                 authority: SourceSoftWrapAuthority::CallerResolvedRetainedSpace,
             } if byte_index > edge_byte_index => None,
+            Self::Opportunity { byte_index, .. }
+                if byte_index > edge_byte_index
+                    && matches!(
+                        following_source_space,
+                        FollowingSourceSpace::UnicodeBoundary
+                    ) =>
+            {
+                None
+            }
             Self::Opportunity { byte_index, .. } if byte_index > edge_byte_index => {
                 Some(ProjectedSourceBoundary::AcrossCollapsibleSpace {
                     edge_byte_index,

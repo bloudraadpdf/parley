@@ -465,6 +465,7 @@ enum SourceFixtureEdge {
     Start,
     End,
     CollapsingEnd,
+    UnicodeOwnedEnd,
 }
 
 fn resolved_source_boundary_layout(
@@ -532,6 +533,16 @@ fn source_boundary_layout(
                     InlineBoxBreakAffinity::ToPrevious,
                 )
             }
+            SourceFixtureEdge::UnicodeOwnedEnd => {
+                InlineBox::inline_end_edge_with_following_source_space(
+                    *id,
+                    *index,
+                    character_width * width,
+                    0.0,
+                    crate::FollowingSourceSpace::UnicodeBoundary,
+                    InlineBoxBreakAffinity::ToPrevious,
+                )
+            }
         };
         builder.push_inline_box(inline_box);
     }
@@ -588,6 +599,19 @@ fn margin_end_geometry_retains_the_following_source_boundary() {
 #[test]
 fn padding_end_geometry_retains_the_following_source_boundary() {
     assert_end_geometry_source_projection();
+}
+
+#[test]
+fn decorated_owner_end_leaves_the_following_space_to_unicode() {
+    let layout = source_boundary_layout(
+        "XX XX",
+        &[],
+        &[(121, SourceFixtureEdge::UnicodeOwnedEnd, 2, 2.5)],
+        [],
+        4.0,
+    );
+
+    assert_eq!(line_text_ranges(&layout), [0..3, 3..5]);
 }
 
 #[test]

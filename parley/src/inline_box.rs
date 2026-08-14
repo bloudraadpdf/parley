@@ -24,6 +24,8 @@ pub enum FollowingSourceSpace {
     RetainedAdvance,
     /// The source space collapses when the projected break is selected.
     CollapsedAfterProjectedBreak,
+    /// Unicode line breaking retains authority over the source space.
+    UnicodeBoundary,
 }
 
 impl InlineBoxBreakAffinity {

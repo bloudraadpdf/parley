@@ -41,6 +41,11 @@ space in the next line's source range with zero advance. A selected
 whose inline geometry retains the following source space from owners whose
 block-axis-only geometry must not create visible leading space.
 
+An owner whose following space remains Unicode-owned uses `UnicodeBoundary`.
+Its logical end edge does not project across that space. Unicode line breaking
+therefore keeps the space with the preceding source range and starts the next
+line after it.
+
 The selected participation remains line-local through final glyph
 positioning. A collapsed source space cannot regain its natural advance when
 positioned runs are materialised, while a later relayout still starts from the
@@ -118,6 +123,8 @@ owner edge as the missing decision would also make the second sequence wrap.
       the next source range with zero advance.
 - [x] Final glyph positioning retains the selected zero-advance projection
       without mutating the shaped cluster used by relayout.
+- [x] A decorated owner can leave its following collapsible space under
+      Unicode line-breaking authority.
 - [x] Border and padding consumer geometry retain the projected source-space
       advance.
 - [x] The same projected space keeps its normal advance when the break is not
