@@ -133,6 +133,12 @@ enum OverflowingWhitespace {
     Other,
 }
 
+#[derive(Clone)]
+enum LogicalOwnerEdgePlacement {
+    Append,
+    Rewind(RegularBreakCandidate),
+}
+
 impl OverflowingWhitespace {
     const fn classify(whitespace: Whitespace, text_wrap_mode: TextWrapMode) -> Self {
         match (whitespace, text_wrap_mode) {
@@ -376,6 +382,26 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         Some((line.metrics.advance, line.size()))
     }
 
+    fn logical_owner_edge_placement(
+        &mut self,
+        source_projection: LogicalInlineEdgeSourceProjection,
+        next_fit_x: f32,
+        max_advance: f32,
+    ) -> LogicalOwnerEdgePlacement {
+        if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
+            && self.state.line.text_wrap_mode == TextWrapMode::Wrap
+            && self.state.line.fit_x != 0.0
+            && !self.advance_fits(next_fit_x, max_advance)
+        {
+            self.state.prev_boundary.take().map_or(
+                LogicalOwnerEdgePlacement::Append,
+                LogicalOwnerEdgePlacement::Rewind,
+            )
+        } else {
+            LogicalOwnerEdgePlacement::Append
+        }
+    }
+
     /// PDFreactor-parity space reclaim (gated by
     /// [`Layout::set_reclaim_space_before_inline_box`]): when the current
     /// line ends in collapsible whitespace whose removal lets `box_width`
@@ -498,6 +524,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
+                            let edge_width = inline_box.width();
+                            let edge_height = inline_box.height();
                             let source_projection = edge.source_projection(inline_box.width());
                             let boundary = self.layout.data.source_soft_wrap_boundary_after(
                                 self.state.item_idx,
@@ -523,11 +551,32 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             {
                                 self.state.mark_projected_source_boundary(projection);
                             }
+                            match self.logical_owner_edge_placement(
+                                source_projection,
+                                self.state.line.fit_x + edge_width,
+                                max_advance,
+                            ) {
+                                LogicalOwnerEdgePlacement::Append => {}
+                                LogicalOwnerEdgePlacement::Rewind(candidate) => {
+                                    let (previous, projected_source_boundary) =
+                                        candidate.into_snapshot();
+                                    self.state.line = previous.state;
+                                    if try_commit_line!(BreakReason::Regular) {
+                                        self.state.resume_after_regular_break(
+                                            previous.item_idx,
+                                            previous.run_idx,
+                                            previous.cluster_idx,
+                                            projected_source_boundary,
+                                        );
+                                        return self.start_new_line();
+                                    }
+                                }
+                            }
                             self.state.item_idx += 1;
                             self.state.append_inline_box_to_line(
-                                self.state.line.x + inline_box.width(),
-                                self.state.line.fit_x + inline_box.width(),
-                                inline_box.height(),
+                                self.state.line.x + edge_width,
+                                self.state.line.fit_x + edge_width,
+                                edge_height,
                             );
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project

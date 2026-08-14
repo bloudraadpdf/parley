@@ -111,6 +111,8 @@ owner edge as the missing decision would also make the second sequence wrap.
       atomic geometry and whitespace topology.
 - [x] Border and padding start geometry retain the atomic reference topology.
 - [x] Margin and padding end geometry retain the following source boundary.
+- [x] An overflowing glued inline-end edge reuses the preceding text
+      opportunity instead of overflowing the complete owner fragment.
 - [x] Caller-resolved collapsed-space opportunities survive `nowrap` owner
       boundaries.
 - [x] A retained opportunity after an exact-fit non-wrapping participant keeps

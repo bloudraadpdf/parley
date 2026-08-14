@@ -602,6 +602,27 @@ fn padding_end_geometry_retains_the_following_source_boundary() {
 }
 
 #[test]
+fn overflowing_glued_end_edge_reuses_the_preceding_text_opportunity() {
+    let text = "XX XX";
+    let layout = source_boundary_layout(
+        text,
+        &[],
+        &[(123, SourceFixtureEdge::End, text.len(), 4.0)],
+        core::iter::empty(),
+        5.0,
+    );
+
+    assert_eq!(
+        layout
+            .lines()
+            .map(|line| text[line.text_range()].trim())
+            .collect::<Vec<_>>(),
+        ["XX", "XX"],
+    );
+    assert_eq!(inline_box_line(&layout, 123), 1);
+}
+
+#[test]
 fn decorated_owner_end_leaves_the_following_space_to_unicode() {
     let layout = source_boundary_layout(
         "XX XX",
