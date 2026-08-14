@@ -359,6 +359,25 @@ fn resolved_source_boundary_layout(
     boundaries: &[usize],
     max_width_in_characters: f32,
 ) -> crate::Layout<ColorBrush> {
+    source_boundary_layout(
+        text,
+        styles,
+        edges,
+        boundaries
+            .iter()
+            .copied()
+            .map(LineBreakOverride::resolved_collapsed_source_opportunity),
+        max_width_in_characters,
+    )
+}
+
+fn source_boundary_layout(
+    text: &str,
+    styles: &[(Range<usize>, TextWrapMode)],
+    edges: &[(u64, SourceFixtureEdge, usize, f32)],
+    overrides: impl IntoIterator<Item = LineBreakOverride>,
+    max_width_in_characters: f32,
+) -> crate::Layout<ColorBrush> {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let mut measure = lcx.ranged_builder(&mut fcx, "X", 1.0, false);
@@ -392,13 +411,7 @@ fn resolved_source_boundary_layout(
         builder.push_inline_box(inline_box);
     }
     let mut layout = builder.build(text);
-    layout.set_line_break_overrides(
-        boundaries
-            .iter()
-            .copied()
-            .map(LineBreakOverride::resolved_source_opportunity)
-            .collect(),
-    );
+    layout.set_line_break_overrides(overrides.into_iter().collect());
     layout.break_all_lines(Some(character_width * max_width_in_characters));
     layout
 }
@@ -481,6 +494,34 @@ fn repeated_collapsed_opportunities_survive_no_wrap_owner_pairs() {
         4.0,
     );
     assert_eq!(layout.len(), 2);
+}
+
+#[test]
+fn retained_source_space_break_starts_the_following_owner_at_zero() {
+    let layout = source_boundary_layout(
+        "X X",
+        &[],
+        &[
+            (106, SourceFixtureEdge::Start, 0, 0.0),
+            (107, SourceFixtureEdge::End, 1, 0.0),
+            (108, SourceFixtureEdge::Start, 2, 0.0),
+            (109, SourceFixtureEdge::End, 3, 0.0),
+        ],
+        [LineBreakOverride::resolved_retained_source_opportunity(2)],
+        1.0,
+    );
+
+    assert_eq!(line_text_ranges(&layout), [0..2, 2..3]);
+    let glyph_offsets = layout
+        .lines()
+        .filter_map(|line| {
+            line.items().find_map(|item| match item {
+                crate::PositionedLayoutItem::GlyphRun(run) => Some(run.offset()),
+                crate::PositionedLayoutItem::InlineBox(_) => None,
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(glyph_offsets, [0.0, 0.0]);
 }
 
 #[test]

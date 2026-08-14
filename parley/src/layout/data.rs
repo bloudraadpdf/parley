@@ -36,7 +36,8 @@ pub(crate) enum LineBreakOverrideDisposition {
     Suppress,
     NormalOpportunity,
     UnprioritizedOpportunity,
-    ResolvedSourceOpportunity,
+    ResolvedCollapsedSourceOpportunity,
+    ResolvedRetainedSourceOpportunity,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,7 +52,8 @@ pub(crate) enum SourceSoftWrapBoundary {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SourceSoftWrapAuthority {
     AdjoiningStyles { following_wrap_mode: TextWrapMode },
-    CallerResolved,
+    CallerResolvedCollapsedSpace,
+    CallerResolvedRetainedSpace,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +105,9 @@ impl SourceSoftWrapBoundary {
                     || matches!(following_wrap_mode, TextWrapMode::Wrap)
             }
             Self::Opportunity {
-                authority: SourceSoftWrapAuthority::CallerResolved,
+                authority:
+                    SourceSoftWrapAuthority::CallerResolvedCollapsedSpace
+                    | SourceSoftWrapAuthority::CallerResolvedRetainedSpace,
                 ..
             } => true,
         }
@@ -118,6 +122,10 @@ impl SourceSoftWrapBoundary {
             Self::Opportunity { byte_index, .. } if byte_index == edge_byte_index => {
                 Some(ProjectedSourceBoundary::Exact { byte_index })
             }
+            Self::Opportunity {
+                byte_index,
+                authority: SourceSoftWrapAuthority::CallerResolvedRetainedSpace,
+            } if byte_index > edge_byte_index => None,
             Self::Opportunity { byte_index, .. } if byte_index > edge_byte_index => {
                 Some(ProjectedSourceBoundary::AcrossCollapsibleSpace {
                     edge_byte_index,
@@ -158,10 +166,21 @@ impl LineBreakOverride {
 
     /// Add a source opportunity whose wrapping styles were resolved before
     /// text normalisation removed its owning run.
-    pub const fn resolved_source_opportunity(byte_index: usize) -> Self {
+    pub const fn resolved_collapsed_source_opportunity(byte_index: usize) -> Self {
         Self {
             byte_index,
-            disposition: LineBreakOverrideDisposition::ResolvedSourceOpportunity,
+            disposition: LineBreakOverrideDisposition::ResolvedCollapsedSourceOpportunity,
+        }
+    }
+
+    /// Add a resolved source opportunity after a retained source space.
+    ///
+    /// Logical owner edges must not project this boundary before the visible
+    /// space that owns it.
+    pub const fn resolved_retained_source_opportunity(byte_index: usize) -> Self {
+        Self {
+            byte_index,
+            disposition: LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity,
         }
     }
 
@@ -644,9 +663,12 @@ impl<B: Brush> LayoutData<B> {
                             Some(LineBreakOverrideDisposition::Suppress) => {
                                 return SourceSoftWrapBoundary::Absent;
                             }
-                            Some(LineBreakOverrideDisposition::ResolvedSourceOpportunity) => {
-                                Some(SourceSoftWrapAuthority::CallerResolved)
-                            }
+                            Some(
+                                LineBreakOverrideDisposition::ResolvedCollapsedSourceOpportunity,
+                            ) => Some(SourceSoftWrapAuthority::CallerResolvedCollapsedSpace),
+                            Some(
+                                LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity,
+                            ) => Some(SourceSoftWrapAuthority::CallerResolvedRetainedSpace),
                             Some(
                                 LineBreakOverrideDisposition::NormalOpportunity
                                 | LineBreakOverrideDisposition::UnprioritizedOpportunity,
@@ -1047,7 +1069,10 @@ impl<B: Brush> LayoutData<B> {
                         }
                         let resolved_source_opportunity = matches!(
                             boundary_override,
-                            Some(LineBreakOverrideDisposition::ResolvedSourceOpportunity)
+                            Some(
+                                LineBreakOverrideDisposition::ResolvedCollapsedSourceOpportunity
+                                    | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity
+                            )
                         );
                         let style_resolved_opportunity = !matches!(
                             boundary_override,

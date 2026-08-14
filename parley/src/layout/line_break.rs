@@ -630,7 +630,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             Some(
                                 LineBreakOverrideDisposition::NormalOpportunity
                                 | LineBreakOverrideDisposition::UnprioritizedOpportunity
-                                | LineBreakOverrideDisposition::ResolvedSourceOpportunity,
+                                | LineBreakOverrideDisposition::ResolvedCollapsedSourceOpportunity
+                                | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity,
                             ) => true,
                             None => boundary == Boundary::Line,
                         };
@@ -648,7 +649,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         let resolved_source_opportunity = matches!(
                             boundary_override,
-                            Some(LineBreakOverrideDisposition::ResolvedSourceOpportunity)
+                            Some(
+                                LineBreakOverrideDisposition::ResolvedCollapsedSourceOpportunity
+                                    | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity
+                            )
                         );
 
                         if has_soft_break_opportunity

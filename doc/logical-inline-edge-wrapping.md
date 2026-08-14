@@ -28,12 +28,21 @@ resolved wrapping styles on both sides of the boundary; a closing `nowrap`
 owner must not suppress an opportunity in following wrapping content.
 
 CSS white-space processing can remove the run that owned an opportunity before
-Parley receives the collapsed text. A caller-resolved source opportunity must
-therefore remain distinct from a Unicode-derived opportunity. The former has
-already applied wrapping styles; the latter still requires Parley to resolve
-the adjoining styles. A logical inline-end edge can project only the first such
-boundary after immediately following collapsible space. It cannot search past
-visible content.
+Parley receives the collapsed text. Caller-resolved source opportunities must
+therefore remain distinct from Unicode-derived opportunities, and retain one
+of two closed projection authorities:
+
+```text
+resolved source opportunity
+├── collapsed-space  may project from an owner edge across the removed space
+└── retained-space   remains at its exact source byte boundary
+```
+
+Both have already applied wrapping styles; a Unicode-derived opportunity still
+requires Parley to resolve the adjoining styles. A logical inline-end edge can
+project a collapsed-space boundary only across immediately following
+collapsible space. It must not project a retained-space boundary before its
+visible space or search past visible content.
 
 The consumer must retain that source decision when collapse removes its owning
 run. Logical edges and the surviving text cannot reconstruct it. For example,
@@ -46,8 +55,9 @@ shaped input:         X X
 ```
 
 Only the first sequence has the parent-owned opportunity. The consumer must use
-`LineBreakOverride::resolved_source_opportunity` for it. Treating an owner edge
-as the missing decision would also make the second sequence wrap.
+`LineBreakOverride::resolved_collapsed_source_opportunity` for it. A retained
+wrapping space uses `resolved_retained_source_opportunity` instead. Treating an
+owner edge as the missing decision would also make the second sequence wrap.
 
 ## Validation
 
@@ -73,6 +83,8 @@ as the missing decision would also make the second sequence wrap.
 - [x] Margin and padding end geometry retain the following source boundary.
 - [x] Caller-resolved collapsed-space opportunities survive `nowrap` owner
       boundaries.
+- [x] A retained source space breaks at its exact byte and starts the following
+      line at zero rather than projecting before the visible space.
 - [x] First-line and mixed white-space style topology retain source boundaries.
 - [x] Word-internal owner edges remain unavailable in all source modes.
 - [x] Border and padding integration topology retains the following collapsed
