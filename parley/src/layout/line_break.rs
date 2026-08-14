@@ -107,9 +107,34 @@ enum RegularBreakKind {
 #[derive(Clone, Copy)]
 enum LineFit {
     Fits,
-    TrailingCollapsibleSpaceOverflow,
+    TrailingCollapsibleSpaceOverflow(SoftWrapOpportunity),
     ContentOverflow,
 }
+
+#[derive(Clone, Copy)]
+struct SoftWrapOpportunity;
+
+#[derive(Clone, Copy)]
+enum OverflowingWhitespace {
+    CollapsibleSoftWrap(SoftWrapOpportunity),
+    NoBreakGlue,
+    Other,
+}
+
+impl OverflowingWhitespace {
+    const fn classify(whitespace: Whitespace, text_wrap_mode: TextWrapMode) -> Self {
+        match (whitespace, text_wrap_mode) {
+            (Whitespace::Space, TextWrapMode::Wrap) => {
+                Self::CollapsibleSoftWrap(SoftWrapOpportunity)
+            }
+            (Whitespace::NoBreakSpace, _) => Self::NoBreakGlue,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct EmergencyBreakOpportunity(BoundarySnapshot);
 
 #[derive(Clone, Default)]
 struct BreakerState {
@@ -131,7 +156,7 @@ struct BreakerState {
 
     line: LineState,
     prev_boundary: Option<RegularBreakCandidate>,
-    emergency_boundary: Option<BoundarySnapshot>,
+    emergency_boundary: Option<EmergencyBreakOpportunity>,
     last_appended_authored_unit: AuthoredBreakUnit,
     /// Consecutive committed lines ending at discretionary boundaries.
     consecutive_discretionary_lines: u32,
@@ -212,12 +237,12 @@ impl BreakerState {
     /// Store the current iteration state so that we can revert to it if we later want to take
     /// an *emergency* line breaking opportunity at this point.
     fn mark_emergency_break_opportunity(&mut self) {
-        self.emergency_boundary = Some(BoundarySnapshot {
+        self.emergency_boundary = Some(EmergencyBreakOpportunity(BoundarySnapshot {
             item_idx: self.item_idx,
             run_idx: self.run_idx,
             cluster_idx: self.cluster_idx,
             state: self.line.clone(),
-        });
+        }));
     }
 
     #[inline(always)]
@@ -693,10 +718,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         let line_fit = if self.advance_fits(next_fit_x, max_advance) {
                             LineFit::Fits
-                        } else if is_space && text_wrap_mode == TextWrapMode::Wrap {
-                            LineFit::TrailingCollapsibleSpaceOverflow
                         } else {
-                            LineFit::ContentOverflow
+                            match OverflowingWhitespace::classify(whitespace, text_wrap_mode) {
+                                OverflowingWhitespace::CollapsibleSoftWrap(opportunity) => {
+                                    LineFit::TrailingCollapsibleSpaceOverflow(opportunity)
+                                }
+                                OverflowingWhitespace::NoBreakGlue
+                                | OverflowingWhitespace::Other => LineFit::ContentOverflow,
+                            }
                         };
 
                         match line_fit {
@@ -713,7 +742,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     self.state.line.num_spaces += 1;
                                 }
                             }
-                            LineFit::TrailingCollapsibleSpaceOverflow => {
+                            LineFit::TrailingCollapsibleSpaceOverflow(opportunity) => {
+                                let SoftWrapOpportunity = opportunity;
                                 // Normal priority composition may select an authored dash before
                                 // this later word separator. Greedy composition keeps the complete
                                 // fitting word and hangs the collapsible space.
@@ -774,6 +804,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 } else if let Some(prev_emergency) =
                                     self.state.emergency_boundary.take()
                                 {
+                                    let prev_emergency = prev_emergency.0;
                                     self.state.line = prev_emergency.state;
                                     if try_commit_line!(BreakReason::Emergency) {
                                         self.state.item_idx = prev_emergency.item_idx;
