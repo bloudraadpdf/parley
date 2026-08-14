@@ -27,6 +27,17 @@ cannot derive an opportunity from its own presence. The projection uses the
 resolved wrapping styles on both sides of the boundary; a closing `nowrap`
 owner must not suppress an opportunity in following wrapping content.
 
+An inline-start edge after a Unicode collapsible space must snapshot the break
+before that space's advance. The space stays in the source range, but it does
+not become visible trailing geometry because the edge projects the same source
+boundary. Caller-resolved retained-space boundaries stay at their exact byte;
+their visible space has separate ownership.
+
+An inline-end edge can project a Unicode boundary across its immediately
+following collapsible space. If that projected break is taken, the traversed
+space stays in the next line's source range but participates as collapsed
+source space with zero advance. It must not become visible leading geometry.
+
 CSS white-space processing can remove the run that owned an opportunity before
 Parley receives the collapsed text. Caller-resolved source opportunities must
 therefore remain distinct from Unicode-derived opportunities, and retain one
@@ -93,5 +104,11 @@ owner edge as the missing decision would also make the second sequence wrap.
       space on the next line.
 - [x] A consumer-resolved parent space wraps between `nowrap` inline owners.
 - [x] The same shaped topology without that source decision stays unbreakable.
+- [x] A Unicode space projected at inline start retains the text range and
+      removes its trailing advance from the line snapshot.
+- [x] A Unicode space traversed by an inline-end projection stays in the next
+      source range with zero advance.
+- [x] The same projected space keeps its normal advance when the break is not
+      taken.
 - [x] Parley formatting, tests, changed-code Clippy audit, duplication, and
       diff checks pass.

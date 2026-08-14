@@ -67,6 +67,12 @@ pub(crate) enum ProjectedSourceBoundary {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectedSourceClusterParticipation {
+    Normal,
+    CollapsedSourceSpace,
+}
+
 impl ProjectedSourceBoundary {
     pub(crate) const fn target(self) -> usize {
         match self {
@@ -86,6 +92,23 @@ impl ProjectedSourceBoundary {
                 edge_byte_index,
                 source_byte_index,
             } => byte_index >= edge_byte_index && byte_index <= source_byte_index,
+        }
+    }
+
+    pub(crate) const fn cluster_participation(
+        self,
+        byte_index: usize,
+    ) -> ProjectedSourceClusterParticipation {
+        match self {
+            Self::AcrossCollapsibleSpace {
+                edge_byte_index,
+                source_byte_index,
+            } if byte_index >= edge_byte_index && byte_index < source_byte_index => {
+                ProjectedSourceClusterParticipation::CollapsedSourceSpace
+            }
+            Self::Exact { .. } | Self::AcrossCollapsibleSpace { .. } => {
+                ProjectedSourceClusterParticipation::Normal
+            }
         }
     }
 }

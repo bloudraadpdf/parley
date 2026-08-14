@@ -18,6 +18,7 @@ use crate::inline_box::{
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
+    ProjectedSourceClusterParticipation,
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -82,21 +83,24 @@ struct DiscretionaryAdvance(f32);
 enum RegularBreakCandidate {
     AuthoredDashPunctuation(BoundarySnapshot),
     InlineBoxEdge(BoundarySnapshot),
-    ProjectedSource(BoundarySnapshot),
+    ProjectedSource {
+        snapshot: BoundarySnapshot,
+        boundary: ProjectedSourceBoundary,
+    },
     Ordinary(BoundarySnapshot),
     ConditionalMaterial(BoundarySnapshot),
     Unprioritized(BoundarySnapshot),
 }
 
 impl RegularBreakCandidate {
-    fn into_snapshot(self) -> BoundarySnapshot {
+    fn into_snapshot(self) -> (BoundarySnapshot, Option<ProjectedSourceBoundary>) {
         match self {
             Self::AuthoredDashPunctuation(snapshot)
             | Self::InlineBoxEdge(snapshot)
-            | Self::ProjectedSource(snapshot)
             | Self::Ordinary(snapshot)
             | Self::ConditionalMaterial(snapshot)
-            | Self::Unprioritized(snapshot) => snapshot,
+            | Self::Unprioritized(snapshot) => (snapshot, None),
+            Self::ProjectedSource { snapshot, boundary } => (snapshot, Some(boundary)),
         }
     }
 }
@@ -105,7 +109,7 @@ impl RegularBreakCandidate {
 enum RegularBreakKind {
     AuthoredDashPunctuation,
     InlineBoxEdge,
-    ProjectedSource,
+    ProjectedSource(ProjectedSourceBoundary),
     Ordinary,
     ConditionalMaterial(DiscretionaryAdvance),
     Unprioritized,
@@ -165,12 +169,26 @@ struct BreakerState {
     prev_boundary: Option<RegularBreakCandidate>,
     emergency_boundary: Option<EmergencyBreakOpportunity>,
     projected_source_boundary: Option<ProjectedSourceBoundary>,
+    taken_projected_source_boundary: Option<ProjectedSourceBoundary>,
     last_appended_authored_unit: AuthoredBreakUnit,
     /// Consecutive committed lines ending at discretionary boundaries.
     consecutive_discretionary_lines: u32,
 }
 
 impl BreakerState {
+    fn resume_after_regular_break(
+        &mut self,
+        item_idx: usize,
+        run_idx: usize,
+        cluster_idx: usize,
+        projected_source_boundary: Option<ProjectedSourceBoundary>,
+    ) {
+        self.item_idx = item_idx;
+        self.run_idx = run_idx;
+        self.cluster_idx = cluster_idx;
+        self.taken_projected_source_boundary = projected_source_boundary;
+    }
+
     /// Add the cluster(s) currently being evaluated to the current line
     fn append_cluster_to_line(
         &mut self,
@@ -222,7 +240,9 @@ impl BreakerState {
                 RegularBreakCandidate::AuthoredDashPunctuation(snapshot)
             }
             RegularBreakKind::InlineBoxEdge => RegularBreakCandidate::InlineBoxEdge(snapshot),
-            RegularBreakKind::ProjectedSource => RegularBreakCandidate::ProjectedSource(snapshot),
+            RegularBreakKind::ProjectedSource(boundary) => {
+                RegularBreakCandidate::ProjectedSource { snapshot, boundary }
+            }
             RegularBreakKind::Ordinary => RegularBreakCandidate::Ordinary(snapshot),
             RegularBreakKind::ConditionalMaterial(_) => {
                 RegularBreakCandidate::ConditionalMaterial(snapshot)
@@ -462,52 +482,61 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             match item.kind {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
-                    let break_affinity = match inline_box.line_break_participation() {
-                        InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
-                        InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
-                            let boundary = self.layout.data.source_soft_wrap_boundary_after(
-                                self.state.item_idx,
-                                inline_box.index,
-                                edge,
-                            );
-                            let projection = boundary.projection_from(inline_box.index);
-                            let project = projection.is_some()
-                                && self.state.line.fit_x != 0.0
-                                && (edge == LogicalInlineEdge::End
-                                    || self
-                                        .state
-                                        .projected_source_boundary
-                                        .map(ProjectedSourceBoundary::target)
-                                        != projection.map(ProjectedSourceBoundary::target))
-                                && boundary.is_available_from(self.state.line.text_wrap_mode);
-                            if edge == LogicalInlineEdge::Start && project {
-                                self.state
-                                    .mark_line_break_opportunity(RegularBreakKind::ProjectedSource);
-                                self.state.projected_source_boundary = projection;
+                    let break_affinity =
+                        match inline_box.line_break_participation() {
+                            InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
+                                break_affinity
                             }
-                            self.state.item_idx += 1;
-                            self.state.append_inline_box_to_line(
-                                self.state.line.x + inline_box.width(),
-                                self.state.line.fit_x + inline_box.width(),
-                                inline_box.height(),
-                            );
-                            if edge == LogicalInlineEdge::End && project {
-                                self.state
-                                    .mark_line_break_opportunity(RegularBreakKind::ProjectedSource);
-                                self.state.projected_source_boundary = projection;
+                            InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
+                                let boundary = self.layout.data.source_soft_wrap_boundary_after(
+                                    self.state.item_idx,
+                                    inline_box.index,
+                                    edge,
+                                );
+                                let projection = boundary.projection_from(inline_box.index);
+                                let project = projection.is_some()
+                                    && self.state.line.fit_x != 0.0
+                                    && (edge == LogicalInlineEdge::End
+                                        || self
+                                            .state
+                                            .projected_source_boundary
+                                            .map(ProjectedSourceBoundary::target)
+                                            != projection.map(ProjectedSourceBoundary::target))
+                                    && boundary.is_available_from(self.state.line.text_wrap_mode);
+                                if edge == LogicalInlineEdge::Start && project {
+                                    self.state.mark_line_break_opportunity(
+                                        RegularBreakKind::ProjectedSource(projection.expect(
+                                            "the projected source boundary must remain typed",
+                                        )),
+                                    );
+                                    self.state.projected_source_boundary = projection;
+                                }
+                                self.state.item_idx += 1;
+                                self.state.append_inline_box_to_line(
+                                    self.state.line.x + inline_box.width(),
+                                    self.state.line.fit_x + inline_box.width(),
+                                    inline_box.height(),
+                                );
+                                if edge == LogicalInlineEdge::End && project {
+                                    self.state.mark_line_break_opportunity(
+                                        RegularBreakKind::ProjectedSource(projection.expect(
+                                            "the projected source boundary must remain typed",
+                                        )),
+                                    );
+                                    self.state.projected_source_boundary = projection;
+                                }
+                                continue;
                             }
-                            continue;
-                        }
-                        InlineBoxLineBreakParticipation::TransparentAnchor => {
-                            self.state.item_idx += 1;
-                            self.state.append_inline_box_to_line(
-                                self.state.line.x,
-                                self.state.line.fit_x,
-                                0.0,
-                            );
-                            continue;
-                        }
-                    };
+                            InlineBoxLineBreakParticipation::TransparentAnchor => {
+                                self.state.item_idx += 1;
+                                self.state.append_inline_box_to_line(
+                                    self.state.line.x,
+                                    self.state.line.fit_x,
+                                    0.0,
+                                );
+                                continue;
+                            }
+                        };
                     let width = inline_box.width();
                     let height = inline_box.height();
 
@@ -635,6 +664,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             ) => true,
                             None => boundary == Boundary::Line,
                         };
+                        let projected_source_cluster =
+                            self.state.taken_projected_source_boundary.map_or(
+                                ProjectedSourceClusterParticipation::Normal,
+                                |projection| projection.cluster_participation(byte_index),
+                            );
                         let source_boundary_was_projected = self
                             .state
                             .projected_source_boundary
@@ -645,6 +679,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             .is_some_and(|projection| projection.target() <= byte_index)
                         {
                             self.state.projected_source_boundary = None;
+                        }
+                        if self
+                            .state
+                            .taken_projected_source_boundary
+                            .is_some_and(|projection| projection.target() <= byte_index)
+                        {
+                            self.state.taken_projected_source_boundary = None;
                         }
 
                         let resolved_source_opportunity = matches!(
@@ -748,8 +789,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // If current cluster is the start of a ligature, then advance state to include
                         // the remaining clusters that make up the ligature
-                        let mut advance = cluster.advance();
-                        let mut fit_advance = cluster.data.line_break_advance;
+                        let (mut advance, mut fit_advance) = match projected_source_cluster {
+                            ProjectedSourceClusterParticipation::Normal => {
+                                (cluster.advance(), cluster.data.line_break_advance)
+                            }
+                            ProjectedSourceClusterParticipation::CollapsedSourceSpace => (0.0, 0.0),
+                        };
                         if cluster.is_ligature_start() {
                             while let Some(cluster) = run.get(self.state.cluster_idx + 1) {
                                 if !cluster.is_ligature_continuation() {
@@ -809,7 +854,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     cluster.info().authored_break_unit(),
                                 );
                                 self.state.cluster_idx += 1;
-                                if is_space {
+                                if is_space
+                                    && projected_source_cluster
+                                        == ProjectedSourceClusterParticipation::Normal
+                                {
                                     self.state.line.num_spaces += 1;
                                 }
                             }
@@ -828,24 +876,34 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     ) => {
                                         self.state.line = prev.state;
                                         if try_commit_line!(BreakReason::Regular) {
-                                            self.state.item_idx = prev.item_idx;
-                                            self.state.run_idx = prev.run_idx;
-                                            self.state.cluster_idx = prev.cluster_idx;
+                                            self.state.resume_after_regular_break(
+                                                prev.item_idx,
+                                                prev.run_idx,
+                                                prev.cluster_idx,
+                                                None,
+                                            );
                                             return self.start_new_line();
                                         }
                                     }
                                     (
                                         _,
                                         Some(
-                                            RegularBreakCandidate::InlineBoxEdge(prev)
-                                            | RegularBreakCandidate::ProjectedSource(prev),
+                                            candidate @ (RegularBreakCandidate::InlineBoxEdge(_)
+                                            | RegularBreakCandidate::ProjectedSource {
+                                                ..
+                                            }),
                                         ),
                                     ) => {
+                                        let (prev, projected_source_boundary) =
+                                            candidate.into_snapshot();
                                         self.state.line = prev.state;
                                         if try_commit_line!(BreakReason::Regular) {
-                                            self.state.item_idx = prev.item_idx;
-                                            self.state.run_idx = prev.run_idx;
-                                            self.state.cluster_idx = prev.cluster_idx;
+                                            self.state.resume_after_regular_break(
+                                                prev.item_idx,
+                                                prev.run_idx,
+                                                prev.cluster_idx,
+                                                projected_source_boundary,
+                                            );
                                             return self.start_new_line();
                                         }
                                     }
@@ -870,12 +928,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 // provenance. Priority only changes the overflowing-separator
                                 // case above; actual content overflow remains greedy.
                                 if let Some(candidate) = self.state.prev_boundary.take() {
-                                    let prev = candidate.into_snapshot();
+                                    let (prev, projected_source_boundary) =
+                                        candidate.into_snapshot();
                                     self.state.line = prev.state;
                                     if try_commit_line!(BreakReason::Regular) {
-                                        self.state.item_idx = prev.item_idx;
-                                        self.state.run_idx = prev.run_idx;
-                                        self.state.cluster_idx = prev.cluster_idx;
+                                        self.state.resume_after_regular_break(
+                                            prev.item_idx,
+                                            prev.run_idx,
+                                            prev.cluster_idx,
+                                            projected_source_boundary,
+                                        );
                                         return self.start_new_line();
                                     }
                                 } else if let Some(prev_emergency) =

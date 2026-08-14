@@ -346,6 +346,76 @@ fn logical_owner_edges_retain_the_following_space_after_wrap() {
     assert_eq!(line_text_ranges(&layout), [0..3, 3..4, 4..7]);
 }
 
+#[test]
+fn logical_owner_end_projection_collapses_the_traversed_unicode_space() {
+    let text = "XXXXXXX XXXXXXXXXXXXXXX XXXX XXXXXXX XXXXXXXXXX";
+    let control = source_boundary_layout(text, &[], &[], [], 24.0);
+    let with_owner = source_boundary_layout(
+        text,
+        &[],
+        &[
+            (110, SourceFixtureEdge::Start, 0, 0.0),
+            (111, SourceFixtureEdge::End, 7, 0.0),
+            (112, SourceFixtureEdge::Start, 8, 0.0),
+            (113, SourceFixtureEdge::End, 23, 0.0),
+            (114, SourceFixtureEdge::Start, 28, 0.0),
+            (115, SourceFixtureEdge::End, 35, 0.0),
+        ],
+        [],
+        24.0,
+    );
+
+    assert_eq!(
+        with_owner
+            .lines()
+            .map(|line| text[line.text_range()].trim())
+            .collect::<Vec<_>>(),
+        control
+            .lines()
+            .map(|line| text[line.text_range()].trim())
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        with_owner
+            .lines()
+            .map(|line| line.metrics().advance - line.metrics().trailing_whitespace)
+            .collect::<Vec<_>>(),
+        control
+            .lines()
+            .map(|line| line.metrics().advance - line.metrics().trailing_whitespace)
+            .collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn untaken_owner_end_projection_keeps_its_unicode_space_advance() {
+    let text = "XX X";
+    let control = source_boundary_layout(text, &[], &[], [], 10.0);
+    let with_owner = source_boundary_layout(
+        text,
+        &[],
+        &[(116, SourceFixtureEdge::End, 2, 0.0)],
+        [],
+        10.0,
+    );
+
+    assert_eq!(with_owner.len(), 1);
+    assert_eq!(
+        with_owner
+            .lines()
+            .next()
+            .expect("owner line must exist")
+            .metrics()
+            .advance,
+        control
+            .lines()
+            .next()
+            .expect("control line must exist")
+            .metrics()
+            .advance,
+    );
+}
+
 #[derive(Clone, Copy)]
 enum SourceFixtureEdge {
     Start,
@@ -538,13 +608,24 @@ fn retained_boundary_after_an_exact_fit_nonwrapping_participant_wins() {
     let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(10.0));
-    builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+    builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
+    for start in (0..18).step_by(2) {
+        builder.push(
+            StyleProperty::TextWrapMode(TextWrapMode::Wrap),
+            start..start + 2,
+        );
+    }
     builder.push(StyleProperty::TextWrapMode(TextWrapMode::NoWrap), 18..19);
+    builder.push(
+        StyleProperty::TextWrapMode(TextWrapMode::Wrap),
+        19..text.len(),
+    );
     let mut layout = builder.build(text);
     layout.set_line_break_overrides(vec![
         LineBreakOverride::resolved_retained_source_opportunity(18),
         LineBreakOverride::resolved_retained_source_opportunity(20),
     ]);
+    layout.set_normal_soft_wrap_selection(NormalSoftWrapSelection::GreedyLatest);
     layout.break_all_lines(Some(max_width));
 
     assert_eq!(line_text_ranges(&layout), [0..20, 20..23]);
