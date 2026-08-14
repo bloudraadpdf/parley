@@ -302,6 +302,11 @@ fn assert_consumer_owner_geometry_retains_following_space() {
         4.0,
     );
     assert_eq!(line_text_ranges(&layout), [0..3, 3..4, 4..7]);
+    let line_advances = layout
+        .lines()
+        .map(|line| line.metrics().advance)
+        .collect::<Vec<_>>();
+    assert_eq!(line_advances[2], line_advances[0]);
 }
 
 #[test]
@@ -355,11 +360,11 @@ fn logical_owner_end_projection_collapses_the_traversed_unicode_space() {
         &[],
         &[
             (110, SourceFixtureEdge::Start, 0, 0.0),
-            (111, SourceFixtureEdge::End, 7, 0.0),
+            (111, SourceFixtureEdge::CollapsingEnd, 7, 0.0),
             (112, SourceFixtureEdge::Start, 8, 0.0),
-            (113, SourceFixtureEdge::End, 23, 0.0),
+            (113, SourceFixtureEdge::CollapsingEnd, 23, 0.0),
             (114, SourceFixtureEdge::Start, 28, 0.0),
-            (115, SourceFixtureEdge::End, 35, 0.0),
+            (115, SourceFixtureEdge::CollapsingEnd, 35, 0.0),
         ],
         [],
         24.0,
@@ -420,6 +425,7 @@ fn untaken_owner_end_projection_keeps_its_unicode_space_advance() {
 enum SourceFixtureEdge {
     Start,
     End,
+    CollapsingEnd,
 }
 
 fn resolved_source_boundary_layout(
@@ -477,6 +483,16 @@ fn source_boundary_layout(
                 0.0,
                 InlineBoxBreakAffinity::ToPrevious,
             ),
+            SourceFixtureEdge::CollapsingEnd => {
+                InlineBox::inline_end_edge_with_following_source_space(
+                    *id,
+                    *index,
+                    character_width * width,
+                    0.0,
+                    crate::FollowingSourceSpace::CollapsedAfterProjectedBreak,
+                    InlineBoxBreakAffinity::ToPrevious,
+                )
+            }
         };
         builder.push_inline_box(inline_box);
     }

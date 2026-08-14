@@ -15,6 +15,17 @@ pub enum InlineBoxBreakAffinity {
     Both,
 }
 
+/// The advance participation of a collapsible source space after an inline-end
+/// edge when the edge projects that source break.
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+pub enum FollowingSourceSpace {
+    /// The source space keeps its shaped advance.
+    #[default]
+    RetainedAdvance,
+    /// The source space collapses when the projected break is selected.
+    CollapsedAfterProjectedBreak,
+}
+
 impl InlineBoxBreakAffinity {
     pub(crate) const fn allows_break_before(self) -> bool {
         matches!(self, Self::Independent | Self::ToNext)
@@ -36,10 +47,13 @@ enum InlineBoxParticipation {
     },
     /// A logical owner edge which contributes geometry but no soft-wrap
     /// opportunity of its own.
-    LogicalOwnerEdge {
+    LogicalOwnerStart { width: f32, height: f32 },
+    /// A logical inline-end edge with explicit following source-space
+    /// participation.
+    LogicalOwnerEnd {
         width: f32,
         height: f32,
-        edge: LogicalInlineEdge,
+        following_source_space: FollowingSourceSpace,
     },
     /// A positioned anchor which is transparent to line breaking and sizing.
     TransparentAnchor,
@@ -56,7 +70,7 @@ pub(crate) enum InlineBoxLineBreakParticipation {
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub(crate) enum LogicalInlineEdge {
     Start,
-    End,
+    End(FollowingSourceSpace),
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -69,14 +83,18 @@ pub(crate) enum InlineBoxBidiAttachment {
 impl InlineBoxParticipation {
     pub(crate) const fn width(self) -> f32 {
         match self {
-            Self::Atomic { width, .. } | Self::LogicalOwnerEdge { width, .. } => width,
+            Self::Atomic { width, .. }
+            | Self::LogicalOwnerStart { width, .. }
+            | Self::LogicalOwnerEnd { width, .. } => width,
             Self::TransparentAnchor => 0.0,
         }
     }
 
     pub(crate) const fn height(self) -> f32 {
         match self {
-            Self::Atomic { height, .. } | Self::LogicalOwnerEdge { height, .. } => height,
+            Self::Atomic { height, .. }
+            | Self::LogicalOwnerStart { height, .. }
+            | Self::LogicalOwnerEnd { height, .. } => height,
             Self::TransparentAnchor => 0.0,
         }
     }
@@ -86,19 +104,33 @@ impl InlineBoxParticipation {
             Self::Atomic { break_affinity, .. } => {
                 InlineBoxLineBreakParticipation::Atomic(break_affinity)
             }
-            Self::LogicalOwnerEdge { edge, .. } => {
-                InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge)
+            Self::LogicalOwnerStart { .. } => {
+                InlineBoxLineBreakParticipation::LogicalOwnerEdge(LogicalInlineEdge::Start)
             }
+            Self::LogicalOwnerEnd {
+                following_source_space,
+                ..
+            } => InlineBoxLineBreakParticipation::LogicalOwnerEdge(LogicalInlineEdge::End(
+                following_source_space,
+            )),
             Self::TransparentAnchor => InlineBoxLineBreakParticipation::TransparentAnchor,
         }
     }
 }
 
 impl LogicalInlineEdge {
-    const fn bidi_attachment(self) -> InlineBoxBidiAttachment {
+    pub(crate) const fn is_start(self) -> bool {
+        matches!(self, Self::Start)
+    }
+
+    pub(crate) const fn is_end(self) -> bool {
+        matches!(self, Self::End(_))
+    }
+
+    pub(crate) const fn following_source_space(self) -> FollowingSourceSpace {
         match self {
-            Self::Start => InlineBoxBidiAttachment::ToNext,
-            Self::End => InlineBoxBidiAttachment::ToPrevious,
+            Self::Start => FollowingSourceSpace::RetainedAdvance,
+            Self::End(participation) => participation,
         }
     }
 }
@@ -170,7 +202,12 @@ impl InlineBox {
         height: f32,
         _break_affinity: InlineBoxBreakAffinity,
     ) -> Self {
-        Self::logical_edge(id, index, width, height, LogicalInlineEdge::Start)
+        Self {
+            id,
+            index,
+            participation: InlineBoxParticipation::LogicalOwnerStart { width, height },
+            bidi_attachment: InlineBoxBidiAttachment::ToNext,
+        }
     }
 
     /// A logical inline-end edge which reorders with the preceding content.
@@ -181,25 +218,35 @@ impl InlineBox {
         height: f32,
         _break_affinity: InlineBoxBreakAffinity,
     ) -> Self {
-        Self::logical_edge(id, index, width, height, LogicalInlineEdge::End)
+        Self::inline_end_edge_with_following_source_space(
+            id,
+            index,
+            width,
+            height,
+            FollowingSourceSpace::RetainedAdvance,
+            _break_affinity,
+        )
     }
 
-    fn logical_edge(
+    /// A logical inline-end edge with explicit following source-space
+    /// participation.
+    pub fn inline_end_edge_with_following_source_space(
         id: u64,
         index: usize,
         width: f32,
         height: f32,
-        edge: LogicalInlineEdge,
+        following_source_space: FollowingSourceSpace,
+        _break_affinity: InlineBoxBreakAffinity,
     ) -> Self {
         Self {
             id,
             index,
-            participation: InlineBoxParticipation::LogicalOwnerEdge {
+            participation: InlineBoxParticipation::LogicalOwnerEnd {
                 width,
                 height,
-                edge,
+                following_source_space,
             },
-            bidi_attachment: edge.bidi_attachment(),
+            bidi_attachment: InlineBoxBidiAttachment::ToPrevious,
         }
     }
 

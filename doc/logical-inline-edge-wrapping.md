@@ -34,9 +34,12 @@ boundary. Caller-resolved retained-space boundaries stay at their exact byte;
 their visible space has separate ownership.
 
 An inline-end edge can project a Unicode boundary across its immediately
-following collapsible space. If that projected break is taken, the traversed
-space stays in the next line's source range but participates as collapsed
-source space with zero advance. It must not become visible leading geometry.
+following collapsible space. The consumer supplies a closed following-space
+authority. A selected `CollapsedAfterProjectedBreak` edge keeps the traversed
+space in the next line's source range with zero advance. A selected
+`RetainedAdvance` edge keeps its shaped advance. This distinguishes owners
+whose inline geometry retains the following source space from owners whose
+block-axis-only geometry must not create visible leading space.
 
 CSS white-space processing can remove the run that owned an opportunity before
 Parley receives the collapsed text. Caller-resolved source opportunities must
@@ -106,8 +109,10 @@ owner edge as the missing decision would also make the second sequence wrap.
 - [x] The same shaped topology without that source decision stays unbreakable.
 - [x] A Unicode space projected at inline start retains the text range and
       removes its trailing advance from the line snapshot.
-- [x] A Unicode space traversed by an inline-end projection stays in the next
-      source range with zero advance.
+- [x] A collapsing inline-end projection keeps its traversed Unicode space in
+      the next source range with zero advance.
+- [x] Border and padding consumer geometry retain the projected source-space
+      advance.
 - [x] The same projected space keeps its normal advance when the break is not
       taken.
 - [x] Parley formatting, tests, changed-code Clippy audit, duplication, and

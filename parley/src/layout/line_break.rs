@@ -12,9 +12,7 @@ use core_maths::CoreFloat;
 use crate::analysis::cluster::Whitespace;
 use crate::analysis::{AuthoredBreakUnit, Boundary};
 use crate::data::ClusterData;
-use crate::inline_box::{
-    InlineBoxBidiAttachment, InlineBoxLineBreakParticipation, LogicalInlineEdge,
-};
+use crate::inline_box::{InlineBoxBidiAttachment, InlineBoxLineBreakParticipation};
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
@@ -176,6 +174,12 @@ struct BreakerState {
 }
 
 impl BreakerState {
+    fn mark_projected_source_boundary(&mut self, projection: Option<ProjectedSourceBoundary>) {
+        let projection = projection.expect("the projected source boundary must remain typed");
+        self.mark_line_break_opportunity(RegularBreakKind::ProjectedSource(projection));
+        self.projected_source_boundary = Some(projection);
+    }
+
     fn resume_after_regular_break(
         &mut self,
         item_idx: usize,
@@ -482,61 +486,49 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             match item.kind {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
-                    let break_affinity =
-                        match inline_box.line_break_participation() {
-                            InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
-                                break_affinity
+                    let break_affinity = match inline_box.line_break_participation() {
+                        InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
+                        InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
+                            let boundary = self.layout.data.source_soft_wrap_boundary_after(
+                                self.state.item_idx,
+                                inline_box.index,
+                                edge,
+                            );
+                            let projection = boundary
+                                .projection_from(inline_box.index, edge.following_source_space());
+                            let project = projection.is_some()
+                                && self.state.line.fit_x != 0.0
+                                && (edge.is_end()
+                                    || self
+                                        .state
+                                        .projected_source_boundary
+                                        .map(ProjectedSourceBoundary::target)
+                                        != projection.map(ProjectedSourceBoundary::target))
+                                && boundary.is_available_from(self.state.line.text_wrap_mode);
+                            if edge.is_start() && project {
+                                self.state.mark_projected_source_boundary(projection);
                             }
-                            InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
-                                let boundary = self.layout.data.source_soft_wrap_boundary_after(
-                                    self.state.item_idx,
-                                    inline_box.index,
-                                    edge,
-                                );
-                                let projection = boundary.projection_from(inline_box.index);
-                                let project = projection.is_some()
-                                    && self.state.line.fit_x != 0.0
-                                    && (edge == LogicalInlineEdge::End
-                                        || self
-                                            .state
-                                            .projected_source_boundary
-                                            .map(ProjectedSourceBoundary::target)
-                                            != projection.map(ProjectedSourceBoundary::target))
-                                    && boundary.is_available_from(self.state.line.text_wrap_mode);
-                                if edge == LogicalInlineEdge::Start && project {
-                                    self.state.mark_line_break_opportunity(
-                                        RegularBreakKind::ProjectedSource(projection.expect(
-                                            "the projected source boundary must remain typed",
-                                        )),
-                                    );
-                                    self.state.projected_source_boundary = projection;
-                                }
-                                self.state.item_idx += 1;
-                                self.state.append_inline_box_to_line(
-                                    self.state.line.x + inline_box.width(),
-                                    self.state.line.fit_x + inline_box.width(),
-                                    inline_box.height(),
-                                );
-                                if edge == LogicalInlineEdge::End && project {
-                                    self.state.mark_line_break_opportunity(
-                                        RegularBreakKind::ProjectedSource(projection.expect(
-                                            "the projected source boundary must remain typed",
-                                        )),
-                                    );
-                                    self.state.projected_source_boundary = projection;
-                                }
-                                continue;
+                            self.state.item_idx += 1;
+                            self.state.append_inline_box_to_line(
+                                self.state.line.x + inline_box.width(),
+                                self.state.line.fit_x + inline_box.width(),
+                                inline_box.height(),
+                            );
+                            if edge.is_end() && project {
+                                self.state.mark_projected_source_boundary(projection);
                             }
-                            InlineBoxLineBreakParticipation::TransparentAnchor => {
-                                self.state.item_idx += 1;
-                                self.state.append_inline_box_to_line(
-                                    self.state.line.x,
-                                    self.state.line.fit_x,
-                                    0.0,
-                                );
-                                continue;
-                            }
-                        };
+                            continue;
+                        }
+                        InlineBoxLineBreakParticipation::TransparentAnchor => {
+                            self.state.item_idx += 1;
+                            self.state.append_inline_box_to_line(
+                                self.state.line.x,
+                                self.state.line.fit_x,
+                                0.0,
+                            );
+                            continue;
+                        }
+                    };
                     let width = inline_box.width();
                     let height = inline_box.height();
 

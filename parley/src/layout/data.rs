@@ -1,7 +1,9 @@
 // Copyright 2021 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::inline_box::{InlineBox, InlineBoxLineBreakParticipation, LogicalInlineEdge};
+use crate::inline_box::{
+    FollowingSourceSpace, InlineBox, InlineBoxLineBreakParticipation, LogicalInlineEdge,
+};
 use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
 
@@ -64,6 +66,7 @@ pub(crate) enum ProjectedSourceBoundary {
     AcrossCollapsibleSpace {
         edge_byte_index: usize,
         source_byte_index: usize,
+        following_source_space: FollowingSourceSpace,
     },
 }
 
@@ -91,6 +94,7 @@ impl ProjectedSourceBoundary {
             Self::AcrossCollapsibleSpace {
                 edge_byte_index,
                 source_byte_index,
+                ..
             } => byte_index >= edge_byte_index && byte_index <= source_byte_index,
         }
     }
@@ -103,6 +107,7 @@ impl ProjectedSourceBoundary {
             Self::AcrossCollapsibleSpace {
                 edge_byte_index,
                 source_byte_index,
+                following_source_space: FollowingSourceSpace::CollapsedAfterProjectedBreak,
             } if byte_index >= edge_byte_index && byte_index < source_byte_index => {
                 ProjectedSourceClusterParticipation::CollapsedSourceSpace
             }
@@ -139,6 +144,7 @@ impl SourceSoftWrapBoundary {
     pub(crate) const fn projection_from(
         self,
         edge_byte_index: usize,
+        following_source_space: FollowingSourceSpace,
     ) -> Option<ProjectedSourceBoundary> {
         match self {
             Self::Absent => None,
@@ -153,6 +159,7 @@ impl SourceSoftWrapBoundary {
                 Some(ProjectedSourceBoundary::AcrossCollapsibleSpace {
                     edge_byte_index,
                     source_byte_index: byte_index,
+                    following_source_space,
                 })
             }
             Self::Opportunity { .. } => None,
@@ -677,9 +684,7 @@ impl<B: Brush> LayoutData<B> {
                             continue;
                         }
                         let disposition = boundary_override(cluster_index);
-                        if edge == LogicalInlineEdge::End
-                            && cluster.info.whitespace() == Whitespace::Space
-                        {
+                        if edge.is_end() && cluster.info.whitespace() == Whitespace::Space {
                             continue;
                         }
                         let authority = match disposition {
@@ -1153,21 +1158,22 @@ impl<B: Brush> LayoutData<B> {
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             let boundary =
                                 self.source_soft_wrap_boundary_after(item_index, ibox.index, edge);
-                            let projection = boundary.projection_from(ibox.index);
+                            let projection =
+                                boundary.projection_from(ibox.index, edge.following_source_space());
                             let project = projection.is_some()
-                                && (edge == LogicalInlineEdge::End
+                                && (edge.is_end()
                                     || projected_source_boundary
                                         .map(ProjectedSourceBoundary::target)
                                         != projection.map(ProjectedSourceBoundary::target))
                                 && boundary.is_available_from(text_wrap_mode);
-                            if edge == LogicalInlineEdge::Start && project {
+                            if edge.is_start() && project {
                                 let trailing_whitespace = whitespace_advance(prev_cluster);
                                 min_width = min_width.max(running_min_width - trailing_whitespace);
                                 running_min_width = 0.0;
                                 projected_source_boundary = projection;
                             }
                             running_min_width += width;
-                            if edge == LogicalInlineEdge::End && project {
+                            if edge.is_end() && project {
                                 min_width = min_width.max(running_min_width);
                                 running_min_width = 0.0;
                                 projected_source_boundary = projection;

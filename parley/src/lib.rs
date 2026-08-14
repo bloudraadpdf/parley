@@ -134,7 +134,7 @@ pub use util::BoundingBox;
 pub use builder::{RangedBuilder, StyleRunBuilder, TreeBuilder};
 pub use context::{FontMetricAdvanceQuantization, LayoutContext};
 pub use font::FontContext;
-pub use inline_box::{InlineBox, InlineBoxBreakAffinity};
+pub use inline_box::{FollowingSourceSpace, InlineBox, InlineBoxBreakAffinity};
 #[doc(inline)]
 pub use layout::Layout;
 
