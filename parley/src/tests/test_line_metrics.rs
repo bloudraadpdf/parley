@@ -129,3 +129,41 @@ fn default_font_size_relative_line_height_resolves() {
     assert!((run.metrics().line_height - 20.0).abs() < 0.01,
         "default-only FontSizeRelative(2.0) at 10px should give 20, got {}", run.metrics().line_height);
 }
+
+#[test]
+fn default_ignorable_bidi_controls_do_not_enlarge_the_line_box() {
+    fn line_metrics(
+        text: &str,
+        enlarged_range: core::ops::Range<usize>,
+    ) -> crate::layout::LineMetrics {
+        let mut fcx = create_font_context();
+        let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(20.0));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.0)));
+        if !enlarged_range.is_empty() {
+            builder.push(StyleProperty::FontSize(100.0), enlarged_range.clone());
+            builder.push(
+                StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.0)),
+                enlarged_range,
+            );
+        }
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        let metrics = *layout
+            .lines()
+            .next()
+            .expect("the probe has one line")
+            .metrics();
+        metrics
+    }
+
+    let plain = line_metrics("xx", 0..0);
+    let controls = line_metrics("x\u{202e}\u{202c}x", 1..7);
+    assert_eq!(controls.line_height, plain.line_height);
+    assert_eq!(controls.baseline, plain.baseline);
+
+    let visible_fallback = line_metrics("x\u{05d0}x", 1..3);
+    assert!(visible_fallback.line_height > plain.line_height);
+}

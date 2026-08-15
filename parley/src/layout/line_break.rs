@@ -74,6 +74,30 @@ struct BoundarySnapshot {
     state: LineState,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LineMetricParticipation {
+    Contributes,
+    DefaultIgnorableControlsOnly,
+}
+
+impl LineMetricParticipation {
+    fn from_clusters(clusters: &[ClusterData]) -> Self {
+        if !clusters.is_empty()
+            && clusters
+                .iter()
+                .all(|cluster| cluster.info.is_default_ignorable())
+        {
+            Self::DefaultIgnorableControlsOnly
+        } else {
+            Self::Contributes
+        }
+    }
+
+    const fn contributes(self) -> bool {
+        matches!(self, Self::Contributes)
+    }
+}
+
 /// A registered, non-negative advance that exists only when its conditional boundary is
 /// selected. Private construction prevents ordinary authored punctuation from
 /// being represented as inserted discretionary material.
@@ -1435,6 +1459,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         needs_reorder = true;
                     }
 
+                    let metric_participation = LineMetricParticipation::from_clusters(
+                        &self.layout.data.clusters[line_item.cluster_range.clone()],
+                    );
+
                     let run = &self.layout.data.runs[line_item.index];
                     // Compute the run's advance by summing the advances of its constituent clusters
                     line_item.advance = self.layout.data.clusters[line_item.cluster_range.clone()]
@@ -1448,6 +1476,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // Ignore trailing whitespace for metrics computation
                     // (we are iterating backwards so trailing whitespace comes first)
                     if !have_metrics && line_item.is_whitespace {
+                        continue;
+                    }
+
+                    if !metric_participation.contributes() {
                         continue;
                     }
 
