@@ -27,6 +27,14 @@ source text + formatting controls + inline participants
 Line breaking and inline-edge attachment consume this sequence.  They cannot
 repair a wrong paragraph-wide visual order.
 
+Trailing whitespace is resolved before visual alignment from the final source
+item on the materialised line.  The paragraph base direction cannot select a
+visual extreme as a substitute: a styled left-to-right run ending in an
+inter-word space can appear at that extreme inside a right-to-left paragraph,
+but its space is not line-trailing whitespace.  Stable source item identity
+therefore selects one of the closed states `Text`, `InlineBox`, or `Absent`;
+only the source-terminal text state can supply a hanging whitespace advance.
+
 ## Regression controls
 
 The CSS2 `bidi-005` control uses nested left-to-right and right-to-left
@@ -35,3 +43,9 @@ control asserts that sequence before inline geometry is attached.  A second
 control inserts the two source inline boundaries and requires the same
 sequence.  Existing Hebrew, number, repeated line-breaking, and inline-box
 identity controls remain unchanged.
+
+Physical-left alignment controls cover two styled left-to-right runs inside a
+right-to-left paragraph.  The internal space ending the first source run must
+not shift the positioned line, while a genuine source-terminal space retains
+the existing hanging behaviour.  A source-terminal inline box supplies no
+text whitespace advance.

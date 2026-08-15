@@ -1517,31 +1517,31 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             );
         }
 
-        // Compute size of line's trailing whitespace. "Trailing" is considered the right edge
-        // for LTR text and the left edge for RTL text.
-        let run = if self.layout.is_rtl() {
-            self.lines.line_items[line.item_range.clone()].first()
-        } else {
-            self.lines.line_items[line.item_range.clone()].last()
-        };
-        line.metrics.trailing_whitespace = run
-            .filter(|item| item.is_text_run() && item.has_trailing_whitespace)
-            .map(|run| {
-                fn whitespace_advance<'c, I: Iterator<Item = &'c ClusterData>>(clusters: I) -> f32 {
-                    clusters
-                        .take_while(|cluster| cluster.info.whitespace() != Whitespace::None)
-                        .map(|cluster| cluster.advance)
-                        .sum()
-                }
+        // Resolve trailing whitespace from source order. Bidi visual order can place an
+        // internal styled run at a physical extreme without making that run source-terminal.
+        line.metrics.trailing_whitespace =
+            match source_trailing_line_item(&self.lines.line_items[line.item_range.clone()]) {
+                SourceTrailingLineItem::Text(run) if run.has_trailing_whitespace => {
+                    fn whitespace_advance<'c, I: Iterator<Item = &'c ClusterData>>(
+                        clusters: I,
+                    ) -> f32 {
+                        clusters
+                            .take_while(|cluster| cluster.info.whitespace() != Whitespace::None)
+                            .map(|cluster| cluster.advance)
+                            .sum()
+                    }
 
-                let clusters = &self.layout.data.clusters[run.cluster_range.clone()];
-                if run.is_rtl() {
-                    whitespace_advance(clusters.iter())
-                } else {
-                    whitespace_advance(clusters.iter().rev())
+                    let clusters = &self.layout.data.clusters[run.cluster_range.clone()];
+                    if run.is_rtl() {
+                        whitespace_advance(clusters.iter())
+                    } else {
+                        whitespace_advance(clusters.iter().rev())
+                    }
                 }
-            })
-            .unwrap_or(0.0);
+                SourceTrailingLineItem::Text(_)
+                | SourceTrailingLineItem::InlineBox
+                | SourceTrailingLineItem::Absent => 0.0,
+            };
 
         if !have_metrics {
             // Line consisting entirely of whitespace?
@@ -1943,10 +1943,79 @@ fn reorder_line_items(runs: &mut [LineItemData], inline_boxes: &[crate::InlineBo
     runs.clone_from_slice(&reordered);
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SourceTrailingLineItem<'a> {
+    Absent,
+    Text(&'a LineItemData),
+    InlineBox,
+}
+
+fn source_trailing_line_item(line_items: &[LineItemData]) -> SourceTrailingLineItem<'_> {
+    let source_terminal = line_items
+        .iter()
+        .filter_map(|item| {
+            item.layout_item_index
+                .map(|source_index| (source_index, item))
+        })
+        .max_by_key(|(source_index, _)| *source_index)
+        .map(|(_, item)| item)
+        .or_else(|| line_items.last());
+    match source_terminal {
+        Some(item) if item.kind == LayoutItemKind::TextRun => SourceTrailingLineItem::Text(item),
+        Some(_) => SourceTrailingLineItem::InlineBox,
+        None => SourceTrailingLineItem::Absent,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{indent_start_is_scope_line, line_advance_fits};
-    use crate::IndentStart;
+    use super::{
+        SourceTrailingLineItem, indent_start_is_scope_line, line_advance_fits,
+        source_trailing_line_item,
+    };
+    use crate::{
+        IndentStart,
+        layout::data::{LayoutItemKind, LineItemData},
+    };
+
+    fn text_item(source_index: usize, text_range: core::ops::Range<usize>) -> LineItemData {
+        LineItemData {
+            kind: LayoutItemKind::TextRun,
+            index: source_index,
+            bidi_level: 0,
+            layout_item_index: Some(source_index),
+            advance: 0.0,
+            is_whitespace: false,
+            has_trailing_whitespace: false,
+            text_range,
+            cluster_range: 0..0,
+        }
+    }
+
+    #[test]
+    fn source_terminal_run_owns_trailing_whitespace_across_visual_reordering() {
+        let source_first = text_item(0, 0..6);
+        let source_last = text_item(1, 6..12);
+        let visual_order = [source_last, source_first];
+
+        let SourceTrailingLineItem::Text(selected) = source_trailing_line_item(&visual_order)
+        else {
+            panic!("the source-terminal text run must remain selected")
+        };
+        assert_eq!(selected.text_range, 6..12);
+    }
+
+    #[test]
+    fn source_terminal_inline_box_cannot_supply_trailing_text_whitespace() {
+        let mut inline_box = text_item(1, 0..0);
+        inline_box.kind = LayoutItemKind::InlineBox;
+        let visual_order = [inline_box, text_item(0, 0..6)];
+
+        assert!(matches!(
+            source_trailing_line_item(&visual_order),
+            SourceTrailingLineItem::InlineBox
+        ));
+    }
 
     #[test]
     fn line_fit_absorbs_only_the_bound_of_float_accumulation_error() {
