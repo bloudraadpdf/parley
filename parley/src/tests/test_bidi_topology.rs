@@ -1,7 +1,7 @@
 // Copyright 2026 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
@@ -34,6 +34,28 @@ fn text_atom_ids(layout: &Layout<ColorBrush>) -> Vec<BidiAtomId> {
         .collect()
 }
 
+fn visible_topology_text(layout: &Layout<ColorBrush>, text: &str) -> String {
+    layout
+        .bidi_topology()
+        .atoms()
+        .iter()
+        .filter_map(|atom| match atom.kind() {
+            BidiVisualAtomKind::Text(range) => Some((atom.level(), &text[range.clone()])),
+            BidiVisualAtomKind::InlineBox { .. } => None,
+        })
+        .flat_map(|(level, text)| {
+            let mut visible = text
+                .chars()
+                .filter(char::is_ascii_alphabetic)
+                .collect::<Vec<_>>();
+            if level.is_rtl() {
+                visible.reverse();
+            }
+            visible
+        })
+        .collect()
+}
+
 #[test]
 fn topology_uses_exact_levels_for_paragraph_visual_order() {
     let layout = build_layout("abc אבג 123", []);
@@ -57,6 +79,63 @@ fn topology_uses_exact_levels_for_paragraph_visual_order() {
         atoms[1].level(),
         "level zero and nested level two must remain distinguishable",
     );
+}
+
+#[test]
+fn nested_directional_overrides_preserve_the_css2_visible_sequence() {
+    let text = "a\u{202e}l\u{202d}c\u{202e}j\u{202d}e\u{202e}h\u{202d}g\u{202c}f\u{202c}i\u{202c}d\u{202c}k\u{202c}b\u{202c}m";
+    let layout = build_layout(text, []);
+
+    assert_eq!(visible_topology_text(&layout, text), "abcdefghijklm");
+}
+
+#[test]
+fn zero_width_inline_boundaries_preserve_the_css2_visible_sequence() {
+    let prefix = "a\u{202e}l\u{202d}";
+    let first_owner = "c\u{202e}j\u{202d}e\u{202e}";
+    let between = "h\u{202d}g\u{202c}f";
+    let second_owner = "\u{202c}i\u{202c}d\u{202c}k\u{202c}b";
+    let suffix = "\u{202c}m";
+    let text = [prefix, first_owner, between, second_owner, suffix].concat();
+    let first_start = prefix.len();
+    let first_end = first_start + first_owner.len();
+    let second_start = first_end + between.len();
+    let second_end = second_start + second_owner.len();
+    let layout = build_layout(
+        &text,
+        [
+            InlineBox::inline_start_edge(
+                1,
+                first_start,
+                0.0,
+                0.0,
+                crate::InlineBoxBreakAffinity::ToNext,
+            ),
+            InlineBox::inline_end_edge(
+                2,
+                first_end,
+                0.0,
+                0.0,
+                crate::InlineBoxBreakAffinity::ToPrevious,
+            ),
+            InlineBox::inline_start_edge(
+                3,
+                second_start,
+                0.0,
+                0.0,
+                crate::InlineBoxBreakAffinity::ToNext,
+            ),
+            InlineBox::inline_end_edge(
+                4,
+                second_end,
+                0.0,
+                0.0,
+                crate::InlineBoxBreakAffinity::ToPrevious,
+            ),
+        ],
+    );
+
+    assert_eq!(visible_topology_text(&layout, &text), "abcdefghijklm");
 }
 
 #[test]

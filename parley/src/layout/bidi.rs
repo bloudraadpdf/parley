@@ -98,7 +98,9 @@ impl<B: Brush> Layout<B> {
                 let item = &self.data.items[index];
                 match item.kind {
                     LayoutItemKind::TextRun => InlineBoxBidiAttachment::Independent,
-                    LayoutItemKind::InlineBox => self.data.inline_boxes[item.index].bidi_attachment(),
+                    LayoutItemKind::InlineBox => {
+                        self.data.inline_boxes[item.index].bidi_attachment()
+                    }
                 }
             },
         );
@@ -175,36 +177,91 @@ pub(crate) fn reorder_by_level_with_attachments(
     mut level_at: impl FnMut(usize) -> u8,
     mut attachment_at: impl FnMut(usize) -> InlineBoxBidiAttachment,
 ) {
-    let mut units: Vec<Vec<usize>> = Vec::new();
+    let mut units: Vec<BidiReorderUnit> = Vec::new();
     let mut attaches_next = false;
     for &index in indices.iter() {
         let attachment = attachment_at(index);
         if attaches_next || attachment == InlineBoxBidiAttachment::ToPrevious {
             if let Some(unit) = units.last_mut() {
-                unit.push(index);
+                unit.push(index, level_at(index), attachment);
             } else {
-                units.push(vec![index]);
+                units.push(BidiReorderUnit::new(index, level_at(index), attachment));
             }
         } else {
-            units.push(vec![index]);
+            units.push(BidiReorderUnit::new(index, level_at(index), attachment));
         }
         attaches_next = attachment == InlineBoxBidiAttachment::ToNext;
     }
 
     let mut visual_units: Vec<usize> = (0..units.len()).collect();
-    reorder_by_level(&mut visual_units, |unit_index| {
-        units[unit_index]
-            .iter()
-            .copied()
-            .map(&mut level_at)
-            .max()
-            .unwrap_or(0)
-    });
+    reorder_by_level(&mut visual_units, |unit_index| units[unit_index].level());
     let reordered = visual_units
         .into_iter()
-        .flat_map(|unit_index| units[unit_index].iter().copied())
+        .flat_map(|unit_index| units[unit_index].indices.iter().copied())
         .collect::<Vec<_>>();
     indices.copy_from_slice(&reordered);
+}
+
+struct BidiReorderUnit {
+    indices: Vec<usize>,
+    level: BidiReorderUnitLevel,
+}
+
+impl BidiReorderUnit {
+    fn new(index: usize, level: u8, attachment: InlineBoxBidiAttachment) -> Self {
+        Self {
+            indices: vec![index],
+            level: BidiReorderUnitLevel::new(level, attachment),
+        }
+    }
+
+    fn push(&mut self, index: usize, level: u8, attachment: InlineBoxBidiAttachment) {
+        self.indices.push(index);
+        self.level.include(level, attachment);
+    }
+
+    fn level(&self) -> u8 {
+        self.level.value()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BidiReorderUnitLevel {
+    AttachedOnly(u8),
+    Content(u8),
+}
+
+impl BidiReorderUnitLevel {
+    fn new(level: u8, attachment: InlineBoxBidiAttachment) -> Self {
+        match attachment {
+            InlineBoxBidiAttachment::Independent => Self::Content(level),
+            InlineBoxBidiAttachment::ToPrevious | InlineBoxBidiAttachment::ToNext => {
+                Self::AttachedOnly(level)
+            }
+        }
+    }
+
+    fn include(&mut self, level: u8, attachment: InlineBoxBidiAttachment) {
+        match (*self, attachment) {
+            (_, InlineBoxBidiAttachment::Independent) => *self = Self::Content(level),
+            (
+                Self::AttachedOnly(current),
+                InlineBoxBidiAttachment::ToPrevious | InlineBoxBidiAttachment::ToNext,
+            ) => {
+                *self = Self::AttachedOnly(current.max(level));
+            }
+            (
+                Self::Content(_),
+                InlineBoxBidiAttachment::ToPrevious | InlineBoxBidiAttachment::ToNext,
+            ) => {}
+        }
+    }
+
+    fn value(self) -> u8 {
+        match self {
+            Self::AttachedOnly(level) | Self::Content(level) => level,
+        }
+    }
 }
 
 #[cfg(test)]
