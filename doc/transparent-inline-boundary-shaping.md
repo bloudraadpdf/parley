@@ -18,3 +18,7 @@ including kerning, ligatures, and contextual substitutions.
 
 The classification is independent of line breaking. Relayout can change the
 line that owns a transparent box, but it cannot change the shaped glyph data.
+An empty paragraph is not an exception: transparent anchors at its sole source
+boundary still produce positioned line items. They contribute no glyphs,
+inline advance, or block extent, but their topology remains available to
+downstream placement.

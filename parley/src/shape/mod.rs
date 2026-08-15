@@ -539,6 +539,12 @@ fn shape_item<'a, B: Brush>(
         // Replace buffer to reuse allocation in next iteration.
         scx.unicode_buffer = Some(glyph_buffer.clear());
     }
+
+    for &(box_index, surrounding_level, _) in
+        &transparent_inline_boxes[transparent_inline_box_start..]
+    {
+        layout.data.push_inline_box(box_index, surrounding_level);
+    }
 }
 
 fn real_script(script: Script) -> bool {

@@ -75,6 +75,61 @@ fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
     assert_eq!(atomic.len(), 2);
 }
 
+#[test]
+fn empty_text_retains_every_transparent_anchor_on_its_line() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.ranged_builder(&mut fcx, "", 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_inline_box(InlineBox::transparent_anchor(76, 0));
+    builder.push_inline_box(InlineBox::transparent_anchor(77, 0));
+    let mut layout = builder.build("");
+
+    layout.break_all_lines(None);
+
+    assert_eq!(layout.len(), 1);
+    assert_eq!(positioned_inline_box_ids(&layout), [76, 77]);
+}
+
+#[test]
+fn text_retains_consecutive_transparent_anchors_at_its_start() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "after";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+        "Missing Fixture Face",
+    )));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_inline_box(InlineBox::transparent_anchor(78, 0));
+    builder.push_inline_box(InlineBox::transparent_anchor(79, 0));
+    builder.push_inline_box(InlineBox::inline_end_edge(
+        80,
+        text.len(),
+        0.0,
+        0.0,
+        InlineBoxBreakAffinity::ToPrevious,
+    ));
+    let mut layout = builder.build(text);
+
+    layout.break_all_lines(None);
+
+    assert_eq!(layout.len(), 1);
+    assert_eq!(positioned_inline_box_ids(&layout), [78, 79, 80]);
+}
+
+fn positioned_inline_box_ids(layout: &crate::Layout<ColorBrush>) -> Vec<u64> {
+    layout
+        .lines()
+        .flat_map(|line| line.items())
+        .filter_map(|item| match item {
+            crate::PositionedLayoutItem::InlineBox(inline_box) => Some(inline_box.id),
+            crate::PositionedLayoutItem::GlyphRun(_) => None,
+        })
+        .collect()
+}
+
 fn logical_inline_edge_fixture(
     text: &str,
     edge_index: usize,
