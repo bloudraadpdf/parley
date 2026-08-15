@@ -375,6 +375,7 @@ mod tests {
             kind: LayoutItemKind::TextRun,
             index: 0,
             bidi_level: 0,
+            layout_item_index: None,
             advance: line_advance,
             is_whitespace: false,
             has_trailing_whitespace: false,

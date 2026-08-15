@@ -703,14 +703,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run_data = &self.layout.data.runs[run_idx];
 
                     let run = Run::new(self.layout, 0, 0, run_data, None);
-                    let cluster_start = run_data.cluster_range.start;
-                    let cluster_end = run_data.cluster_range.end;
+                    let cluster_start = item.cluster_range.start;
+                    let cluster_end = item.cluster_range.end;
+                    self.state.cluster_idx = self.state.cluster_idx.max(cluster_start);
 
                     // println!("TextRun ({:?})", &run_data.text_range);
 
                     // Iterate over remaining clusters in the Run
                     while self.state.cluster_idx < cluster_end {
-                        let cluster = run.get(self.state.cluster_idx - cluster_start).unwrap();
+                        let cluster = run
+                            .get(self.state.cluster_idx - run_data.cluster_range.start)
+                            .unwrap();
 
                         // Retrieve metadata about the cluster
                         let is_ligature_continuation = cluster.is_ligature_continuation();
@@ -878,7 +881,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             ProjectedSourceClusterParticipation::CollapsedSourceSpace => (0.0, 0.0),
                         };
                         if cluster.is_ligature_start() {
-                            while let Some(cluster) = run.get(self.state.cluster_idx + 1) {
+                            while let Some(cluster) =
+                                run.get(self.state.cluster_idx + 1 - run_data.cluster_range.start)
+                            {
                                 if !cluster.is_ligature_continuation() {
                                     break;
                                 } else {
@@ -1178,11 +1183,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run_idx = item.index;
                     let run_data = &self.layout.data.runs[run_idx];
                     let run = Run::new(self.layout, 0, 0, run_data, None);
-                    let cluster_start = run_data.cluster_range.start;
-                    let cluster_end = run_data.cluster_range.end;
+                    let cluster_start = item.cluster_range.start;
+                    let cluster_end = item.cluster_range.end;
+                    self.state.cluster_idx = self.state.cluster_idx.max(cluster_start);
 
                     while self.state.cluster_idx < cluster_end {
-                        let cluster = run.get(self.state.cluster_idx - cluster_start).unwrap();
+                        let cluster = run
+                            .get(self.state.cluster_idx - run_data.cluster_range.start)
+                            .unwrap();
 
                         // Check if we should break before this cluster
                         if char_count >= max_chars
@@ -1583,6 +1591,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         kind: LayoutItemKind::TextRun,
                         index,
                         bidi_level: 0,
+                        layout_item_index: None,
                         advance: 0.,
                         is_whitespace: false,
                         has_trailing_whitespace: false,
@@ -1791,6 +1800,7 @@ fn try_commit_line<B: Brush>(
                     kind: LayoutItemKind::InlineBox,
                     index: item.index,
                     bidi_level: item.bidi_level,
+                    layout_item_index: Some(state.items.start + i),
                     advance: inline_box.width(),
 
                     // These properties are ignored for inline boxes. So we just put a dummy value.
@@ -1807,15 +1817,15 @@ fn try_commit_line<B: Brush>(
 
                 // Compute cluster range
                 // The first and last ranges have overrides to account for line-breaks within runs
-                let mut cluster_range = run_data.cluster_range.clone();
+                let mut cluster_range = item.cluster_range.clone();
                 if i == first_run_pos {
-                    cluster_range.start = state.clusters.start;
+                    cluster_range.start = cluster_range.start.max(state.clusters.start);
                 }
                 if i == last_run_pos {
-                    cluster_range.end = state.clusters.end;
+                    cluster_range.end = cluster_range.end.min(state.clusters.end);
                 }
 
-                if cluster_range.start >= run_data.cluster_range.end {
+                if cluster_range.start >= cluster_range.end {
                     // println!("INVALID CLUSTER");
                     // dbg!(&run_data.text_range);
                     // dbg!(cluster_range);
@@ -1843,6 +1853,7 @@ fn try_commit_line<B: Brush>(
                     kind: LayoutItemKind::TextRun,
                     index: item.index,
                     bidi_level: run_data.bidi_level,
+                    layout_item_index: Some(state.items.start + i),
                     advance: 0.,
                     is_whitespace: false,
                     has_trailing_whitespace: false,

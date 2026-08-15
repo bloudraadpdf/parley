@@ -14,7 +14,7 @@ use super::style::{Brush, FontFeature, FontSynthesis, FontVariation};
 use crate::analysis::cluster::{Char, CharCluster, Status};
 use crate::analysis::{AnalysisDataSources, CharInfo};
 use crate::convert::script_to_harfrust;
-use crate::inline_box::InlineBox;
+use crate::inline_box::{InlineBox, InlineBoxShapingParticipation};
 use crate::lru_cache::LruCache;
 use crate::util::nearly_eq;
 use crate::{FontData, convert};
@@ -114,6 +114,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
     let mut inline_box_iter = inline_boxes.iter().enumerate();
     let mut current_box = inline_box_iter.next();
+    let mut transparent_boxes = Vec::new();
 
     // Iterate over characters in the text
     for ((char_index, (byte_index, ch)), (info, style_index)) in
@@ -160,18 +161,37 @@ pub(crate) fn shape_text<'a, B: Brush>(
         //   - We do this *before* processing the text run because we need to know whether we should
         //     break the run due to the presence of an inline box.
         let mut deferred_boxes: Option<RangeInclusive<usize>> = None;
+        let mut boundary_boxes: Option<RangeInclusive<usize>> = None;
+        let mut boundary_has_inline_advance = false;
         while let Some((box_idx, inline_box)) = current_box {
             if inline_box.index == byte_index {
-                break_run = true;
-                if let Some(boxes) = &mut deferred_boxes {
-                    deferred_boxes = Some((*boxes.start())..=box_idx);
+                boundary_has_inline_advance |= matches!(
+                    inline_box.shaping_participation(),
+                    InlineBoxShapingParticipation::InterveningInlineAdvance
+                );
+                if let Some(boxes) = &mut boundary_boxes {
+                    boundary_boxes = Some((*boxes.start())..=box_idx);
                 } else {
-                    deferred_boxes = Some(box_idx..=box_idx);
+                    boundary_boxes = Some(box_idx..=box_idx);
                 };
                 // Update the current box to the next box
                 current_box = inline_box_iter.next();
             } else {
                 break;
+            }
+        }
+        if let Some(boundary_boxes) = boundary_boxes {
+            if boundary_has_inline_advance {
+                break_run = true;
+                deferred_boxes = Some(boundary_boxes);
+            } else {
+                transparent_boxes.extend(boundary_boxes.map(|box_idx| {
+                    (
+                        box_idx,
+                        bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+                        inline_boxes[box_idx].index,
+                    )
+                }));
             }
         }
 
@@ -188,7 +208,9 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 infos,
                 layout,
                 analysis_data_sources,
+                &transparent_boxes,
             );
+            transparent_boxes.clear();
             item.size = style.font_size;
             item.level = level;
             item.script = script;
@@ -206,12 +228,10 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
         if let Some(deferred_boxes) = deferred_boxes {
             for box_idx in deferred_boxes {
-                layout
-                    .data
-                    .push_inline_box(
-                        box_idx,
-                        bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
-                    );
+                layout.data.push_inline_box(
+                    box_idx,
+                    bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+                );
             }
         }
 
@@ -232,25 +252,22 @@ pub(crate) fn shape_text<'a, B: Brush>(
             infos,
             layout,
             analysis_data_sources,
+            &transparent_boxes,
         );
     }
 
     // Process any remaining inline boxes whose index is greater than the length of the text
     if let Some((box_idx, _inline_box)) = current_box {
-        layout
-            .data
-            .push_inline_box(
-                box_idx,
-                bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
-            );
+        layout.data.push_inline_box(
+            box_idx,
+            bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+        );
     }
     for (box_idx, _inline_box) in inline_box_iter {
-        layout
-            .data
-            .push_inline_box(
-                box_idx,
-                bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
-            );
+        layout.data.push_inline_box(
+            box_idx,
+            bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+        );
     }
 }
 
@@ -315,6 +332,7 @@ fn shape_item<'a, B: Brush>(
     infos: &[(CharInfo, u16)],
     layout: &mut Layout<B>,
     analysis_data_sources: &AnalysisDataSources,
+    transparent_inline_boxes: &[(usize, u8, usize)],
 ) {
     let item_text = &text[text_range.clone()];
     let item_infos = &infos[char_range.start..char_range.end]; // Only process current item
@@ -346,6 +364,7 @@ fn shape_item<'a, B: Brush>(
     );
 
     let mut current_font = font_selector.select_font(char_cluster, analysis_data_sources);
+    let mut transparent_inline_box_start = 0;
 
     // Main segmentation loop (based on swash shape_clusters) - only within current item
     while let Some(font) = current_font.take() {
@@ -488,6 +507,15 @@ fn shape_item<'a, B: Brush>(
         let segment_char_count = segment_text.chars().count();
         let segment_infos =
             &item_infos[segment_char_start..(segment_char_start + segment_char_count)];
+        let segment_text_range =
+            (text_range.start + segment_start_offset)..(text_range.start + segment_end_offset);
+        let segment_inline_box_end = transparent_inline_box_start
+            + transparent_inline_boxes[transparent_inline_box_start..].partition_point(
+                |(_, _, source_boundary)| *source_boundary <= segment_text_range.end,
+            );
+        let segment_inline_boxes =
+            &transparent_inline_boxes[transparent_inline_box_start..segment_inline_box_end];
+        transparent_inline_box_start = segment_inline_box_end;
 
         // Push harfrust-shaped run for the entire segment
         layout.data.push_run(
@@ -503,8 +531,9 @@ fn shape_item<'a, B: Brush>(
             item.letter_spacing,
             segment_text,
             segment_infos,
-            (text_range.start + segment_start_offset)..(text_range.start + segment_end_offset),
+            segment_text_range,
             harf_shaper.coords(),
+            segment_inline_boxes,
         );
 
         // Replace buffer to reuse allocation in next iteration.

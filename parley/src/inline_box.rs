@@ -70,6 +70,12 @@ pub(crate) enum InlineBoxLineBreakParticipation {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub(crate) enum InlineBoxShapingParticipation {
+    InterveningInlineAdvance,
+    TransparentBoundary,
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub(crate) enum LogicalInlineEdge {
     Start,
     End(FollowingSourceSpace),
@@ -123,6 +129,20 @@ impl InlineBoxParticipation {
                 following_source_space,
             )),
             Self::TransparentAnchor => InlineBoxLineBreakParticipation::TransparentAnchor,
+        }
+    }
+
+    pub(crate) const fn shaping_participation(self) -> InlineBoxShapingParticipation {
+        match self {
+            Self::Atomic { .. } => InlineBoxShapingParticipation::InterveningInlineAdvance,
+            Self::LogicalOwnerStart { width, .. } | Self::LogicalOwnerEnd { width, .. } => {
+                if width == 0.0 {
+                    InlineBoxShapingParticipation::TransparentBoundary
+                } else {
+                    InlineBoxShapingParticipation::InterveningInlineAdvance
+                }
+            }
+            Self::TransparentAnchor => InlineBoxShapingParticipation::TransparentBoundary,
         }
     }
 }
@@ -275,6 +295,10 @@ impl InlineBox {
 
     pub(crate) const fn line_break_participation(&self) -> InlineBoxLineBreakParticipation {
         self.participation.line_break_participation()
+    }
+
+    pub(crate) const fn shaping_participation(&self) -> InlineBoxShapingParticipation {
+        self.participation.shaping_participation()
     }
 
     pub(crate) const fn bidi_attachment(&self) -> InlineBoxBidiAttachment {

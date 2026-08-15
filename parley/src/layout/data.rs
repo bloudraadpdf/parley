@@ -513,6 +513,8 @@ pub(crate) struct LineItemData {
     pub(crate) index: usize,
     /// Bidi level for the item (used for reordering)
     pub(crate) bidi_level: u8,
+    /// Stable item identity in the paragraph topology.
+    pub(crate) layout_item_index: Option<usize>,
     /// Advance (size in direction of text flow) for the run.
     pub(crate) advance: f32,
 
@@ -588,6 +590,10 @@ pub(crate) struct LayoutItem {
     pub(crate) index: usize,
     /// Bidi level for the item (used for reordering)
     pub(crate) bidi_level: u8,
+    /// Source text owned by this item before line breaking.
+    pub(crate) text_range: Range<usize>,
+    /// Shaped clusters owned by this item before line breaking.
+    pub(crate) cluster_range: Range<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -723,7 +729,7 @@ impl<B: Brush> LayoutData<B> {
                 }
                 LayoutItemKind::TextRun => {
                     let run = &self.runs[item.index];
-                    for cluster in &self.clusters[run.cluster_range.clone()] {
+                    for cluster in &self.clusters[item.cluster_range.clone()] {
                         let cluster_index = cluster.text_range(run).start;
                         if cluster_index < byte_index {
                             continue;
@@ -827,6 +833,8 @@ impl<B: Brush> LayoutData<B> {
             kind: LayoutItemKind::InlineBox,
             index,
             bidi_level: surrounding_level,
+            text_range: 0..0,
+            cluster_range: 0..0,
         });
     }
     #[allow(clippy::too_many_arguments)]
@@ -846,6 +854,7 @@ impl<B: Brush> LayoutData<B> {
         char_infos: &[(CharInfo, u16)], // From text analysis
         text_range: Range<usize>,       // The text range this run covers
         coords: &[harfrust::NormalizedCoord],
+        transparent_inline_boxes: &[(usize, u8, usize)],
     ) {
         let coords_start = self.coords.len();
         self.coords.extend(coords.iter().map(|c| c.to_bits()));
@@ -966,6 +975,9 @@ impl<B: Brush> LayoutData<B> {
 
         let glyph_infos = glyph_buffer.glyph_infos();
         if glyph_infos.is_empty() {
+            for &(box_index, surrounding_level, _) in transparent_inline_boxes {
+                self.push_inline_box(box_index, surrounding_level);
+            }
             return;
         }
         let glyph_positions = glyph_buffer.glyph_positions();
@@ -1005,11 +1017,48 @@ impl<B: Brush> LayoutData<B> {
 
         run.cluster_range = cluster_range_start..self.clusters.len();
         if !run.cluster_range.is_empty() {
-            self.runs.push(run);
+            self.push_shaped_run(run, transparent_inline_boxes);
+        }
+    }
+
+    fn push_shaped_run(&mut self, run: RunData, transparent_inline_boxes: &[(usize, u8, usize)]) {
+        let run_index = self.runs.len();
+        let run_text_range = run.text_range.clone();
+        let run_cluster_range = run.cluster_range.clone();
+        let bidi_level = run.bidi_level;
+        self.runs.push(run);
+
+        let mut text_start = run_text_range.start;
+        let mut cluster_start = run_cluster_range.start;
+        for &(box_index, surrounding_level, boundary) in transparent_inline_boxes {
+            if !(run_text_range.start..=run_text_range.end).contains(&boundary) {
+                continue;
+            }
+            let run = &self.runs[run_index];
+            let cluster_end = self.clusters[cluster_start..run_cluster_range.end]
+                .iter()
+                .position(|cluster| cluster.text_range(run).start >= boundary)
+                .map_or(run_cluster_range.end, |offset| cluster_start + offset);
+            if text_start < boundary || cluster_start < cluster_end {
+                self.items.push(LayoutItem {
+                    kind: LayoutItemKind::TextRun,
+                    index: run_index,
+                    bidi_level,
+                    text_range: text_start..boundary,
+                    cluster_range: cluster_start..cluster_end,
+                });
+            }
+            self.push_inline_box(box_index, surrounding_level);
+            text_start = boundary;
+            cluster_start = cluster_end;
+        }
+        if text_start < run_text_range.end || cluster_start < run_cluster_range.end {
             self.items.push(LayoutItem {
                 kind: LayoutItemKind::TextRun,
-                index: self.runs.len() - 1,
+                index: run_index,
                 bidi_level,
+                text_range: text_start..run_text_range.end,
+                cluster_range: cluster_start..run_cluster_range.end,
             });
         }
     }
@@ -1118,7 +1167,7 @@ impl<B: Brush> LayoutData<B> {
             match item.kind {
                 LayoutItemKind::TextRun => {
                     let run = &self.runs[item.index];
-                    let clusters = &self.clusters[run.cluster_range.clone()];
+                    let clusters = &self.clusters[item.cluster_range.clone()];
                     if is_rtl {
                         prev_cluster = clusters.first();
                     }

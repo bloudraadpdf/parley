@@ -32,6 +32,10 @@ impl BidiLevel {
 pub struct BidiAtomId(usize);
 
 impl BidiAtomId {
+    pub(crate) const fn from_layout_item_index(index: usize) -> Self {
+        Self(index)
+    }
+
     /// Returns the stable paragraph item index.
     pub const fn index(self) -> usize {
         self.0
@@ -111,7 +115,7 @@ impl<B: Brush> Layout<B> {
                     let item = &self.data.items[index];
                     let kind = match item.kind {
                         LayoutItemKind::TextRun => {
-                            BidiVisualAtomKind::Text(self.data.runs[item.index].text_range.clone())
+                            BidiVisualAtomKind::Text(item.text_range.clone())
                         }
                         LayoutItemKind::InlineBox => {
                             let inline_box = &self.data.inline_boxes[item.index];

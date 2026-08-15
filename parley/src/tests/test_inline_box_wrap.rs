@@ -134,6 +134,62 @@ fn inline_box_line(layout: &crate::Layout<ColorBrush>, id: u64) -> usize {
         .expect("the logical edge must remain positioned")
 }
 
+fn inline_boundary_shaping_layout(edge_width: f32) -> crate::Layout<ColorBrush> {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "AV";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(40.0));
+    builder.push_inline_box(InlineBox::inline_end_edge(
+        90,
+        1,
+        edge_width,
+        0.0,
+        InlineBoxBreakAffinity::ToPrevious,
+    ));
+    builder.build(text)
+}
+
+fn first_line_advance(layout: &mut crate::Layout<ColorBrush>) -> f32 {
+    layout.break_all_lines(None);
+    layout
+        .lines()
+        .next()
+        .expect("the text must produce one line")
+        .metrics()
+        .advance
+}
+
+#[test]
+fn zero_width_logical_edge_preserves_cross_boundary_shaping() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.ranged_builder(&mut fcx, "AV", 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(40.0));
+    let uninterrupted = first_line_advance(&mut builder.build("AV"));
+
+    let mut transparent_layout = inline_boundary_shaping_layout(0.0);
+    let transparent = first_line_advance(&mut transparent_layout);
+    let intervening = first_line_advance(&mut inline_boundary_shaping_layout(4.0));
+
+    assert_eq!(transparent, uninterrupted);
+    assert!(intervening > transparent + 3.9);
+    assert_eq!(inline_box_line(&transparent_layout, 90), 0);
+
+    transparent_layout.break_all_lines(Some(uninterrupted));
+    assert_eq!(
+        transparent_layout
+            .lines()
+            .next()
+            .expect("the transparent edge must survive relayout")
+            .metrics()
+            .advance,
+        uninterrupted,
+    );
+}
+
 #[test]
 fn logical_inline_edge_pair_does_not_split_an_unbreakable_word() {
     let (mut layout, unbroken_min, unbroken_max) =

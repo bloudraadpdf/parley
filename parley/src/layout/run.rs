@@ -94,11 +94,10 @@ impl<'a, B: Brush> Run<'a, B> {
 
     /// Returns the stable pre-line-break visual atom identity for this run.
     pub fn bidi_atom_id(&self) -> Option<BidiAtomId> {
-        let run_index = self
-            .line_data
-            .map(|line_data| line_data.index)
-            .unwrap_or(self.index as usize);
-        self.layout.bidi_atom_id_for_run(run_index)
+        self.line_data
+            .and_then(|line_data| line_data.layout_item_index)
+            .map(BidiAtomId::from_layout_item_index)
+            .or_else(|| self.layout.bidi_atom_id_for_run(self.index as usize))
     }
 
     /// Returns `true` if the run has right-to-left directionality.
