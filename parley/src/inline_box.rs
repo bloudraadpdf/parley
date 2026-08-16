@@ -75,6 +75,12 @@ pub(crate) enum InlineBoxShapingParticipation {
     TransparentBoundary,
 }
 
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub(crate) enum InlineBoxLineMetricParticipation {
+    AtomicBlockExtent(f32),
+    BoundaryOnly,
+}
+
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub(crate) enum LogicalInlineEdge {
     Start,
@@ -143,6 +149,17 @@ impl InlineBoxParticipation {
                 }
             }
             Self::TransparentAnchor => InlineBoxShapingParticipation::TransparentBoundary,
+        }
+    }
+
+    pub(crate) const fn line_metric_participation(self) -> InlineBoxLineMetricParticipation {
+        match self {
+            Self::Atomic { height, .. } => {
+                InlineBoxLineMetricParticipation::AtomicBlockExtent(height)
+            }
+            Self::LogicalOwnerStart { .. }
+            | Self::LogicalOwnerEnd { .. }
+            | Self::TransparentAnchor => InlineBoxLineMetricParticipation::BoundaryOnly,
         }
     }
 }
@@ -299,6 +316,10 @@ impl InlineBox {
 
     pub(crate) const fn shaping_participation(&self) -> InlineBoxShapingParticipation {
         self.participation.shaping_participation()
+    }
+
+    pub(crate) const fn line_metric_participation(&self) -> InlineBoxLineMetricParticipation {
+        self.participation.line_metric_participation()
     }
 
     pub(crate) const fn bidi_attachment(&self) -> InlineBoxBidiAttachment {

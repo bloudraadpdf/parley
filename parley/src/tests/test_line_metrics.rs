@@ -11,9 +11,42 @@
 //! contributes the deepest below-extent — the line box must span both.
 
 use super::test_builders::create_font_context;
-use crate::{FontFamily, LayoutContext, LineHeight, StyleProperty};
+use crate::{
+    FontFamily, InlineBox, InlineBoxBreakAffinity, Layout, LayoutContext, LineHeight, StyleProperty,
+};
 
 use super::utils::ColorBrush;
+
+fn negative_leading_layout(
+    inline_boxes: impl IntoIterator<Item = InlineBox>,
+) -> Layout<ColorBrush> {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+
+    let text = "negative leading";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    for property in [
+        StyleProperty::FontFamily(FontFamily::named("Roboto")),
+        StyleProperty::FontSize(30.0),
+        StyleProperty::LineHeight(LineHeight::Absolute(10.0)),
+    ] {
+        builder.push_default(property);
+    }
+    for inline_box in inline_boxes {
+        builder.push_inline_box(inline_box);
+    }
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    layout
+}
+
+fn run_extents(metrics: &crate::RunMetrics) -> (f32, f32) {
+    let half_leading = (metrics.line_height - metrics.ascent - metrics.descent) * 0.5;
+    (
+        metrics.ascent + half_leading,
+        metrics.descent + half_leading,
+    )
+}
 
 #[test]
 fn unquantized_line_box_spans_per_run_half_leading_extents() {
@@ -92,23 +125,11 @@ fn unquantized_uniform_line_box_still_equals_the_line_height() {
 
 #[test]
 fn unquantized_uniform_negative_leading_keeps_the_authored_line_height() {
-    let mut fcx = create_font_context();
-    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-
-    let text = "negative leading";
-    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
-    builder.push_default(StyleProperty::FontSize(30.0));
-    builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(10.0)));
-    let mut layout = builder.build(text);
-    layout.break_all_lines(None);
+    let layout = negative_leading_layout([]);
 
     let line = layout.lines().next().unwrap();
     let run = line.runs().next().unwrap();
-    let metrics = run.metrics();
-    let half_leading = (metrics.line_height - metrics.ascent - metrics.descent) * 0.5;
-    let expected_above = metrics.ascent + half_leading;
-    let expected_below = metrics.descent + half_leading;
+    let (expected_above, expected_below) = run_extents(run.metrics());
 
     assert!(
         expected_below < 0.0,
@@ -116,6 +137,32 @@ fn unquantized_uniform_negative_leading_keeps_the_authored_line_height() {
     );
     assert!((line.metrics().baseline - expected_above).abs() < 0.01);
     assert!((line.metrics().line_height - 10.0).abs() < 0.01);
+}
+
+#[test]
+fn zero_height_boundaries_keep_negative_line_extents() {
+    let text = "negative leading";
+    let cases = [
+        alloc::vec![
+            InlineBox::inline_start_edge(1, 0, 0.0, 0.0, InlineBoxBreakAffinity::ToNext),
+            InlineBox::inline_end_edge(2, text.len(), 0.0, 0.0, InlineBoxBreakAffinity::ToPrevious,),
+        ],
+        alloc::vec![InlineBox::transparent_anchor(3, 0)],
+    ];
+    for inline_boxes in cases {
+        let layout = negative_leading_layout(inline_boxes);
+        let line = layout.lines().next().unwrap();
+        assert!((line.metrics().line_height - 10.0).abs() < 0.01);
+    }
+}
+
+#[test]
+fn zero_height_atomic_inline_contributes_its_baseline_edge() {
+    let layout = negative_leading_layout([InlineBox::new(1, 0, 0.0, 0.0)]);
+    let line = layout.lines().next().unwrap();
+    let run = line.runs().next().unwrap();
+    let (expected_above, _) = run_extents(run.metrics());
+    assert!((line.metrics().line_height - expected_above).abs() < 0.01);
 }
 
 #[test]

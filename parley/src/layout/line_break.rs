@@ -13,7 +13,8 @@ use crate::analysis::cluster::Whitespace;
 use crate::analysis::{AuthoredBreakUnit, Boundary};
 use crate::data::ClusterData;
 use crate::inline_box::{
-    InlineBoxBidiAttachment, InlineBoxLineBreakParticipation, LogicalInlineEdgeSourceProjection,
+    InlineBoxBidiAttachment, InlineBoxLineBreakParticipation, InlineBoxLineMetricParticipation,
+    LogicalInlineEdgeSourceProjection,
 };
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
@@ -1478,18 +1479,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         needs_reorder = true;
                     }
 
-                    // Advance is already computed in "commit line" for items
-
-                    // Default vertical alignment is to align the bottom of boxes with the text baseline.
-                    // This is equivalent to the entire height of the box being "ascent"
-                    line.metrics.ascent = line.metrics.ascent.max(item.height());
-                    include_line_metric_extents(
-                        &mut line_extents,
-                        LineMetricExtents::from_inline_box(item.height()),
-                    );
-
-                    // Mark us as having seen non-whitespace content on this line
-                    have_metrics = true;
+                    if let InlineBoxLineMetricParticipation::AtomicBlockExtent(height) =
+                        item.line_metric_participation()
+                    {
+                        line.metrics.ascent = line.metrics.ascent.max(height);
+                        include_line_metric_extents(
+                            &mut line_extents,
+                            LineMetricExtents::from_inline_box(height),
+                        );
+                        have_metrics = true;
+                    }
                 }
                 LayoutItemKind::TextRun => {
                     line_item.compute_whitespace_properties(&self.layout.data);

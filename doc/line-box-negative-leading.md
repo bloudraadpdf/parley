@@ -22,11 +22,13 @@ next run:   above = max(above, next above)
             below = max(below, next below)
 ```
 
-Zero is not a metric contributor.
+Logical owner edges and transparent anchors are boundary records, not metric
+contributors. Atomic inline boxes retain their block-extent contribution.
 
 ## Verification
 
 - [x] A uniform negative-leading run keeps its authored line height.
+- [x] A zero-height inline anchor does not clamp negative line extents.
 - [x] Mixed runs keep the maximum extent on each baseline side.
 - [x] Empty lines retain their existing zero-based fallback.
 - [x] Quantised line metrics retain their existing rounding policy.
