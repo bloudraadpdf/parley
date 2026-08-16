@@ -1581,8 +1581,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if !have_metrics {
             // Line consisting entirely of whitespace?
             if !line.item_range.is_empty() {
-                let line_item = &self.lines.line_items[line.item_range.start];
-                if line_item.is_text_run() {
+                if let Some(line_item) = self.lines.line_items[line.item_range.clone()]
+                    .iter()
+                    .find(|line_item| line_item.is_text_run())
+                {
                     let run = &self.layout.data.runs[line_item.index];
                     line.metrics.ascent = run.metrics.ascent;
                     line.metrics.descent = run.metrics.descent;

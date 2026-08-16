@@ -16,22 +16,29 @@ use core::ops::Range;
 use super::test_builders::create_font_context;
 use crate::{
     FontFamily, FontWeight, InlineBox, InlineBoxBreakAffinity, LayoutContext, LineBreakMode,
-    LineBreakOverride, NormalSoftWrapSelection, OverflowWrap, RangedBuilder, StyleProperty,
-    TextWrapMode, WordBreak, layout::DiscretionaryBreak,
+    LineBreakOverride, LineHeight, NormalSoftWrapSelection, OverflowWrap, RangedBuilder,
+    StyleProperty, TextWrapMode, WordBreak, layout::DiscretionaryBreak,
 };
 
 use super::utils::ColorBrush;
 
-fn build_transparent_anchor_layout(
+fn build_inline_box_layout(
     lcx: &mut LayoutContext<ColorBrush>,
     fcx: &mut crate::FontContext,
     text: &str,
-    inline_box: InlineBox,
+    font_size: f32,
+    line_height: Option<LineHeight>,
+    inline_boxes: impl IntoIterator<Item = InlineBox>,
 ) -> crate::Layout<ColorBrush> {
     let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
-    builder.push_default(StyleProperty::FontSize(10.0));
-    builder.push_inline_box(inline_box);
+    builder.push_default(StyleProperty::FontSize(font_size));
+    if let Some(line_height) = line_height {
+        builder.push_default(StyleProperty::LineHeight(line_height));
+    }
+    for inline_box in inline_boxes {
+        builder.push_inline_box(inline_box);
+    }
     builder.build(text)
 }
 
@@ -47,11 +54,13 @@ fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
     let text_only = text_only_builder.build(text);
     let text_widths = text_only.calculate_content_widths();
 
-    let mut transparent = build_transparent_anchor_layout(
+    let mut transparent = build_inline_box_layout(
         &mut lcx,
         &mut fcx,
         text,
-        InlineBox::transparent_anchor(73, 3),
+        10.0,
+        None,
+        [InlineBox::transparent_anchor(73, 3)],
     );
     let transparent_widths = transparent.calculate_content_widths();
     assert!((transparent_widths.min - text_widths.min).abs() < 0.01);
@@ -68,8 +77,14 @@ fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
         1,
     );
 
-    let mut atomic =
-        build_transparent_anchor_layout(&mut lcx, &mut fcx, text, InlineBox::new(74, 3, 0.0, 0.0));
+    let mut atomic = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        10.0,
+        None,
+        [InlineBox::new(74, 3, 0.0, 0.0)],
+    );
     assert!(atomic.calculate_content_widths().min < text_widths.min);
     atomic.break_all_lines(Some(text_widths.max - 1.0));
     assert_eq!(atomic.len(), 2);
@@ -90,6 +105,38 @@ fn empty_text_retains_every_transparent_anchor_on_its_line() {
 
     assert_eq!(layout.len(), 1);
     assert_eq!(positioned_inline_box_ids(&layout), [76, 77]);
+}
+
+#[test]
+fn logical_boundaries_preserve_all_whitespace_run_metrics() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "\u{a0}";
+    let mut layout = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        16.0,
+        Some(LineHeight::Absolute(96.0)),
+        [
+            InlineBox::inline_start_edge(81, 0, 0.0, 0.0, InlineBoxBreakAffinity::ToNext),
+            InlineBox::inline_end_edge(
+                82,
+                text.len(),
+                0.0,
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ),
+        ],
+    );
+
+    layout.break_all_lines(None);
+
+    let line = layout.lines().next().unwrap();
+    let run = line.runs().next().unwrap();
+    assert!((line.metrics().ascent - run.metrics().ascent).abs() < 0.01);
+    assert!((line.metrics().descent - run.metrics().descent).abs() < 0.01);
+    assert!((line.metrics().line_height - 96.0).abs() < 0.01);
 }
 
 #[test]
@@ -946,11 +993,13 @@ fn transparent_anchor_preserves_a_mandatory_break() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let text = "XXX\nXXX";
-    let mut layout = build_transparent_anchor_layout(
+    let mut layout = build_inline_box_layout(
         &mut lcx,
         &mut fcx,
         text,
-        InlineBox::transparent_anchor(75, 4),
+        10.0,
+        None,
+        [InlineBox::transparent_anchor(75, 4)],
     );
 
     layout.break_all_lines(None);

@@ -25,10 +25,15 @@ next run:   above = max(above, next above)
 Logical owner edges and transparent anchors are boundary records, not metric
 contributors. Atomic inline boxes retain their block-extent contribution.
 
+An all-whitespace line still takes metrics from its text run when logical
+owner boundaries surround that run. Boundary records must not hide the text
+run from the whitespace fallback.
+
 ## Verification
 
 - [x] A uniform negative-leading run keeps its authored line height.
 - [x] A zero-height inline anchor does not clamp negative line extents.
+- [x] Logical owner boundaries preserve all-whitespace run metrics.
 - [x] Mixed runs keep the maximum extent on each baseline side.
 - [x] Empty lines retain their existing zero-based fallback.
 - [x] Quantised line metrics retain their existing rounding policy.
