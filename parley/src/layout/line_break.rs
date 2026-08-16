@@ -22,7 +22,7 @@ use crate::layout::data::{
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
-    LineMetrics, Run,
+    LineMetrics, Run, RunMetrics,
 };
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
@@ -95,6 +95,44 @@ impl LineMetricParticipation {
 
     const fn contributes(self) -> bool {
         matches!(self, Self::Contributes)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LineMetricExtents {
+    above: f32,
+    below: f32,
+}
+
+impl LineMetricExtents {
+    fn from_run(metrics: RunMetrics) -> Self {
+        let half_leading = (metrics.line_height - metrics.ascent - metrics.descent) * 0.5;
+        Self {
+            above: metrics.ascent + half_leading,
+            below: metrics.descent + half_leading,
+        }
+    }
+
+    fn from_inline_box(height: f32) -> Self {
+        Self {
+            above: height,
+            below: 0.0,
+        }
+    }
+
+    fn include(&mut self, contribution: Self) {
+        self.above = self.above.max(contribution.above);
+        self.below = self.below.max(contribution.below);
+    }
+}
+
+fn include_line_metric_extents(
+    extents: &mut Option<LineMetricExtents>,
+    contribution: LineMetricExtents,
+) {
+    match extents {
+        Some(extents) => extents.include(contribution),
+        None => *extents = Some(contribution),
     }
 }
 
@@ -1425,9 +1463,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Cousine `code` spans inside 10pt/1.25 Arimo paragraphs make the
         // line 13.06pt, not 12.5pt). Uniform-style lines are unchanged:
         // above + below == line-height there.
-        let mut max_above = 0.0f32;
-        let mut max_below = 0.0f32;
-        let mut have_extents = false;
+        let mut line_extents = None;
         let mut have_metrics = false;
         let mut needs_reorder = false;
         for line_item in self.lines.line_items[line.item_range.clone()]
@@ -1447,8 +1483,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // Default vertical alignment is to align the bottom of boxes with the text baseline.
                     // This is equivalent to the entire height of the box being "ascent"
                     line.metrics.ascent = line.metrics.ascent.max(item.height());
-                    max_above = max_above.max(item.height());
-                    have_extents = true;
+                    include_line_metric_extents(
+                        &mut line_extents,
+                        LineMetricExtents::from_inline_box(item.height()),
+                    );
 
                     // Mark us as having seen non-whitespace content on this line
                     have_metrics = true;
@@ -1494,12 +1532,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // Compute the run's vertical metrics
                     line.metrics.ascent = line.metrics.ascent.max(run.metrics.ascent);
                     line.metrics.descent = line.metrics.descent.max(run.metrics.descent);
-                    let half_leading = (run.metrics.line_height
-                        - (run.metrics.ascent + run.metrics.descent))
-                        * 0.5;
-                    max_above = max_above.max(run.metrics.ascent + half_leading);
-                    max_below = max_below.max(run.metrics.descent + half_leading);
-                    have_extents = true;
+                    include_line_metric_extents(
+                        &mut line_extents,
+                        LineMetricExtents::from_run(run.metrics),
+                    );
 
                     // Mark us as having seen non-whitespace content on this line
                     have_metrics = true;
@@ -1551,12 +1587,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run = &self.layout.data.runs[line_item.index];
                     line.metrics.ascent = run.metrics.ascent;
                     line.metrics.descent = run.metrics.descent;
-                    let half_leading = (run.metrics.line_height
-                        - (run.metrics.ascent + run.metrics.descent))
-                        * 0.5;
-                    max_above = max_above.max(run.metrics.ascent + half_leading);
-                    max_below = max_below.max(run.metrics.descent + half_leading);
-                    have_extents = true;
+                    include_line_metric_extents(
+                        &mut line_extents,
+                        LineMetricExtents::from_run(run.metrics),
+                    );
                 }
             } else if let Some(metrics) = prev_line_metrics {
                 // HACK: copy metrics from previous line if we don't have
@@ -1569,9 +1603,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 // per-contributor model reproduces the copied geometry
                 // exactly at the new offset.
                 let prev_top = self.state.committed_y as f32 - metrics.line_height;
-                max_above = metrics.baseline - prev_top;
-                max_below = metrics.line_height - max_above;
-                have_extents = true;
+                let above = metrics.baseline - prev_top;
+                line_extents = Some(LineMetricExtents {
+                    above,
+                    below: metrics.line_height - above,
+                });
                 // If we have no items on this line, it must be the last (empty)
                 // line in a layout following a newline. Commit an empty run so
                 // that AccessKit has a node with which to identify the visual
@@ -1612,8 +1648,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // quantized path keeps the legacy Chrome-mimicking model — its
         // pixel rounding is calibrated against Chromium fixtures and
         // uniform-style UI text does not exercise the difference.
-        if !quantize && have_extents {
-            line.metrics.line_height = max_above + max_below;
+        if !quantize {
+            if let Some(extents) = line_extents {
+                line.metrics.line_height = extents.above + extents.below;
+            }
         }
 
         line.metrics.leading =
@@ -1638,13 +1676,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             let above = (leading * 0.5).floor();
             let below = leading.round() - above;
             (above, below)
-        } else if have_extents {
+        } else if let Some(extents) = line_extents {
             // Anchor the baseline at the per-contributor above-extent; the
             // leading split is whatever the extents dictate rather than an
             // even halving of the total.
             (
-                max_above - line.metrics.ascent,
-                max_below - line.metrics.descent,
+                extents.above - line.metrics.ascent,
+                extents.below - line.metrics.descent,
             )
         } else {
             (line.metrics.leading * 0.5, line.metrics.leading * 0.5)

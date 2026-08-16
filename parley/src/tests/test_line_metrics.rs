@@ -91,6 +91,34 @@ fn unquantized_uniform_line_box_still_equals_the_line_height() {
 }
 
 #[test]
+fn unquantized_uniform_negative_leading_keeps_the_authored_line_height() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+
+    let text = "negative leading";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(30.0));
+    builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(10.0)));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+
+    let line = layout.lines().next().unwrap();
+    let run = line.runs().next().unwrap();
+    let metrics = run.metrics();
+    let half_leading = (metrics.line_height - metrics.ascent - metrics.descent) * 0.5;
+    let expected_above = metrics.ascent + half_leading;
+    let expected_below = metrics.descent + half_leading;
+
+    assert!(
+        expected_below < 0.0,
+        "the fixture must have negative under-leading"
+    );
+    assert!((line.metrics().baseline - expected_above).abs() < 0.01);
+    assert!((line.metrics().line_height - 10.0).abs() < 0.01);
+}
+
+#[test]
 fn runs_keep_their_own_style_index_across_boundaries() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
