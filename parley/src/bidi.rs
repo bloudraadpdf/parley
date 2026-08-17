@@ -84,6 +84,42 @@ impl BidiResolver {
         chars: impl Iterator<Item = (char, (BidiClass, BidiMirroringGlyph))>,
         base_level: Option<u8>,
     ) {
+        let chars = chars.collect::<Vec<_>>();
+        self.clear();
+        let mut paragraph_start = 0;
+        for paragraph_end in 0..chars.len() {
+            if chars[paragraph_end].1.0 != BidiClass::ParagraphSeparator {
+                continue;
+            }
+            self.append_paragraph(&chars[paragraph_start..=paragraph_end], base_level);
+            paragraph_start = paragraph_end + 1;
+        }
+        if paragraph_start < chars.len() {
+            self.append_paragraph(&chars[paragraph_start..], base_level);
+        } else if chars.is_empty() {
+            self.base_level = base_level.unwrap_or_default() & 1;
+        }
+    }
+
+    fn append_paragraph(
+        &mut self,
+        chars: &[(char, (BidiClass, BidiMirroringGlyph))],
+        base_level: Option<u8>,
+    ) {
+        let mut paragraph = Self::new();
+        paragraph.resolve_paragraph(chars.iter().copied(), base_level);
+        if self.initial_types.is_empty() {
+            self.base_level = paragraph.base_level;
+        }
+        self.initial_types.extend(paragraph.initial_types);
+        self.levels.extend(paragraph.levels);
+    }
+
+    fn resolve_paragraph(
+        &mut self,
+        chars: impl Iterator<Item = (char, (BidiClass, BidiMirroringGlyph))>,
+        base_level: Option<u8>,
+    ) {
         self.clear();
         let mut needs_bidi = false;
         let mut len = 0;
