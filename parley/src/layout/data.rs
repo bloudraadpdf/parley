@@ -77,6 +77,12 @@ pub(crate) enum ProjectedSourceClusterParticipation {
     CollapsedSourceSpace,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectedSourceLineFill {
+    AvailableMeasure,
+    FilledMeasure,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum SelectedSourceClusterAdvance {
     #[default]
@@ -96,6 +102,36 @@ impl SelectedSourceClusterAdvance {
 }
 
 impl ProjectedSourceBoundary {
+    pub(crate) const fn resolve_line_fill(self, fill: ProjectedSourceLineFill) -> Self {
+        match (self, fill) {
+            (
+                Self::AcrossCollapsibleSpace {
+                    edge_byte_index,
+                    source_byte_index,
+                    following_source_space: FollowingSourceSpace::CollapseAfterFilledOwnerFragment,
+                },
+                ProjectedSourceLineFill::FilledMeasure,
+            ) => Self::AcrossCollapsibleSpace {
+                edge_byte_index,
+                source_byte_index,
+                following_source_space: FollowingSourceSpace::CollapsedAfterProjectedBreak,
+            },
+            (
+                Self::AcrossCollapsibleSpace {
+                    edge_byte_index,
+                    source_byte_index,
+                    following_source_space: FollowingSourceSpace::CollapseAfterFilledOwnerFragment,
+                },
+                ProjectedSourceLineFill::AvailableMeasure,
+            ) => Self::AcrossCollapsibleSpace {
+                edge_byte_index,
+                source_byte_index,
+                following_source_space: FollowingSourceSpace::RetainedAdvance,
+            },
+            (boundary, _) => boundary,
+        }
+    }
+
     pub(crate) const fn target(self) -> usize {
         match self {
             Self::Exact { byte_index } => byte_index,

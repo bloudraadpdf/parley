@@ -24,6 +24,9 @@ pub enum FollowingSourceSpace {
     RetainedAdvance,
     /// The source space collapses when the projected break is selected.
     CollapsedAfterProjectedBreak,
+    /// The source space collapses when its owner fragment already fills the
+    /// line and otherwise keeps its shaped advance.
+    CollapseAfterFilledOwnerFragment,
     /// Unicode line breaking retains authority over the source space.
     UnicodeBoundary,
 }

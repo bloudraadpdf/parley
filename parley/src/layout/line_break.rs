@@ -19,7 +19,7 @@ use crate::inline_box::{
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
-    ProjectedSourceClusterParticipation, SelectedSourceClusterAdvance,
+    ProjectedSourceClusterParticipation, ProjectedSourceLineFill, SelectedSourceClusterAdvance,
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -246,8 +246,19 @@ struct BreakerState {
 }
 
 impl BreakerState {
-    fn mark_projected_source_boundary(&mut self, projection: Option<ProjectedSourceBoundary>) {
-        let projection = projection.expect("the projected source boundary must remain typed");
+    fn mark_projected_source_boundary(
+        &mut self,
+        projection: Option<ProjectedSourceBoundary>,
+        max_advance: f32,
+    ) {
+        let fill = if self.line.fit_x >= max_advance {
+            ProjectedSourceLineFill::FilledMeasure
+        } else {
+            ProjectedSourceLineFill::AvailableMeasure
+        };
+        let projection = projection
+            .expect("the projected source boundary must remain typed")
+            .resolve_line_fill(fill);
         self.mark_line_break_opportunity(RegularBreakKind::ProjectedSource(projection));
         self.projected_source_boundary = Some(projection);
     }
@@ -612,7 +623,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 == LogicalInlineEdgeSourceProjection::BeforeGeometry
                                 && project
                             {
-                                self.state.mark_projected_source_boundary(projection);
+                                self.state
+                                    .mark_projected_source_boundary(projection, max_advance);
                             }
                             match self.logical_owner_edge_placement(
                                 source_projection,
@@ -644,7 +656,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
                             {
-                                self.state.mark_projected_source_boundary(projection);
+                                self.state
+                                    .mark_projected_source_boundary(projection, max_advance);
                             }
                             continue;
                         }

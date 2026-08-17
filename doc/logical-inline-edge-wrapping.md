@@ -47,6 +47,12 @@ space in the next line's source range with zero advance. A selected
 whose inline geometry retains the following source space from owners whose
 block-axis-only geometry must not create visible leading space.
 
+Start-only inline geometry uses `CollapseAfterFilledOwnerFragment`. It keeps
+the projected space when the owner fragment leaves available measure. It
+collapses the space when that fragment already fills the line. This keeps the
+space available for a required projected break without reducing the capacity
+of the next line after an exact fit.
+
 An owner whose following space remains Unicode-owned uses `UnicodeBoundary`.
 Its logical end edge does not project across that space. Unicode line breaking
 therefore keeps the space with the preceding source range and starts the next
@@ -131,6 +137,8 @@ owner edge as the missing decision would also make the second sequence wrap.
       the next source range with zero advance.
 - [x] Final glyph positioning retains the selected zero-advance projection
       without mutating the shaped cluster used by relayout.
+- [x] Start-only geometry collapses its following space after an exact-fit
+      owner fragment and retains it when the fragment leaves available measure.
 - [x] A decorated owner can leave its following collapsible space under
       Unicode line-breaking authority.
 - [x] A zero-width owner start cannot promote an earlier Unicode boundary over

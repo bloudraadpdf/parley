@@ -478,6 +478,27 @@ fn consumer_padding_owner_geometry_retains_the_following_collapsed_space() {
 }
 
 #[test]
+fn start_only_geometry_with_available_measure_retains_the_following_space() {
+    let layout = resolved_source_boundary_layout(
+        "XX X XX",
+        &[],
+        &[
+            (126, SourceFixtureEdge::Start, 3, 2.5),
+            (127, SourceFixtureEdge::CollapseAfterFilledOwnerEnd, 4, 0.0),
+        ],
+        &[],
+        4.0,
+    );
+
+    assert_eq!(line_text_ranges(&layout), [0..3, 3..4, 4..7]);
+    let advances = layout
+        .lines()
+        .map(|line| line.metrics().advance)
+        .collect::<Vec<_>>();
+    assert_eq!(advances[2], advances[0]);
+}
+
+#[test]
 fn logical_owner_edges_retain_the_following_space_after_wrap() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
@@ -618,12 +639,59 @@ fn untaken_owner_end_projection_keeps_its_unicode_space_advance() {
     );
 }
 
+#[test]
+fn exact_fit_owner_fragment_discards_its_following_space_at_the_next_line_start() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let max_width = source_fixture_text_width(&mut lcx, &mut fcx, "XX XX XX XX");
+    let owner_text_width = source_fixture_text_width(&mut lcx, &mut fcx, "XX");
+
+    let text = "XX XX XX XX XX";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_inline_box(InlineBox::inline_start_edge(
+        124,
+        0,
+        max_width - owner_text_width,
+        0.0,
+        InlineBoxBreakAffinity::ToNext,
+    ));
+    builder.push_inline_box(InlineBox::inline_end_edge_with_following_source_space(
+        125,
+        2,
+        0.0,
+        0.0,
+        crate::FollowingSourceSpace::CollapseAfterFilledOwnerFragment,
+        InlineBoxBreakAffinity::ToPrevious,
+    ));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(max_width));
+
+    assert_eq!(line_text_ranges(&layout), [0..2, 2..14]);
+
+    layout.break_all_lines(None);
+    assert_eq!(layout.len(), 1);
+}
+
 #[derive(Clone, Copy)]
 enum SourceFixtureEdge {
     Start,
     End,
     CollapsingEnd,
+    CollapseAfterFilledOwnerEnd,
     UnicodeOwnedEnd,
+}
+
+fn source_fixture_text_width(
+    lcx: &mut LayoutContext<ColorBrush>,
+    fcx: &mut crate::FontContext,
+    text: &str,
+) -> f32 {
+    let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.build(text).calculate_content_widths().max
 }
 
 fn resolved_source_boundary_layout(
@@ -654,10 +722,7 @@ fn source_boundary_layout(
 ) -> crate::Layout<ColorBrush> {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-    let mut measure = lcx.ranged_builder(&mut fcx, "X", 1.0, false);
-    measure.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
-    measure.push_default(StyleProperty::FontSize(10.0));
-    let character_width = measure.build("X").calculate_content_widths().max;
+    let character_width = source_fixture_text_width(&mut lcx, &mut fcx, "X");
 
     let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
@@ -688,6 +753,16 @@ fn source_boundary_layout(
                     character_width * width,
                     0.0,
                     crate::FollowingSourceSpace::CollapsedAfterProjectedBreak,
+                    InlineBoxBreakAffinity::ToPrevious,
+                )
+            }
+            SourceFixtureEdge::CollapseAfterFilledOwnerEnd => {
+                InlineBox::inline_end_edge_with_following_source_space(
+                    *id,
+                    *index,
+                    character_width * width,
+                    0.0,
+                    crate::FollowingSourceSpace::CollapseAfterFilledOwnerFragment,
                     InlineBoxBreakAffinity::ToPrevious,
                 )
             }
