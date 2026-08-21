@@ -3,7 +3,7 @@
 
 use super::{
     BreakReason,
-    data::{ClusterData, LineItemData},
+    data::{ClusterData, LineItemData, PhysicalLineEdge},
 };
 use crate::data::LayoutData;
 use crate::style::Brush;
@@ -174,27 +174,6 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
 
     // Apply alignment to line items
     for line_index in 0..layout.lines.len() {
-        let (indent, line_advance, trailing_whitespace, break_reason, num_spaces, item_range) = {
-            let line = &layout.lines[line_index];
-            (
-                line.indent,
-                line.metrics.advance,
-                line.metrics.trailing_whitespace,
-                line.break_reason,
-                line.num_spaces,
-                line.item_range.clone(),
-            )
-        };
-
-        if is_rtl {
-            // In RTL text, trailing whitespace is on the left. As we hang that whitespace, offset
-            // the line to the left. Note: indent is not subtracted here because `free_space` below
-            // already accounts for it.
-            layout.lines[line_index].metrics.offset = -trailing_whitespace;
-        } else {
-            layout.lines[line_index].metrics.offset = indent;
-        }
-
         // Per-line alignment width override (peedeeef CSS 2.1 §9.5 Rule 9).
         // Falls back to `layout.alignment_width` when no override is set
         // for this line.
@@ -203,9 +182,28 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
             .get(line_index)
             .copied()
             .unwrap_or(layout.alignment_width);
+        let (indent, line_advance, trailing_whitespace, break_reason, num_spaces, item_range) = {
+            let line = &layout.lines[line_index];
+            (
+                line.indent,
+                line.metrics.advance,
+                line.used_terminal_whitespace(alignment_width - line.indent),
+                line.break_reason,
+                line.num_spaces,
+                line.item_range.clone(),
+            )
+        };
+        let trailing_whitespace_advance = trailing_whitespace.advance();
+
+        // Paragraph direction controls alignment semantics; the source-terminal
+        // run controls which physical edge contains hanging whitespace.
+        layout.lines[line_index].metrics.offset = if is_rtl { 0.0 } else { indent };
+        if trailing_whitespace.occupies(PhysicalLineEdge::Left) {
+            layout.lines[line_index].metrics.offset -= trailing_whitespace_advance;
+        }
 
         // Compute free space.
-        let free_space = alignment_width - indent - line_advance + trailing_whitespace;
+        let free_space = alignment_width - indent - line_advance + trailing_whitespace_advance;
 
         if !options.align_when_overflowing && free_space <= 0.0 {
             if is_rtl {

@@ -328,11 +328,4 @@ impl InlineBox {
     pub(crate) const fn bidi_attachment(&self) -> InlineBoxBidiAttachment {
         self.bidi_attachment
     }
-
-    pub(crate) const fn is_transparent_anchor(&self) -> bool {
-        matches!(
-            self.line_break_participation(),
-            InlineBoxLineBreakParticipation::TransparentAnchor
-        )
-    }
 }

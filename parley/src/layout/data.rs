@@ -17,13 +17,166 @@ pub(crate) enum TerminalWhitespaceDisposition {
     Hanging,
 }
 
-impl TerminalWhitespaceDisposition {
-    pub(crate) const fn is_hanging(self) -> bool {
-        matches!(self, Self::ConditionallyHanging | Self::Hanging)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PhysicalLineEdge {
+    Left,
+    Right,
+}
+
+impl PhysicalLineEdge {
+    pub(crate) const fn from_bidi_level(level: u8) -> Self {
+        if level & 1 == 1 {
+            Self::Left
+        } else {
+            Self::Right
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct TerminalWhitespaceAdvances {
+    unconditional: f32,
+    conditional: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum TerminalWhitespace {
+    #[default]
+    Absent,
+    Present {
+        advances: TerminalWhitespaceAdvances,
+        physical_side: PhysicalLineEdge,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalWhitespaceScan {
+    Continue,
+    Stop,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum UsedTerminalWhitespace {
+    #[default]
+    Absent,
+    Present {
+        advance: f32,
+        physical_side: PhysicalLineEdge,
+    },
+}
+
+impl UsedTerminalWhitespace {
+    pub(crate) const fn advance(self) -> f32 {
+        match self {
+            Self::Absent => 0.0,
+            Self::Present { advance, .. } => advance,
+        }
     }
 
-    const fn is_unconditionally_hanging(self) -> bool {
-        matches!(self, Self::Hanging)
+    pub(crate) fn occupies(self, side: PhysicalLineEdge) -> bool {
+        matches!(self, Self::Present { physical_side, .. } if physical_side == side)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ConditionalFit {
+    Fits,
+    Overflows { advance: f32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum UsedLineEnd {
+    SoftWrap,
+    ForcedBreak { conditional_fit: ConditionalFit },
+    ParagraphEnd,
+}
+
+impl UsedLineEnd {
+    fn new(break_reason: BreakReason, candidate_advance: f32, available_advance: f32) -> Self {
+        match break_reason {
+            BreakReason::None => Self::ParagraphEnd,
+            BreakReason::Regular | BreakReason::Emergency => Self::SoftWrap,
+            BreakReason::Explicit => {
+                let overflow = candidate_advance - available_advance;
+                let conditional_fit = if overflow > 0.0 {
+                    ConditionalFit::Overflows { advance: overflow }
+                } else {
+                    ConditionalFit::Fits
+                };
+                Self::ForcedBreak { conditional_fit }
+            }
+        }
+    }
+}
+
+impl TerminalWhitespace {
+    pub(crate) fn include(
+        &mut self,
+        disposition: TerminalWhitespaceDisposition,
+        advance: f32,
+        physical_side: PhysicalLineEdge,
+    ) -> TerminalWhitespaceScan {
+        if disposition == TerminalWhitespaceDisposition::Measured {
+            return TerminalWhitespaceScan::Stop;
+        }
+        if matches!(
+            self,
+            Self::Present {
+                physical_side: existing,
+                ..
+            } if *existing != physical_side
+        ) {
+            return TerminalWhitespaceScan::Stop;
+        }
+        if matches!(self, Self::Absent) {
+            *self = Self::Present {
+                advances: TerminalWhitespaceAdvances::default(),
+                physical_side,
+            };
+        }
+        let Self::Present { advances, .. } = self else {
+            unreachable!("a hanging terminal contribution always has a physical side")
+        };
+        match disposition {
+            TerminalWhitespaceDisposition::Measured => unreachable!(),
+            TerminalWhitespaceDisposition::ConditionallyHanging => {
+                advances.conditional += advance;
+            }
+            TerminalWhitespaceDisposition::Hanging => {
+                advances.unconditional += advance;
+            }
+        }
+        TerminalWhitespaceScan::Continue
+    }
+
+    pub(crate) fn resolve(
+        self,
+        break_reason: BreakReason,
+        line_advance: f32,
+        available_advance: f32,
+    ) -> UsedTerminalWhitespace {
+        let Self::Present {
+            advances,
+            physical_side,
+        } = self
+        else {
+            return UsedTerminalWhitespace::Absent;
+        };
+        let candidate_advance = (line_advance - advances.unconditional).max(0.0);
+        let conditional = match UsedLineEnd::new(break_reason, candidate_advance, available_advance)
+        {
+            UsedLineEnd::ForcedBreak {
+                conditional_fit: ConditionalFit::Fits,
+            } => 0.0,
+            UsedLineEnd::ForcedBreak {
+                conditional_fit: ConditionalFit::Overflows { advance },
+            } => advance.min(advances.conditional),
+            UsedLineEnd::SoftWrap | UsedLineEnd::ParagraphEnd => advances.conditional,
+        };
+        UsedTerminalWhitespace::Present {
+            advance: advances.unconditional + conditional,
+            physical_side,
+        }
     }
 }
 
@@ -596,6 +749,8 @@ pub(crate) struct LineData {
     pub(crate) break_reason: BreakReason,
     /// Maximum advance for the line.
     pub(crate) max_advance: f32,
+    /// Source-terminal whitespace policy and physical placement.
+    pub(crate) terminal_whitespace: TerminalWhitespace,
     /// Number of justified clusters on the line.
     pub(crate) num_spaces: usize,
     /// Source-cluster advance selected for this materialised line.
@@ -614,6 +769,14 @@ pub(crate) struct LineData {
 impl LineData {
     pub(crate) fn size(&self) -> f32 {
         self.metrics.ascent + self.metrics.descent + self.metrics.leading
+    }
+
+    pub(crate) fn used_terminal_whitespace(
+        &self,
+        available_advance: f32,
+    ) -> UsedTerminalWhitespace {
+        self.terminal_whitespace
+            .resolve(self.break_reason, self.metrics.advance, available_advance)
     }
 }
 
@@ -647,9 +810,13 @@ impl LineItemData {
         self.kind == LayoutItemKind::TextRun
     }
 
-    #[inline(always)]
-    pub(crate) fn is_rtl(&self) -> bool {
-        self.bidi_level & 1 != 0
+    pub(crate) fn logical_clusters_from_end<'a, B: Brush>(
+        &self,
+        layout_data: &'a LayoutData<B>,
+    ) -> impl Iterator<Item = &'a ClusterData> {
+        layout_data.clusters[self.cluster_range.clone()]
+            .iter()
+            .rev()
     }
 
     /// If the item is a text run
@@ -662,31 +829,14 @@ impl LineItemData {
         }
 
         self.is_whitespace = true;
-        if self.is_rtl() {
-            // RTL runs check for "trailing" whitespace at the front.
-            for cluster in layout_data.clusters[self.cluster_range.clone()].iter() {
-                if cluster.info.is_default_ignorable() {
-                    continue;
-                } else if cluster.info.is_whitespace() {
-                    self.has_trailing_whitespace = true;
-                } else {
-                    self.is_whitespace = false;
-                    break;
-                }
-            }
-        } else {
-            for cluster in layout_data.clusters[self.cluster_range.clone()]
-                .iter()
-                .rev()
-            {
-                if cluster.info.is_default_ignorable() {
-                    continue;
-                } else if cluster.info.is_whitespace() {
-                    self.has_trailing_whitespace = true;
-                } else {
-                    self.is_whitespace = false;
-                    break;
-                }
+        for cluster in self.logical_clusters_from_end(layout_data) {
+            if cluster.info.is_default_ignorable() {
+                continue;
+            } else if cluster.info.is_whitespace() {
+                self.has_trailing_whitespace = true;
+            } else {
+                self.is_whitespace = false;
+                break;
             }
         }
     }
@@ -1341,18 +1491,25 @@ impl<B: Brush> LayoutData<B> {
                         running_max_width += cluster.advance;
                         let terminal_disposition = WhiteSpaceLayoutMode::from_style(style)
                             .terminal_disposition(cluster.info.whitespace());
-                        if terminal_disposition.is_hanging() {
-                            trailing_min_width += cluster.advance;
-                            trailing_max_width += cluster.advance;
-                            if terminal_disposition.is_unconditionally_hanging() {
+                        match terminal_disposition {
+                            TerminalWhitespaceDisposition::ConditionallyHanging => {
+                                trailing_min_width += cluster.advance;
+                                trailing_max_width += cluster.advance;
+                            }
+                            TerminalWhitespaceDisposition::Hanging => {
+                                trailing_min_width += cluster.advance;
+                                trailing_max_width += cluster.advance;
                                 trailing_unconditional_max_width += cluster.advance;
                             }
-                        } else if cluster.info.whitespace() != Whitespace::Newline
-                            && !cluster.info.is_default_ignorable()
-                        {
-                            trailing_min_width = 0.0;
-                            trailing_max_width = 0.0;
-                            trailing_unconditional_max_width = 0.0;
+                            TerminalWhitespaceDisposition::Measured
+                                if cluster.info.whitespace() != Whitespace::Newline
+                                    && !cluster.info.is_default_ignorable() =>
+                            {
+                                trailing_min_width = 0.0;
+                                trailing_max_width = 0.0;
+                                trailing_unconditional_max_width = 0.0;
+                            }
+                            TerminalWhitespaceDisposition::Measured => {}
                         }
                     }
                     min_width = min_width.max(running_min_width - trailing_min_width);

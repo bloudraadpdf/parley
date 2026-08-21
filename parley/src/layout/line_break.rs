@@ -18,9 +18,10 @@ use crate::inline_box::{
 };
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
-    LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
-    ProjectedSourceClusterParticipation, ProjectedSourceLineFill, SelectedSourceClusterAdvance,
-    WhiteSpaceLayoutMode,
+    LineBreakOverrideDisposition, NormalSoftWrapSelection, PhysicalLineEdge,
+    ProjectedSourceBoundary, ProjectedSourceClusterParticipation, ProjectedSourceLineFill,
+    SelectedSourceClusterAdvance, TerminalWhitespace, TerminalWhitespaceDisposition,
+    TerminalWhitespaceScan, WhiteSpaceLayoutMode,
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -45,6 +46,55 @@ impl LineLayout {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SourceEndContribution {
+    #[default]
+    Empty,
+    Content,
+    ExplicitBreak,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LengthBreakTrigger {
+    CharacterLimit { content_exhausted: bool },
+    ContentExhausted,
+}
+
+impl SourceEndContribution {
+    fn include_cluster(&mut self, whitespace: Whitespace, is_default_ignorable: bool) {
+        if whitespace == Whitespace::Newline {
+            *self = Self::ExplicitBreak;
+        } else if !is_default_ignorable {
+            *self = Self::Content;
+        }
+    }
+
+    fn include_inline_box(&mut self, participation: InlineBoxShapingParticipation) {
+        if participation == InlineBoxShapingParticipation::InterveningInlineAdvance {
+            *self = Self::Content;
+        }
+    }
+
+    const fn break_reason(self, trigger: LengthBreakTrigger) -> BreakReason {
+        match (self, trigger) {
+            (Self::ExplicitBreak, _) => BreakReason::Explicit,
+            (_, LengthBreakTrigger::ContentExhausted)
+            | (
+                _,
+                LengthBreakTrigger::CharacterLimit {
+                    content_exhausted: true,
+                },
+            ) => BreakReason::None,
+            (
+                Self::Empty | Self::Content,
+                LengthBreakTrigger::CharacterLimit {
+                    content_exhausted: false,
+                },
+            ) => BreakReason::Regular,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct LineState {
     x: f32,
@@ -66,6 +116,7 @@ struct LineState {
     /// discretionary. It is absent from the unbroken flow.
     discretionary_advance: f32,
     discretionary_break: bool,
+    source_end_contribution: SourceEndContribution,
 }
 
 #[derive(Clone, Default)]
@@ -199,6 +250,30 @@ enum OverflowingWhitespace {
     Other,
 }
 
+#[derive(Clone, Copy)]
+enum TerminalSourceUnit {
+    Bridge,
+    Candidate(TerminalWhitespaceDisposition),
+    Barrier,
+}
+
+impl TerminalSourceUnit {
+    fn classify<B: Brush>(cluster: &ClusterData, style: &crate::layout::Style<B>) -> Self {
+        let whitespace = cluster.info.whitespace();
+        if whitespace == Whitespace::Newline || cluster.info.is_default_ignorable() {
+            Self::Bridge
+        } else if whitespace == Whitespace::None {
+            Self::Barrier
+        } else {
+            match WhiteSpaceLayoutMode::from_style(style).terminal_disposition(whitespace) {
+                TerminalWhitespaceDisposition::Measured => Self::Barrier,
+                disposition @ (TerminalWhitespaceDisposition::ConditionallyHanging
+                | TerminalWhitespaceDisposition::Hanging) => Self::Candidate(disposition),
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 enum LogicalOwnerEdgePlacement {
     Append,
@@ -214,10 +289,12 @@ impl OverflowingWhitespace {
             Self::Other
         } else if white_space.collapses_space(whitespace) {
             Self::CollapsibleSoftWrap(SoftWrapOpportunity)
-        } else if white_space.terminal_disposition(whitespace).is_hanging() {
-            Self::PreservedHanging
         } else {
-            Self::Other
+            match white_space.terminal_disposition(whitespace) {
+                TerminalWhitespaceDisposition::ConditionallyHanging
+                | TerminalWhitespaceDisposition::Hanging => Self::PreservedHanging,
+                TerminalWhitespaceDisposition::Measured => Self::Other,
+            }
         }
     }
 }
@@ -439,6 +516,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.running_line_height = 0.;
         self.state.line.discretionary_advance = 0.;
         self.state.line.discretionary_break = false;
+        self.state.line.source_end_contribution = SourceEndContribution::Empty;
         self.state.prev_boundary = None; // Added by Nico
         self.state.emergency_boundary = None;
         self.state.last_appended_authored_unit = AuthoredBreakUnit::Other;
@@ -1220,8 +1298,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             match item.kind {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
+                    let shaping_participation = inline_box.shaping_participation();
 
-                    if inline_box.is_transparent_anchor() {
+                    if shaping_participation == InlineBoxShapingParticipation::TransparentBoundary {
                         self.state.item_idx += 1;
                         self.state.append_inline_box_to_line(
                             self.state.line.x,
@@ -1246,6 +1325,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     self.state.item_idx += 1;
                     self.state
                         .append_inline_box_to_line(next_x, next_fit_x, inline_box.height());
+                    self.state
+                        .line
+                        .source_end_contribution
+                        .include_inline_box(shaping_participation);
                     char_count += u32::from(matches!(
                         inline_box.line_break_participation(),
                         InlineBoxLineBreakParticipation::Atomic(_)
@@ -1255,11 +1338,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     if char_count >= max_chars {
                         // Check if we've consumed all content (this is the last line).
                         let is_last_item = self.state.item_idx >= self.layout.data.items.len();
-                        let break_reason = if is_last_item {
-                            BreakReason::None
-                        } else {
-                            BreakReason::Regular
-                        };
+                        let break_reason = self.state.line.source_end_contribution.break_reason(
+                            LengthBreakTrigger::CharacterLimit {
+                                content_exhausted: is_last_item,
+                            },
+                        );
 
                         if try_commit_line!(break_reason) {
                             if break_reason == BreakReason::None {
@@ -1319,6 +1402,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         );
                         self.state.cluster_idx += 1;
                         char_count += 1;
+                        self.state
+                            .line
+                            .source_end_contribution
+                            .include_cluster(whitespace, cluster.info().is_default_ignorable());
 
                         if is_space {
                             self.state.line.num_spaces += 1;
@@ -1333,13 +1420,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             let is_last_cluster_of_run = self.state.cluster_idx >= cluster_end;
                             let is_last_item =
                                 self.state.item_idx + 1 >= self.layout.data.items.len();
-                            let break_reason = if is_last_cluster_of_run && is_last_item {
-                                BreakReason::None
-                            } else if is_newline {
-                                BreakReason::Explicit
-                            } else {
-                                BreakReason::Regular
-                            };
+                            let break_reason =
+                                self.state.line.source_end_contribution.break_reason(
+                                    LengthBreakTrigger::CharacterLimit {
+                                        content_exhausted: is_last_cluster_of_run && is_last_item,
+                                    },
+                                );
 
                             if try_commit_line!(break_reason) {
                                 if break_reason == BreakReason::None {
@@ -1360,8 +1446,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if self.state.line.items.end == 0 {
             self.state.line.items.end = 1;
         }
-        if try_commit_line!(BreakReason::None) {
-            self.done = true;
+        let break_reason = self
+            .state
+            .line
+            .source_end_contribution
+            .break_reason(LengthBreakTrigger::ContentExhausted);
+        if try_commit_line!(break_reason) {
+            self.done = break_reason == BreakReason::None;
             self.start_new_line();
             return Some(());
         }
@@ -1594,6 +1685,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }
         }
 
+        // Resolve the source-terminal sequence while line items are still in
+        // logical source order. The immutable summary retains physical
+        // placement for later bidi reordering and re-alignment.
+        line.terminal_whitespace = collect_terminal_whitespace(
+            &self.lines.line_items[line.item_range.clone()],
+            &self.layout.data,
+            &line.selected_source_cluster_advance,
+        );
+        line.metrics.trailing_whitespace =
+            line.used_terminal_whitespace(line.max_advance).advance();
+
         // Reorder the items within the line (if required). Reordering is required if the line contains
         // a mix of bidi levels (a mix of LTR and RTL text)
         let item_count = line.item_range.end - line.item_range.start;
@@ -1603,43 +1705,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 &self.layout.data.inline_boxes,
             );
         }
-
-        // Resolve trailing whitespace from source order. Bidi visual order can place an
-        // internal styled run at a physical extreme without making that run source-terminal.
-        line.metrics.trailing_whitespace = match source_trailing_line_item(
-            &self.lines.line_items[line.item_range.clone()],
-            &self.layout.data.inline_boxes,
-        ) {
-            SourceTrailingLineItem::Text(run) if run.has_trailing_whitespace => {
-                fn hanging_whitespace_advance<'c, B: Brush, I: Iterator<Item = &'c ClusterData>>(
-                    clusters: I,
-                    styles: &[crate::layout::Style<B>],
-                ) -> f32 {
-                    clusters
-                        .take_while(|cluster| {
-                            cluster.info.whitespace() != Whitespace::None
-                                || cluster.info.is_default_ignorable()
-                        })
-                        .filter(|cluster| {
-                            WhiteSpaceLayoutMode::from_style(&styles[cluster.style_index as usize])
-                                .terminal_disposition(cluster.info.whitespace())
-                                .is_hanging()
-                        })
-                        .map(|cluster| cluster.advance)
-                        .sum()
-                }
-
-                let clusters = &self.layout.data.clusters[run.cluster_range.clone()];
-                if run.is_rtl() {
-                    hanging_whitespace_advance(clusters.iter(), &self.layout.data.styles)
-                } else {
-                    hanging_whitespace_advance(clusters.iter().rev(), &self.layout.data.styles)
-                }
-            }
-            SourceTrailingLineItem::Text(_)
-            | SourceTrailingLineItem::InlineBox
-            | SourceTrailingLineItem::Absent => 0.0,
-        };
 
         if !have_metrics {
             // Line consisting entirely of whitespace?
@@ -2027,6 +2092,47 @@ fn try_commit_line<B: Brush>(
     true
 }
 
+fn collect_terminal_whitespace<B: Brush>(
+    line_items: &[LineItemData],
+    layout_data: &LayoutData<B>,
+    selected_source_cluster_advance: &SelectedSourceClusterAdvance,
+) -> TerminalWhitespace {
+    let mut terminal = TerminalWhitespace::Absent;
+    'items: for line_item in line_items.iter().rev() {
+        match line_item.kind {
+            LayoutItemKind::InlineBox => {
+                if layout_data.inline_boxes[line_item.index].shaping_participation()
+                    != InlineBoxShapingParticipation::TransparentBoundary
+                {
+                    break;
+                }
+            }
+            LayoutItemKind::TextRun => {
+                let run = &layout_data.runs[line_item.index];
+                let physical_side = PhysicalLineEdge::from_bidi_level(line_item.bidi_level);
+                for cluster in line_item.logical_clusters_from_end(layout_data) {
+                    let style = &layout_data.styles[cluster.style_index as usize];
+                    match TerminalSourceUnit::classify(cluster, style) {
+                        TerminalSourceUnit::Bridge => {}
+                        TerminalSourceUnit::Barrier => break 'items,
+                        TerminalSourceUnit::Candidate(disposition) => {
+                            let byte_index = cluster.text_range(run).start;
+                            let advance = selected_source_cluster_advance
+                                .resolve(byte_index, cluster.advance);
+                            if terminal.include(disposition, advance, physical_side)
+                                == TerminalWhitespaceScan::Stop
+                            {
+                                break 'items;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    terminal
+}
+
 /// Reorder items within line according to the bidi levels of the items
 fn reorder_line_items(runs: &mut [LineItemData], inline_boxes: &[crate::InlineBox]) {
     let mut visual_indices = (0..runs.len()).collect::<Vec<_>>();
@@ -2045,114 +2151,10 @@ fn reorder_line_items(runs: &mut [LineItemData], inline_boxes: &[crate::InlineBo
     runs.clone_from_slice(&reordered);
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum SourceTrailingLineItem<'a> {
-    Absent,
-    Text(&'a LineItemData),
-    InlineBox,
-}
-
-fn source_trailing_line_item<'a>(
-    line_items: &'a [LineItemData],
-    inline_boxes: &[crate::InlineBox],
-) -> SourceTrailingLineItem<'a> {
-    let source_terminal = line_items
-        .iter()
-        .filter(|item| {
-            item.kind == LayoutItemKind::TextRun
-                || inline_boxes.get(item.index).is_none_or(|inline_box| {
-                    inline_box.shaping_participation()
-                        != InlineBoxShapingParticipation::TransparentBoundary
-                })
-        })
-        .filter_map(|item| {
-            item.layout_item_index
-                .map(|source_index| (source_index, item))
-        })
-        .max_by_key(|(source_index, _)| *source_index)
-        .map(|(_, item)| item)
-        .or_else(|| line_items.last());
-    match source_terminal {
-        Some(item) if item.kind == LayoutItemKind::TextRun => SourceTrailingLineItem::Text(item),
-        Some(_) => SourceTrailingLineItem::InlineBox,
-        None => SourceTrailingLineItem::Absent,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        SourceTrailingLineItem, indent_start_is_scope_line, line_advance_fits,
-        source_trailing_line_item,
-    };
-    use crate::{
-        IndentStart,
-        layout::data::{LayoutItemKind, LineItemData},
-    };
-
-    fn text_item(source_index: usize, text_range: core::ops::Range<usize>) -> LineItemData {
-        LineItemData {
-            kind: LayoutItemKind::TextRun,
-            index: source_index,
-            bidi_level: 0,
-            layout_item_index: Some(source_index),
-            advance: 0.0,
-            is_whitespace: false,
-            has_trailing_whitespace: false,
-            text_range,
-            cluster_range: 0..0,
-        }
-    }
-
-    fn inline_item(source_index: usize) -> LineItemData {
-        let mut item = text_item(source_index, 0..0);
-        item.kind = LayoutItemKind::InlineBox;
-        item.index = 0;
-        item
-    }
-
-    #[test]
-    fn source_terminal_run_owns_trailing_whitespace_across_visual_reordering() {
-        let source_first = text_item(0, 0..6);
-        let source_last = text_item(1, 6..12);
-        let visual_order = [source_last, source_first];
-
-        let SourceTrailingLineItem::Text(selected) = source_trailing_line_item(&visual_order, &[])
-        else {
-            panic!("the source-terminal text run must remain selected")
-        };
-        assert_eq!(selected.text_range, 6..12);
-    }
-
-    #[test]
-    fn source_terminal_inline_box_cannot_supply_trailing_text_whitespace() {
-        let visual_order = [inline_item(1), text_item(0, 0..6)];
-        let inline_boxes = [crate::InlineBox::new(1, 6, 0.0, 0.0)];
-
-        assert!(matches!(
-            source_trailing_line_item(&visual_order, &inline_boxes),
-            SourceTrailingLineItem::InlineBox
-        ));
-    }
-
-    #[test]
-    fn transparent_owner_end_leaves_trailing_text_source_terminal() {
-        let visual_order = [inline_item(1), text_item(0, 0..6)];
-        let inline_boxes = [crate::InlineBox::inline_end_edge(
-            1,
-            6,
-            0.0,
-            0.0,
-            crate::InlineBoxBreakAffinity::ToPrevious,
-        )];
-
-        let SourceTrailingLineItem::Text(selected) =
-            source_trailing_line_item(&visual_order, &inline_boxes)
-        else {
-            panic!("the transparent owner end must not replace the trailing text")
-        };
-        assert_eq!(selected.text_range, 0..6);
-    }
+    use super::{indent_start_is_scope_line, line_advance_fits};
+    use crate::IndentStart;
 
     #[test]
     fn line_fit_absorbs_only_the_bound_of_float_accumulation_error() {
