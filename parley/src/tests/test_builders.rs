@@ -14,7 +14,7 @@ use crate::{
     FontContext, FontFamily, FontFeatures, FontSynthesis, FontSynthesisStyle, FontVariations,
     HyphenateCharacter, Layout, LayoutContext, LineBreakMode, LineHeight, OverflowWrap,
     RangedBuilder, StyleProperty, StyleRunBuilder, TabSize, TextStyle, TextWrapMode, TreeBuilder,
-    WordBreak,
+    WhiteSpaceCollapse, WordBreak,
 };
 
 // TODO: `FONT_FAMILY_LIST`, `load_fonts`, and `create_font_context` are
@@ -264,6 +264,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         line_break_mode: LineBreakMode::Anywhere,
         overflow_wrap: OverflowWrap::Anywhere,
         text_wrap_mode: TextWrapMode::Wrap,
+        white_space_collapse: WhiteSpaceCollapse::BreakSpaces,
         tab_size: TabSize::default(),
         hyphenate_character: HyphenateCharacter::Auto,
     }
@@ -310,6 +311,9 @@ fn set_root_style(rb: &mut RangedBuilder<'_, ColorBrush>) {
     rb.push_default(StyleProperty::WordBreak(WordBreak::BreakAll));
     rb.push_default(StyleProperty::LineBreakMode(LineBreakMode::Anywhere));
     rb.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
+    rb.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::BreakSpaces,
+    ));
     rb.push_default(StyleProperty::HyphenateCharacter(HyphenateCharacter::Auto));
 }
 

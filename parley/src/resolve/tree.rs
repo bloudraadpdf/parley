@@ -94,7 +94,7 @@ impl<B: Brush> TreeStyleBuilder<B> {
     pub(crate) fn push_uncommitted_text(&mut self, is_span_last: bool) {
         let uncommitted_text = core::mem::take(&mut self.uncommitted_text);
         let span_text = match self.white_space_collapse {
-            WhiteSpaceCollapse::Preserve => uncommitted_text,
+            WhiteSpaceCollapse::Preserve | WhiteSpaceCollapse::BreakSpaces => uncommitted_text,
             WhiteSpaceCollapse::Collapse => {
                 let mut span_text = uncommitted_text.as_str();
 

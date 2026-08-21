@@ -45,7 +45,9 @@ pub use crate::editing::{Cursor, Selection};
 
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
-use crate::{HyphenateCharacter, LineHeight, OverflowWrap, TabSize, TextWrapMode};
+use crate::{
+    HyphenateCharacter, LineHeight, OverflowWrap, TabSize, TextWrapMode, WhiteSpaceCollapse,
+};
 
 #[allow(clippy::partial_pub_fields)]
 /// Style properties.
@@ -67,6 +69,8 @@ pub struct Style<B: Brush> {
     pub(crate) overflow_wrap: OverflowWrap,
     /// Per-cluster text-wrap-mode setting
     pub(crate) text_wrap_mode: TextWrapMode,
+    /// Per-cluster white-space collapsing and hanging setting.
+    pub(crate) white_space_collapse: WhiteSpaceCollapse,
     /// Tab size.
     pub(crate) tab_size: TabSize,
     /// Hyphenate character.

@@ -27,7 +27,7 @@ use crate::layout::{
 };
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
-use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WordBreak};
+use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WhiteSpaceCollapse, WordBreak};
 
 use core::ops::Range;
 
@@ -203,12 +203,18 @@ enum LogicalOwnerEdgePlacement {
 }
 
 impl OverflowingWhitespace {
-    const fn classify(whitespace: Whitespace, text_wrap_mode: TextWrapMode) -> Self {
-        match (whitespace, text_wrap_mode) {
-            (Whitespace::Space, TextWrapMode::Wrap) => {
+    const fn classify(
+        whitespace: Whitespace,
+        text_wrap_mode: TextWrapMode,
+        white_space_collapse: WhiteSpaceCollapse,
+    ) -> Self {
+        match (whitespace, text_wrap_mode, white_space_collapse) {
+            (Whitespace::Space, TextWrapMode::Wrap, collapse)
+                if !matches!(collapse, WhiteSpaceCollapse::BreakSpaces) =>
+            {
                 Self::CollapsibleSoftWrap(SoftWrapOpportunity)
             }
-            (Whitespace::NoBreakSpace, _) => Self::NoBreakGlue,
+            (Whitespace::NoBreakSpace, _, _) => Self::NoBreakGlue,
             _ => Self::Other,
         }
     }
@@ -978,8 +984,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let line_fit = if fits {
                             LineFit::Fits
                         } else {
-                            match OverflowingWhitespace::classify(whitespace, style.text_wrap_mode)
-                            {
+                            match OverflowingWhitespace::classify(
+                                whitespace,
+                                style.text_wrap_mode,
+                                style.white_space_collapse,
+                            ) {
                                 OverflowingWhitespace::CollapsibleSoftWrap(opportunity) => {
                                     LineFit::TrailingCollapsibleSpaceOverflow(opportunity)
                                 }

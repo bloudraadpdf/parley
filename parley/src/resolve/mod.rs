@@ -176,6 +176,7 @@ impl ResolveContext {
             StyleProperty::LineBreakMode(value) => LineBreakMode(*value),
             StyleProperty::OverflowWrap(value) => OverflowWrap(*value),
             StyleProperty::TextWrapMode(value) => TextWrapMode(*value),
+            StyleProperty::WhiteSpaceCollapse(value) => WhiteSpaceCollapse(*value),
             StyleProperty::TabSize(value) => TabSize(value.scale(scale)),
             StyleProperty::HyphenateCharacter(value) => HyphenateCharacter(*value),
         }
@@ -227,6 +228,7 @@ impl ResolveContext {
             line_break_mode: raw_style.line_break_mode,
             overflow_wrap: raw_style.overflow_wrap,
             text_wrap_mode: raw_style.text_wrap_mode,
+            white_space_collapse: raw_style.white_space_collapse,
             tab_size: raw_style.tab_size.scale(scale),
             hyphenate_character: raw_style.hyphenate_character,
         }
@@ -430,6 +432,8 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     OverflowWrap(OverflowWrap),
     /// Control over non-"emergency" line-breaking.
     TextWrapMode(TextWrapMode),
+    /// Control over white-space collapsing and hanging.
+    WhiteSpaceCollapse(crate::style::WhiteSpaceCollapse),
     /// Tab size.
     TabSize(TabSize),
     /// Hyphenate character.
@@ -494,6 +498,8 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) overflow_wrap: OverflowWrap,
     /// Control over non-"emergency" line-breaking.
     pub(crate) text_wrap_mode: TextWrapMode,
+    /// Control over white-space collapsing and hanging.
+    pub(crate) white_space_collapse: crate::style::WhiteSpaceCollapse,
     /// Tab size.
     pub(crate) tab_size: TabSize,
     /// Hyphenate character.
@@ -538,6 +544,7 @@ impl<B: Brush> ResolvedStyle<B> {
             LineBreakMode(value) => self.line_break_mode = value,
             OverflowWrap(value) => self.overflow_wrap = value,
             TextWrapMode(value) => self.text_wrap_mode = value,
+            WhiteSpaceCollapse(value) => self.white_space_collapse = value,
             TabSize(value) => self.tab_size = value,
             HyphenateCharacter(value) => self.hyphenate_character = value,
         }
@@ -579,6 +586,7 @@ impl<B: Brush> ResolvedStyle<B> {
             LineBreakMode(value) => self.line_break_mode == *value,
             OverflowWrap(value) => self.overflow_wrap == *value,
             TextWrapMode(value) => self.text_wrap_mode == *value,
+            WhiteSpaceCollapse(value) => self.white_space_collapse == *value,
             TabSize(value) => self.tab_size.nearly_eq(*value),
             HyphenateCharacter(value) => self.hyphenate_character == *value,
         }
@@ -594,6 +602,7 @@ impl<B: Brush> ResolvedStyle<B> {
             soft_break_policy: self.soft_break_policy(),
             overflow_wrap: self.overflow_wrap,
             text_wrap_mode: self.text_wrap_mode,
+            white_space_collapse: self.white_space_collapse,
             tab_size: self.tab_size,
             hyphenate_character: self.hyphenate_character,
             font_metric_advance_quantization: self.font_metric_advance_quantization.0,

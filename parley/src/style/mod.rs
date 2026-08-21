@@ -22,10 +22,12 @@ pub use styleset::StyleSet;
 
 use crate::util::nearly_eq;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WhiteSpaceCollapse {
+    #[default]
     Collapse,
     Preserve,
+    BreakSpaces,
 }
 
 /// How normal soft-wrap opportunities are constructed and prioritized.
@@ -214,6 +216,8 @@ pub enum StyleProperty<'a, B: Brush> {
     OverflowWrap(OverflowWrap),
     /// Control over non-"emergency" line-breaking.
     TextWrapMode(TextWrapMode),
+    /// Control over white-space collapsing and hanging.
+    WhiteSpaceCollapse(WhiteSpaceCollapse),
     /// Tab size.
     TabSize(TabSize),
     /// Hyphenate character.
@@ -286,6 +290,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub overflow_wrap: OverflowWrap,
     /// Control over non-"emergency" line-breaking.
     pub text_wrap_mode: TextWrapMode,
+    /// Control over white-space collapsing and hanging.
+    pub white_space_collapse: WhiteSpaceCollapse,
     /// Tab size.
     pub tab_size: TabSize,
     /// Hyphenate character.
@@ -326,6 +332,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             line_break_mode: LineBreakMode::default(),
             overflow_wrap: OverflowWrap::default(),
             text_wrap_mode: TextWrapMode::default(),
+            white_space_collapse: WhiteSpaceCollapse::default(),
             tab_size: TabSize::default(),
             hyphenate_character: HyphenateCharacter::default(),
         }
