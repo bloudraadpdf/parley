@@ -20,7 +20,7 @@ use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
     ProjectedSourceClusterParticipation, ProjectedSourceLineFill, SelectedSourceClusterAdvance,
-    WhiteSpaceLayoutMode,
+    TerminalWhitespaceAdvances, TerminalWhitespaceScan, WhiteSpaceLayoutMode,
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -214,7 +214,10 @@ impl OverflowingWhitespace {
             Self::Other
         } else if white_space.collapses_space(whitespace) {
             Self::CollapsibleSoftWrap(SoftWrapOpportunity)
-        } else if white_space.terminal_disposition(whitespace).is_hanging() {
+        } else if white_space
+            .terminal_disposition(whitespace)
+            .hangs_when_overflowing()
+        {
             Self::PreservedHanging
         } else {
             Self::Other
@@ -1344,10 +1347,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             let is_last_cluster_of_run = self.state.cluster_idx >= cluster_end;
                             let is_last_item =
                                 self.state.item_idx + 1 >= self.layout.data.items.len();
-                            let break_reason = if is_last_cluster_of_run && is_last_item {
-                                BreakReason::None
-                            } else if is_newline {
+                            let break_reason = if is_newline {
                                 BreakReason::Explicit
+                            } else if is_last_cluster_of_run && is_last_item {
+                                BreakReason::None
                             } else {
                                 BreakReason::Regular
                             };
@@ -1617,40 +1620,51 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         // Resolve trailing whitespace from source order. Bidi visual order can place an
         // internal styled run at a physical extreme without making that run source-terminal.
-        line.metrics.trailing_whitespace = match source_trailing_line_item(
+        line.terminal_whitespace = match source_trailing_line_item(
             &self.lines.line_items[line.item_range.clone()],
             &self.layout.data.inline_boxes,
         ) {
             SourceTrailingLineItem::Text(run) if run.has_trailing_whitespace => {
-                fn hanging_whitespace_advance<'c, B: Brush, I: Iterator<Item = &'c ClusterData>>(
-                    clusters: I,
-                    styles: &[crate::layout::Style<B>],
-                ) -> f32 {
-                    clusters
-                        .take_while(|cluster| {
-                            cluster.info.whitespace() != Whitespace::None
-                                || cluster.info.is_default_ignorable()
-                        })
-                        .filter(|cluster| {
-                            WhiteSpaceLayoutMode::from_style(&styles[cluster.style_index as usize])
-                                .terminal_disposition(cluster.info.whitespace())
-                                .is_hanging()
-                        })
-                        .map(|cluster| cluster.advance)
-                        .sum()
-                }
-
                 let clusters = &self.layout.data.clusters[run.cluster_range.clone()];
+                let run_data = &self.layout.data.runs[run.index];
+                let mut advances = TerminalWhitespaceAdvances::default();
+                let mut include = |cluster: &ClusterData| {
+                    let whitespace = cluster.info.whitespace();
+                    if whitespace == Whitespace::Newline || cluster.info.is_default_ignorable() {
+                        return true;
+                    }
+                    if whitespace == Whitespace::None {
+                        return false;
+                    }
+                    let style = &self.layout.data.styles[cluster.style_index as usize];
+                    let disposition =
+                        WhiteSpaceLayoutMode::from_style(style).terminal_disposition(whitespace);
+                    let byte_index = cluster.text_range(run_data).start;
+                    let advance = line
+                        .selected_source_cluster_advance
+                        .resolve(byte_index, cluster.advance);
+                    advances.include(disposition, advance) == TerminalWhitespaceScan::Continue
+                };
                 if run.is_rtl() {
-                    hanging_whitespace_advance(clusters.iter(), &self.layout.data.styles)
+                    for cluster in clusters {
+                        if !include(cluster) {
+                            break;
+                        }
+                    }
                 } else {
-                    hanging_whitespace_advance(clusters.iter().rev(), &self.layout.data.styles)
+                    for cluster in clusters.iter().rev() {
+                        if !include(cluster) {
+                            break;
+                        }
+                    }
                 }
+                advances
             }
             SourceTrailingLineItem::Text(_)
             | SourceTrailingLineItem::InlineBox
-            | SourceTrailingLineItem::Absent => 0.0,
+            | SourceTrailingLineItem::Absent => TerminalWhitespaceAdvances::default(),
         };
+        line.metrics.trailing_whitespace = line.used_trailing_whitespace(line.max_advance);
 
         if !have_metrics {
             // Line consisting entirely of whitespace?

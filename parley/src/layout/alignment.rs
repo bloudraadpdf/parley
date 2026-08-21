@@ -174,12 +174,20 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
 
     // Apply alignment to line items
     for line_index in 0..layout.lines.len() {
+        // Per-line alignment width override (peedeeef CSS 2.1 §9.5 Rule 9).
+        // Falls back to `layout.alignment_width` when no override is set
+        // for this line.
+        let alignment_width = layout
+            .per_line_alignment_widths
+            .get(line_index)
+            .copied()
+            .unwrap_or(layout.alignment_width);
         let (indent, line_advance, trailing_whitespace, break_reason, num_spaces, item_range) = {
             let line = &layout.lines[line_index];
             (
                 line.indent,
                 line.metrics.advance,
-                line.metrics.trailing_whitespace,
+                line.used_trailing_whitespace(alignment_width - line.indent),
                 line.break_reason,
                 line.num_spaces,
                 line.item_range.clone(),
@@ -194,15 +202,6 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
         } else {
             layout.lines[line_index].metrics.offset = indent;
         }
-
-        // Per-line alignment width override (peedeeef CSS 2.1 §9.5 Rule 9).
-        // Falls back to `layout.alignment_width` when no override is set
-        // for this line.
-        let alignment_width = layout
-            .per_line_alignment_widths
-            .get(line_index)
-            .copied()
-            .unwrap_or(layout.alignment_width);
 
         // Compute free space.
         let free_space = alignment_width - indent - line_advance + trailing_whitespace;

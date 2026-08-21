@@ -4,8 +4,9 @@
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
 use crate::{
-    FontFamily, InlineBox, InlineBoxBreakAffinity, Layout, LayoutContext, LineBreakOverride,
-    RangedBuilder, StyleProperty, TabSize, TextWrapMode, WhiteSpaceCollapse,
+    Alignment, AlignmentOptions, BreakReason, FontFamily, InlineBox, InlineBoxBreakAffinity,
+    Layout, LayoutContext, LineBreakOverride, RangedBuilder, StyleProperty, TabSize, TextWrapMode,
+    WhiteSpaceCollapse,
 };
 use alloc::{
     string::{String, ToString},
@@ -54,14 +55,28 @@ fn full_width(text: &str) -> f32 {
     layout.full_width()
 }
 
+fn assert_close(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() < 0.001,
+        "expected {expected}, got {actual}",
+    );
+}
+
+fn align_end_first_line(layout: &mut Layout<ColorBrush>, width: f32) -> (f32, f32) {
+    layout.align(Some(width), Alignment::End, AlignmentOptions::default());
+    let first = layout.lines().next().unwrap();
+    let metrics = first.metrics();
+    (metrics.offset, metrics.trailing_whitespace)
+}
+
 fn assert_terminal_space_is_measured(mut layout: Layout<ColorBrush>, expected: f32) {
     let widths = layout.calculate_content_widths();
     layout.break_all_lines(None);
 
     assert_eq!(widths.min, expected);
     assert_eq!(widths.max, expected);
-    assert_eq!(layout.width(), expected);
-    assert_eq!(layout.full_width(), expected);
+    assert_close(layout.width(), expected);
+    assert_close(layout.full_width(), expected);
     assert_eq!(
         layout.lines().next().unwrap().metrics().trailing_whitespace,
         0.0
@@ -292,6 +307,84 @@ fn pre_forced_break_space_is_measured() {
     let first = layout.lines().next().unwrap();
     assert_eq!(first.metrics().advance, expected);
     assert_eq!(first.metrics().trailing_whitespace, 0.0);
+}
+
+#[test]
+fn pre_wrap_forced_break_measures_a_fitting_terminal_space() {
+    let text = "XX \nX";
+    let expected = full_width("XX ");
+    let alignment_width = expected * 2.0;
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
+
+    layout.break_all_lines(Some(alignment_width));
+    assert_eq!(layout.width(), expected);
+    assert_eq!(layout.full_width(), expected);
+
+    let first = layout.lines().next().unwrap();
+    assert_eq!(first.break_reason(), BreakReason::Explicit);
+    assert_eq!(first.metrics().trailing_whitespace, 0.0);
+
+    layout.align(
+        Some(alignment_width),
+        Alignment::Center,
+        AlignmentOptions::default(),
+    );
+    assert_close(
+        layout.lines().next().unwrap().metrics().offset,
+        (alignment_width - expected) * 0.5,
+    );
+}
+
+#[test]
+fn pre_wrap_forced_break_hangs_an_overflowing_terminal_space() {
+    let text = "XX \nX";
+    let word = full_width("XX");
+    let with_space = full_width("XX ");
+    let space = with_space - word;
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
+
+    let constrained_width = word + space * 0.5;
+    let expected_hanging = with_space - constrained_width;
+    layout.break_all_lines(Some(constrained_width));
+
+    let first = layout.lines().next().unwrap();
+    assert_eq!(first.break_reason(), BreakReason::Explicit);
+    assert_close(first.metrics().trailing_whitespace, expected_hanging);
+    assert_close(layout.width(), constrained_width);
+    assert_close(layout.full_width(), with_space);
+
+    let (offset, trailing) = align_end_first_line(&mut layout, constrained_width);
+    assert_close(offset, 0.0);
+    assert_close(trailing, expected_hanging);
+
+    let wider_alignment = with_space * 2.0;
+    let (offset, trailing) = align_end_first_line(&mut layout, wider_alignment);
+    assert_close(offset, wider_alignment - with_space);
+    assert_close(trailing, expected_hanging);
+
+    let (offset, trailing) = align_end_first_line(&mut layout, constrained_width);
+    assert_close(offset, 0.0);
+    assert_close(trailing, expected_hanging);
+}
+
+#[test]
+fn length_breaker_preserves_a_terminal_forced_break() {
+    let text = "XX \n";
+    let expected = full_width("XX ");
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
+
+    {
+        let mut lines = layout.break_lines();
+        assert_eq!(lines.break_next_with_length(4), Some(()));
+        assert_eq!(lines.break_next_with_length(4), Some(()));
+    }
+
+    let lines = layout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].break_reason(), BreakReason::Explicit);
+    assert_close(lines[0].metrics().advance, expected);
+    assert_close(lines[0].metrics().trailing_whitespace, 0.0);
+    assert_eq!(lines[1].break_reason(), BreakReason::None);
 }
 
 #[test]

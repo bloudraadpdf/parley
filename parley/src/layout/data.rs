@@ -18,12 +18,115 @@ pub(crate) enum TerminalWhitespaceDisposition {
 }
 
 impl TerminalWhitespaceDisposition {
-    pub(crate) const fn is_hanging(self) -> bool {
+    pub(crate) const fn excluded_from_min_content(self) -> bool {
         matches!(self, Self::ConditionallyHanging | Self::Hanging)
     }
 
-    const fn is_unconditionally_hanging(self) -> bool {
+    pub(crate) const fn excluded_from_unforced_max_content(self) -> bool {
+        matches!(self, Self::ConditionallyHanging | Self::Hanging)
+    }
+
+    const fn excluded_from_forced_max_content(self) -> bool {
         matches!(self, Self::Hanging)
+    }
+
+    pub(crate) const fn hangs_when_overflowing(self) -> bool {
+        matches!(self, Self::ConditionallyHanging | Self::Hanging)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UsedLineEndKind {
+    SoftWrap,
+    ForcedBreak,
+    ParagraphEnd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ConditionalFit {
+    Fits,
+    Overflows { advance: f32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct UsedLineEndContext {
+    kind: UsedLineEndKind,
+    conditional_fit: ConditionalFit,
+}
+
+impl UsedLineEndContext {
+    fn new(break_reason: BreakReason, candidate_advance: f32, available_advance: f32) -> Self {
+        let kind = match break_reason {
+            BreakReason::None => UsedLineEndKind::ParagraphEnd,
+            BreakReason::Regular | BreakReason::Emergency => UsedLineEndKind::SoftWrap,
+            BreakReason::Explicit => UsedLineEndKind::ForcedBreak,
+        };
+        let overflow = candidate_advance - available_advance;
+        let conditional_fit = if overflow > 0.0 {
+            ConditionalFit::Overflows { advance: overflow }
+        } else {
+            ConditionalFit::Fits
+        };
+        Self {
+            kind,
+            conditional_fit,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct TerminalWhitespaceAdvances {
+    unconditional: f32,
+    conditional: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalWhitespaceScan {
+    Continue,
+    Stop,
+}
+
+impl TerminalWhitespaceAdvances {
+    pub(crate) fn include(
+        &mut self,
+        disposition: TerminalWhitespaceDisposition,
+        advance: f32,
+    ) -> TerminalWhitespaceScan {
+        match disposition {
+            TerminalWhitespaceDisposition::Measured => TerminalWhitespaceScan::Stop,
+            TerminalWhitespaceDisposition::ConditionallyHanging => {
+                self.conditional += advance;
+                TerminalWhitespaceScan::Continue
+            }
+            TerminalWhitespaceDisposition::Hanging => {
+                self.unconditional += advance;
+                TerminalWhitespaceScan::Continue
+            }
+        }
+    }
+
+    fn used_line_end_context(
+        self,
+        break_reason: BreakReason,
+        line_advance: f32,
+        available_advance: f32,
+    ) -> UsedLineEndContext {
+        UsedLineEndContext::new(
+            break_reason,
+            (line_advance - self.unconditional).max(0.0),
+            available_advance,
+        )
+    }
+
+    fn hanging_advance(self, context: UsedLineEndContext) -> f32 {
+        let conditional = match (context.kind, context.conditional_fit) {
+            (UsedLineEndKind::ForcedBreak, ConditionalFit::Fits) => 0.0,
+            (UsedLineEndKind::ForcedBreak, ConditionalFit::Overflows { advance }) => {
+                advance.min(self.conditional)
+            }
+            (UsedLineEndKind::SoftWrap | UsedLineEndKind::ParagraphEnd, _) => self.conditional,
+        };
+        self.unconditional + conditional
     }
 }
 
@@ -596,6 +699,8 @@ pub(crate) struct LineData {
     pub(crate) break_reason: BreakReason,
     /// Maximum advance for the line.
     pub(crate) max_advance: f32,
+    /// Terminal whitespace retained by each CSS hanging policy.
+    pub(crate) terminal_whitespace: TerminalWhitespaceAdvances,
     /// Number of justified clusters on the line.
     pub(crate) num_spaces: usize,
     /// Source-cluster advance selected for this materialised line.
@@ -614,6 +719,15 @@ pub(crate) struct LineData {
 impl LineData {
     pub(crate) fn size(&self) -> f32 {
         self.metrics.ascent + self.metrics.descent + self.metrics.leading
+    }
+
+    pub(crate) fn used_trailing_whitespace(&self, available_advance: f32) -> f32 {
+        let context = self.terminal_whitespace.used_line_end_context(
+            self.break_reason,
+            self.metrics.advance,
+            available_advance,
+        );
+        self.terminal_whitespace.hanging_advance(context)
     }
 }
 
@@ -1347,10 +1461,12 @@ impl<B: Brush> LayoutData<B> {
                         running_max_width += cluster.advance;
                         let terminal_disposition = WhiteSpaceLayoutMode::from_style(style)
                             .terminal_disposition(cluster.info.whitespace());
-                        if terminal_disposition.is_hanging() {
+                        if terminal_disposition.excluded_from_min_content() {
                             trailing_min_width += cluster.advance;
-                            trailing_max_width += cluster.advance;
-                            if terminal_disposition.is_unconditionally_hanging() {
+                            if terminal_disposition.excluded_from_unforced_max_content() {
+                                trailing_max_width += cluster.advance;
+                            }
+                            if terminal_disposition.excluded_from_forced_max_content() {
                                 trailing_unconditional_max_width += cluster.advance;
                             }
                         } else if cluster.info.whitespace() != Whitespace::Newline
