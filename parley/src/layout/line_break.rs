@@ -970,7 +970,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // println!("Cluster {} next_x: {}", self.state.cluster_idx, next_x);
 
-                        let line_fit = if self.advance_fits(next_fit_x, max_advance) {
+                        let fits = if whitespace == Whitespace::Tab {
+                            self.tab_stop_advance_fits(next_fit_x, max_advance)
+                        } else {
+                            self.advance_fits(next_fit_x, max_advance)
+                        };
+                        let line_fit = if fits {
                             LineFit::Fits
                         } else {
                             match OverflowingWhitespace::classify(whitespace, style.text_wrap_mode)
@@ -1137,6 +1142,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     max_advance,
                     self.state.line.clusters.len() + self.state.line.items.len() + 1,
                 ))
+    }
+
+    /// Compare a position-dependent tab stop with the line measure.
+    ///
+    /// A tab stop and an independently resolved measure can represent the
+    /// same exact CSS length on opposite sides of one `f32` rounding. Unlike
+    /// ordinary shaped advances, that arithmetic has the same closed
+    /// positive-sum error contract as fixed-grid metric projection.
+    fn tab_stop_advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
+        self.advance_fits(candidate, max_advance)
+            || line_advance_fits(
+                candidate,
+                max_advance,
+                self.state.line.clusters.len() + self.state.line.items.len() + 1,
+            )
     }
 
     /// Computes the next line in the paragraph by character count.
