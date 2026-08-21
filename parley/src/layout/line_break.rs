@@ -478,6 +478,17 @@ fn line_advance_fits(candidate: f32, max_advance: f32, term_count: usize) -> boo
     candidate - max_advance <= error_bound
 }
 
+#[inline]
+fn tab_advance(cursor: f32, interval: f32, minimum: f32) -> f32 {
+    let next_stop = ((cursor / interval).floor() + 1.0) * interval;
+    let next_stop = if next_stop - cursor < minimum {
+        next_stop + interval
+    } else {
+        next_stop
+    };
+    next_stop - cursor
+}
+
 /// Line breaking support for a paragraph.
 pub struct BreakLines<'a, B: Brush> {
     layout: &'a mut Layout<B>,
@@ -1043,13 +1054,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             let tab_interval =
                                 style.tab_size.interval(run_data.metrics.space_advance);
                             if tab_interval > 0.0 {
-                                advance = ((self.state.line.x / tab_interval).floor() + 1.0)
-                                    * tab_interval
-                                    - self.state.line.x;
-                                fit_advance = ((self.state.line.fit_x / tab_interval).floor()
-                                    + 1.0)
-                                    * tab_interval
-                                    - self.state.line.fit_x;
+                                let minimum = run_data.metrics.zero_advance * 0.5;
+                                advance = tab_advance(self.state.line.x, tab_interval, minimum);
+                                fit_advance =
+                                    tab_advance(self.state.line.fit_x, tab_interval, minimum);
                             } else {
                                 advance = 0.0;
                                 fit_advance = 0.0;
@@ -1561,6 +1569,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     LayoutItemKind::TextRun => {
                         let run = &self.layout.data.runs[line_item.index];
                         let space_advance = run.metrics.space_advance;
+                        let minimum_tab_advance = run.metrics.zero_advance * 0.5;
                         let glyph_start = run.glyph_start;
                         let tab_size = self
                             .layout
@@ -1574,9 +1583,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         for cluster in &mut self.layout.data.clusters[cluster_range] {
                             if tab_interval > 0.0 && cluster.info.whitespace() == Whitespace::Tab {
-                                let next_stop =
-                                    ((line_x / tab_interval).floor() + 1.0) * tab_interval;
-                                let new_advance = next_stop - line_x;
+                                let new_advance =
+                                    tab_advance(line_x, tab_interval, minimum_tab_advance);
                                 // Keep glyph array advance in sync for non-inline clusters.
                                 if cluster.glyph_len != 0xFF {
                                     let delta = new_advance - cluster.advance;

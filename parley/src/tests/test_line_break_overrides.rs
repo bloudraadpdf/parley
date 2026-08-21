@@ -183,6 +183,32 @@ fn exact_tab_stop_uses_the_line_fit_error_bound() {
 }
 
 #[test]
+fn tabs_observe_the_half_zero_advance_threshold() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let zero_advance = full_width("0");
+    let following_advance = full_width("P");
+    let interval = 80.0;
+    let text = "\tP";
+
+    for (remaining_zero_fraction, stop_count) in [(0.4, 2.0), (0.6, 1.0)] {
+        let inline_advance = interval - zero_advance * remaining_zero_fraction;
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        set_roboto(&mut builder);
+        builder.push_default(StyleProperty::TabSize(TabSize::Length(interval)));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        builder.push_inline_box(InlineBox::new(1, 0, inline_advance, 0.0));
+        let mut layout = builder.build(text);
+
+        layout.break_all_lines(None);
+
+        assert!((layout.full_width() - (interval * stop_count + following_advance)).abs() < 0.01);
+    }
+}
+
+#[test]
 fn break_spaces_rewinds_before_an_overflowing_preserved_space() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

@@ -1161,17 +1161,22 @@ impl<B: Brush> LayoutData<B> {
                     quantization.denominator(),
                 )
             });
-        let space_gid = font_ref.charmap().map(' ');
-        let space_advance = space_gid
-            .and_then(|gid| {
-                glyph_metrics.advance_width(gid).map(|advance| {
-                    let advance = advance * scale_factor;
-                    advance_projection
-                        .as_ref()
-                        .map_or(advance, |projection| projection.project(gid, advance))
+        let glyph_advance = |character, fallback| {
+            let gid = font_ref.charmap().map(character);
+            let advance = gid
+                .and_then(|gid| {
+                    glyph_metrics.advance_width(gid).map(|advance| {
+                        let advance = advance * scale_factor;
+                        advance_projection
+                            .as_ref()
+                            .map_or(advance, |projection| projection.project(gid, advance))
+                    })
                 })
-            })
-            .unwrap_or(font_size / 4.0);
+                .unwrap_or(fallback);
+            (gid, advance)
+        };
+        let (space_gid, space_advance) = glyph_advance(' ', font_size / 4.0);
+        let (_, zero_advance) = glyph_advance('0', font_size / 2.0);
         let space_glyph_id = space_gid.map_or(0_u32, |gid| gid.to_u32());
         let units_per_em = metrics.units_per_em as f32;
 
@@ -1220,6 +1225,7 @@ impl<B: Brush> LayoutData<B> {
                 x_height: metrics.x_height,
                 cap_height: metrics.cap_height,
                 space_advance,
+                zero_advance,
                 space_glyph_id,
             }
         };
