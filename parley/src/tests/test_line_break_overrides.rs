@@ -530,3 +530,41 @@ fn break_spaces_preserves_trailing_space_measurement() {
         0.0
     );
 }
+
+#[test]
+fn rtl_paragraph_centres_ltr_hanging_whitespace_on_its_physical_side() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "one two three four";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.set_direction(BaseDirection::Rtl);
+    set_roboto(&mut builder);
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    let mut layout = builder.build(text);
+    layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(14)]);
+    layout.break_all_lines(Some(full_width("one two three")));
+
+    let line = layout.lines().next().unwrap();
+    let content_advance = line.metrics().advance - line.metrics().trailing_whitespace;
+    let alignment_width = content_advance + 100.0;
+    assert!(line.metrics().trailing_whitespace > 0.0);
+
+    layout.align(
+        Some(alignment_width),
+        Alignment::Center,
+        AlignmentOptions::default(),
+    );
+
+    let line = layout.lines().next().unwrap();
+    assert!(
+        (line.metrics().offset - 50.0).abs() < 0.01,
+        "offset={}, trailing={}, runs={:?}",
+        line.metrics().offset,
+        line.metrics().trailing_whitespace,
+        line.runs()
+            .map(|run| (run.text_range(), run.is_rtl()))
+            .collect::<Vec<_>>()
+    );
+}
