@@ -209,9 +209,7 @@ impl OverflowingWhitespace {
         white_space_collapse: WhiteSpaceCollapse,
     ) -> Self {
         match (whitespace, text_wrap_mode, white_space_collapse) {
-            (Whitespace::Space, TextWrapMode::Wrap, collapse)
-                if !matches!(collapse, WhiteSpaceCollapse::BreakSpaces) =>
-            {
+            (Whitespace::Space, TextWrapMode::Wrap, WhiteSpaceCollapse::Collapse) => {
                 Self::CollapsibleSoftWrap(SoftWrapOpportunity)
             }
             (Whitespace::NoBreakSpace, _, _) => Self::NoBreakGlue,
