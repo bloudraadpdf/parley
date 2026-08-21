@@ -183,6 +183,7 @@ enum RegularBreakKind {
 enum LineFit {
     Fits,
     TrailingCollapsibleSpaceOverflow(SoftWrapOpportunity),
+    TrailingPreservedSpaceOverflow,
     ContentOverflow,
 }
 
@@ -192,6 +193,7 @@ struct SoftWrapOpportunity;
 #[derive(Clone, Copy)]
 enum OverflowingWhitespace {
     CollapsibleSoftWrap(SoftWrapOpportunity),
+    PreservedHanging,
     NoBreakGlue,
     Other,
 }
@@ -211,6 +213,9 @@ impl OverflowingWhitespace {
         match (whitespace, text_wrap_mode, white_space_collapse) {
             (Whitespace::Space, TextWrapMode::Wrap, WhiteSpaceCollapse::Collapse) => {
                 Self::CollapsibleSoftWrap(SoftWrapOpportunity)
+            }
+            (Whitespace::Space, TextWrapMode::Wrap, WhiteSpaceCollapse::Preserve) => {
+                Self::PreservedHanging
             }
             (Whitespace::NoBreakSpace, _, _) => Self::NoBreakGlue,
             _ => Self::Other,
@@ -990,13 +995,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 OverflowingWhitespace::CollapsibleSoftWrap(opportunity) => {
                                     LineFit::TrailingCollapsibleSpaceOverflow(opportunity)
                                 }
+                                OverflowingWhitespace::PreservedHanging => {
+                                    LineFit::TrailingPreservedSpaceOverflow
+                                }
                                 OverflowingWhitespace::NoBreakGlue
                                 | OverflowingWhitespace::Other => LineFit::ContentOverflow,
                             }
                         };
 
                         match line_fit {
-                            LineFit::Fits => {
+                            LineFit::Fits | LineFit::TrailingPreservedSpaceOverflow => {
                                 let line_height = run.metrics().line_height;
                                 self.state.append_cluster_to_line(
                                     next_x,

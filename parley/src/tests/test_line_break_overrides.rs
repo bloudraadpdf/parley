@@ -4,14 +4,25 @@
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
 use crate::{
-    FontFamily, LayoutContext, LineBreakOverride, RangedBuilder, StyleProperty, TabSize,
+    FontFamily, Layout, LayoutContext, LineBreakOverride, RangedBuilder, StyleProperty, TabSize,
     WhiteSpaceCollapse,
 };
-use alloc::{string::ToString, vec, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 
 fn set_roboto(builder: &mut RangedBuilder<'_, ColorBrush>) {
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(12.0));
+}
+
+fn line_texts(layout: &Layout<ColorBrush>, text: &str) -> Vec<String> {
+    layout
+        .lines()
+        .map(|line| text[line.text_range()].to_string())
+        .collect()
 }
 
 #[test]
@@ -33,11 +44,7 @@ fn caller_overrides_replace_unicode_slash_opportunities() {
     ]);
     layout.break_all_lines(Some(20.0));
 
-    let lines = layout
-        .lines()
-        .map(|line| text[line.text_range()].to_string())
-        .collect::<Vec<_>>();
-    assert_eq!(lines, ["aa", "/bb", "/cc"]);
+    assert_eq!(line_texts(&layout, text), ["aa", "/bb", "/cc"]);
 }
 
 #[test]
@@ -56,11 +63,7 @@ fn exact_tab_stop_uses_the_line_fit_error_bound() {
     ]);
     layout.break_all_lines(Some(239.99998));
 
-    let lines = layout
-        .lines()
-        .map(|line| text[line.text_range()].to_string())
-        .collect::<Vec<_>>();
-    assert_eq!(lines, ["XX\t\t", "XX"]);
+    assert_eq!(line_texts(&layout, text), ["XX\t\t", "XX"]);
 }
 
 #[test]
@@ -79,11 +82,7 @@ fn break_spaces_rewinds_before_an_overflowing_preserved_space() {
     layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(2)]);
     layout.break_all_lines(Some(12.0));
 
-    let lines = layout
-        .lines()
-        .map(|line| text[line.text_range()].to_string())
-        .collect::<Vec<_>>();
-    assert_eq!(lines, ["X\t", " X"]);
+    assert_eq!(line_texts(&layout, text), ["X\t", " X"]);
 }
 
 #[test]
@@ -101,11 +100,37 @@ fn pre_wrap_hangs_a_complete_preserved_space_sequence() {
     layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(6)]);
     layout.break_all_lines(Some(18.0));
 
-    let lines = layout
-        .lines()
-        .map(|line| text[line.text_range()].to_string())
-        .collect::<Vec<_>>();
-    assert_eq!(lines, ["XX    ", "XX"]);
+    assert_eq!(line_texts(&layout, text), ["XX    ", "XX"]);
+}
+
+#[test]
+fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let measure = {
+        let text = "X X";
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        set_roboto(&mut builder);
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        layout.full_width()
+    };
+    let text = "X X X X ";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    set_roboto(&mut builder);
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    let mut layout = builder.build(text);
+
+    layout.set_line_break_overrides(vec![
+        LineBreakOverride::opportunity(2),
+        LineBreakOverride::opportunity(4),
+        LineBreakOverride::opportunity(6),
+    ]);
+    layout.break_all_lines(Some(measure));
+
+    assert_eq!(line_texts(&layout, text), ["X X ", "X X "]);
 }
 
 #[test]
