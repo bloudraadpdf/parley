@@ -134,6 +134,34 @@ fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity() {
 }
 
 #[test]
+fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity_across_controls() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let measure = {
+        let text = "X X";
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        set_roboto(&mut builder);
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        layout.full_width()
+    };
+    let text = "X \u{200b}X \u{200b}X \u{200b}X ";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    set_roboto(&mut builder);
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    let mut layout = builder.build(text);
+
+    layout.break_all_lines(Some(measure));
+
+    assert_eq!(
+        line_texts(&layout, text),
+        ["X \u{200b}X \u{200b}", "X \u{200b}X "]
+    );
+}
+
+#[test]
 fn pre_wrap_space_hangs_through_a_default_ignorable_boundary() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

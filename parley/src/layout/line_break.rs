@@ -979,7 +979,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // println!("Cluster {} next_x: {}", self.state.cluster_idx, next_x);
 
-                        let fits = if whitespace == Whitespace::Tab {
+                        let fits = if fit_advance == 0.0 {
+                            true
+                        } else if whitespace == Whitespace::Tab {
                             self.tab_stop_advance_fits(next_fit_x, max_advance)
                         } else {
                             self.advance_fits(next_fit_x, max_advance)
