@@ -910,7 +910,12 @@ impl<B: Brush> LayoutData<B> {
         let font_ref = skrifa::FontRef::from_index(font.data.as_ref(), font.index).unwrap();
         let size = skrifa::prelude::Size::new(font_size);
         let metrics = skrifa::metrics::Metrics::new(&font_ref, size, coords);
-        let glyph_metrics = skrifa::metrics::GlyphMetrics::new(&font_ref, size, coords);
+        let scale_factor = font_size / metrics.units_per_em as f32;
+        let glyph_metrics = skrifa::metrics::GlyphMetrics::new(
+            &font_ref,
+            skrifa::prelude::Size::unscaled(),
+            coords,
+        );
         let advance_projection = self
             .font_metric_advance_quantization
             .filter(|quantization| {
@@ -930,6 +935,7 @@ impl<B: Brush> LayoutData<B> {
         let space_advance = space_gid
             .and_then(|gid| {
                 glyph_metrics.advance_width(gid).map(|advance| {
+                    let advance = advance * scale_factor;
                     advance_projection
                         .as_ref()
                         .map_or(advance, |projection| projection.project(gid, advance))
@@ -1017,7 +1023,6 @@ impl<B: Brush> LayoutData<B> {
             return;
         }
         let glyph_positions = glyph_buffer.glyph_positions();
-        let scale_factor = font_size / units_per_em;
         let cluster_range_start = self.clusters.len();
         let is_rtl = bidi_level & 1 == 1;
         if !is_rtl {
