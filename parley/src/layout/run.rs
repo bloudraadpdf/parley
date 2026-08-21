@@ -257,6 +257,8 @@ pub struct RunMetrics {
     pub cap_height: Option<f32>,
     /// Advance width of the space character (U+0020) in this font at this size.
     pub space_advance: f32,
+    /// Advance width of the zero character (U+0030) in this font at this size.
+    pub zero_advance: f32,
     /// Glyph identifier for U+0020 SPACE in this font (used to replace
     /// the `.notdef` glyph that the shaper emits for tab characters).
     pub space_glyph_id: u32,
