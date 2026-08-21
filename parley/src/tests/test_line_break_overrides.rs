@@ -4,8 +4,8 @@
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
 use crate::{
-    FontFamily, InlineBox, Layout, LayoutContext, LineBreakOverride, RangedBuilder, StyleProperty,
-    TabSize, WhiteSpaceCollapse,
+    FontFamily, InlineBox, InlineBoxBreakAffinity, Layout, LayoutContext, LineBreakOverride,
+    RangedBuilder, StyleProperty, TabSize, TextWrapMode, WhiteSpaceCollapse,
 };
 use alloc::{
     string::{String, ToString},
@@ -29,6 +29,14 @@ fn roboto_layout(
     text: &str,
     white_space_collapse: Option<WhiteSpaceCollapse>,
 ) -> Layout<ColorBrush> {
+    roboto_layout_with_white_space(text, white_space_collapse, TextWrapMode::Wrap)
+}
+
+fn roboto_layout_with_white_space(
+    text: &str,
+    white_space_collapse: Option<WhiteSpaceCollapse>,
+    text_wrap_mode: TextWrapMode,
+) -> Layout<ColorBrush> {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
@@ -36,6 +44,7 @@ fn roboto_layout(
     if let Some(white_space_collapse) = white_space_collapse {
         builder.push_default(StyleProperty::WhiteSpaceCollapse(white_space_collapse));
     }
+    builder.push_default(StyleProperty::TextWrapMode(text_wrap_mode));
     builder.build(text)
 }
 
@@ -43,6 +52,20 @@ fn full_width(text: &str) -> f32 {
     let mut layout = roboto_layout(text, None);
     layout.break_all_lines(None);
     layout.full_width()
+}
+
+fn assert_terminal_space_is_measured(mut layout: Layout<ColorBrush>, expected: f32) {
+    let widths = layout.calculate_content_widths();
+    layout.break_all_lines(None);
+
+    assert_eq!(widths.min, expected);
+    assert_eq!(widths.max, expected);
+    assert_eq!(layout.width(), expected);
+    assert_eq!(layout.full_width(), expected);
+    assert_eq!(
+        layout.lines().next().unwrap().metrics().trailing_whitespace,
+        0.0
+    );
 }
 
 #[test]
@@ -218,6 +241,57 @@ fn break_spaces_measures_other_space_separators_as_content() {
         layout.lines().next().unwrap().metrics().trailing_whitespace,
         0.0
     );
+}
+
+#[test]
+fn pre_terminal_space_is_measured() {
+    let text = "XX ";
+    let expected = full_width(text);
+    let layout = roboto_layout_with_white_space(
+        text,
+        Some(WhiteSpaceCollapse::Preserve),
+        TextWrapMode::NoWrap,
+    );
+    assert_terminal_space_is_measured(layout, expected);
+}
+
+#[test]
+fn pre_terminal_space_is_measured_across_transparent_owner_end() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "XX ";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    set_roboto(&mut builder);
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
+    builder.push_inline_box(InlineBox::inline_end_edge(
+        1,
+        text.len(),
+        0.0,
+        0.0,
+        InlineBoxBreakAffinity::ToPrevious,
+    ));
+    let layout = builder.build(text);
+    let expected = full_width(text);
+    assert_terminal_space_is_measured(layout, expected);
+}
+
+#[test]
+fn pre_forced_break_space_is_measured() {
+    let expected = full_width("XX ");
+    let mut layout = roboto_layout_with_white_space(
+        "XX \nX",
+        Some(WhiteSpaceCollapse::Preserve),
+        TextWrapMode::NoWrap,
+    );
+
+    assert_eq!(layout.calculate_content_widths().max, expected);
+    layout.break_all_lines(None);
+    let first = layout.lines().next().unwrap();
+    assert_eq!(first.metrics().advance, expected);
+    assert_eq!(first.metrics().trailing_whitespace, 0.0);
 }
 
 #[test]
