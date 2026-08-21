@@ -1614,10 +1614,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         styles: &[crate::layout::Style<B>],
                     ) -> f32 {
                         clusters
-                            .take_while(|cluster| cluster.info.whitespace() != Whitespace::None)
+                            .take_while(|cluster| {
+                                cluster.info.whitespace() != Whitespace::None
+                                    || cluster.info.is_default_ignorable()
+                            })
                             .filter(|cluster| {
-                                styles[cluster.style_index as usize].white_space_collapse
-                                    != WhiteSpaceCollapse::BreakSpaces
+                                cluster.info.whitespace() != Whitespace::None
+                                    && styles[cluster.style_index as usize].white_space_collapse
+                                        != WhiteSpaceCollapse::BreakSpaces
                             })
                             .map(|cluster| cluster.advance)
                             .sum()

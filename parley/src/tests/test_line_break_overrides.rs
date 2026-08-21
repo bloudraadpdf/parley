@@ -134,6 +134,22 @@ fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity() {
 }
 
 #[test]
+fn pre_wrap_space_hangs_through_a_default_ignorable_boundary() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "X \u{200b}";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    set_roboto(&mut builder);
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+
+    assert!(layout.lines().next().unwrap().metrics().trailing_whitespace > 0.0);
+}
+
+#[test]
 fn break_spaces_preserves_trailing_space_measurement() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

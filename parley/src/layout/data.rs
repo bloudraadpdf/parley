@@ -590,7 +590,9 @@ impl LineItemData {
         if self.is_rtl() {
             // RTL runs check for "trailing" whitespace at the front.
             for cluster in layout_data.clusters[self.cluster_range.clone()].iter() {
-                if cluster.info.is_whitespace() {
+                if cluster.info.is_default_ignorable() {
+                    continue;
+                } else if cluster.info.is_whitespace() {
                     self.has_trailing_whitespace = true;
                 } else {
                     self.is_whitespace = false;
@@ -602,7 +604,9 @@ impl LineItemData {
                 .iter()
                 .rev()
             {
-                if cluster.info.is_whitespace() {
+                if cluster.info.is_default_ignorable() {
+                    continue;
+                } else if cluster.info.is_whitespace() {
                     self.has_trailing_whitespace = true;
                 } else {
                     self.is_whitespace = false;
