@@ -573,7 +573,7 @@ fn rtl_paragraph_centres_ltr_hanging_whitespace_on_its_physical_side() {
 fn rtl_override_centres_source_terminal_hanging_whitespace() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-    let text = "\u{202e}one two three four\u{202c}";
+    let text = "\u{202e}one \u{200b}two \u{200b}three \u{200b}four\u{202c}";
     let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
     builder.set_direction(BaseDirection::Rtl);
     set_roboto(&mut builder);
