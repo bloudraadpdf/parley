@@ -166,6 +166,34 @@ fn text_retains_consecutive_transparent_anchors_at_its_start() {
     assert_eq!(positioned_inline_box_ids(&layout), [78, 79, 80]);
 }
 
+#[test]
+fn zero_width_owner_end_does_not_follow_hanging_spaces_onto_an_empty_line() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "XX    ";
+    let measure = {
+        let mut builder = lcx.ranged_builder(&mut fcx, "XX", 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        let mut layout = builder.build("XX");
+        layout.break_all_lines(None);
+        layout.full_width()
+    };
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        crate::WhiteSpaceCollapse::Preserve,
+    ));
+    builder.push_inline_box(InlineBox::new(83, text.len(), 0.0, 0.0));
+    let mut layout = builder.build(text);
+
+    layout.break_all_lines(Some(measure));
+
+    assert_eq!(layout.len(), 1);
+    assert_eq!(inline_box_line(&layout, 83), 0);
+}
+
 fn positioned_inline_box_ids(layout: &crate::Layout<ColorBrush>) -> Vec<u64> {
     layout
         .lines()

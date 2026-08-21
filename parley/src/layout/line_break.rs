@@ -468,12 +468,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     fn logical_owner_edge_placement(
         &mut self,
         source_projection: LogicalInlineEdgeSourceProjection,
+        edge_width: f32,
         next_fit_x: f32,
         max_advance: f32,
     ) -> LogicalOwnerEdgePlacement {
         if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
             && self.state.line.text_wrap_mode == TextWrapMode::Wrap
             && self.state.line.fit_x != 0.0
+            && edge_width != 0.0
             && !self.advance_fits(next_fit_x, max_advance)
         {
             self.state.prev_boundary.take().map_or(
@@ -637,6 +639,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             }
                             match self.logical_owner_edge_placement(
                                 source_projection,
+                                edge_width,
                                 self.state.line.fit_x + edge_width,
                                 max_advance,
                             ) {
@@ -691,7 +694,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // If the box fits on the current line (or we are at the start of the current line)
                     // then simply move on to the next item
-                    if self.advance_fits(next_fit_x, max_advance)
+                    if self.advance_contribution_fits(width, next_fit_x, max_advance)
                         || self.state.line.text_wrap_mode != TextWrapMode::Wrap
                     {
                         // println!("BOX FITS");
@@ -979,12 +982,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // println!("Cluster {} next_x: {}", self.state.cluster_idx, next_x);
 
-                        let fits = if fit_advance == 0.0 {
-                            true
-                        } else if whitespace == Whitespace::Tab {
+                        let fits = if whitespace == Whitespace::Tab && fit_advance != 0.0 {
                             self.tab_stop_advance_fits(next_fit_x, max_advance)
                         } else {
-                            self.advance_fits(next_fit_x, max_advance)
+                            self.advance_contribution_fits(fit_advance, next_fit_x, max_advance)
                         };
                         let line_fit = if fits {
                             LineFit::Fits
@@ -1159,6 +1160,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     max_advance,
                     self.state.line.clusters.len() + self.state.line.items.len() + 1,
                 ))
+    }
+
+    fn advance_contribution_fits(
+        &self,
+        contribution: f32,
+        candidate: f32,
+        max_advance: f32,
+    ) -> bool {
+        contribution == 0.0 || self.advance_fits(candidate, max_advance)
     }
 
     /// Compare a position-dependent tab stop with the line measure.
