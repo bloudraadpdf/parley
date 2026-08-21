@@ -25,6 +25,26 @@ fn line_texts(layout: &Layout<ColorBrush>, text: &str) -> Vec<String> {
         .collect()
 }
 
+fn roboto_layout(
+    text: &str,
+    white_space_collapse: Option<WhiteSpaceCollapse>,
+) -> Layout<ColorBrush> {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    set_roboto(&mut builder);
+    if let Some(white_space_collapse) = white_space_collapse {
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(white_space_collapse));
+    }
+    builder.build(text)
+}
+
+fn full_width(text: &str) -> f32 {
+    let mut layout = roboto_layout(text, None);
+    layout.break_all_lines(None);
+    layout.full_width()
+}
+
 #[test]
 fn caller_overrides_replace_unicode_slash_opportunities() {
     let mut fcx = create_font_context();
@@ -87,15 +107,8 @@ fn break_spaces_rewinds_before_an_overflowing_preserved_space() {
 
 #[test]
 fn pre_wrap_hangs_a_complete_preserved_space_sequence() {
-    let mut fcx = create_font_context();
-    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let text = "XX    XX";
-    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-    set_roboto(&mut builder);
-    builder.push_default(StyleProperty::WhiteSpaceCollapse(
-        WhiteSpaceCollapse::Preserve,
-    ));
-    let mut layout = builder.build(text);
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
 
     layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(6)]);
     layout.break_all_lines(Some(18.0));
@@ -105,23 +118,9 @@ fn pre_wrap_hangs_a_complete_preserved_space_sequence() {
 
 #[test]
 fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity() {
-    let mut fcx = create_font_context();
-    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-    let measure = {
-        let text = "X X";
-        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-        set_roboto(&mut builder);
-        let mut layout = builder.build(text);
-        layout.break_all_lines(None);
-        layout.full_width()
-    };
+    let measure = full_width("X X");
     let text = "X X X X ";
-    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-    set_roboto(&mut builder);
-    builder.push_default(StyleProperty::WhiteSpaceCollapse(
-        WhiteSpaceCollapse::Preserve,
-    ));
-    let mut layout = builder.build(text);
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
 
     layout.set_line_break_overrides(vec![
         LineBreakOverride::opportunity(2),
@@ -135,23 +134,9 @@ fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity() {
 
 #[test]
 fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity_across_controls() {
-    let mut fcx = create_font_context();
-    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-    let measure = {
-        let text = "X X";
-        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-        set_roboto(&mut builder);
-        let mut layout = builder.build(text);
-        layout.break_all_lines(None);
-        layout.full_width()
-    };
+    let measure = full_width("X X");
     let text = "X \u{200b}X \u{200b}X \u{200b}X ";
-    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-    set_roboto(&mut builder);
-    builder.push_default(StyleProperty::WhiteSpaceCollapse(
-        WhiteSpaceCollapse::Preserve,
-    ));
-    let mut layout = builder.build(text);
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
 
     layout.break_all_lines(Some(measure));
 
@@ -163,15 +148,8 @@ fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity_across_controls()
 
 #[test]
 fn pre_wrap_space_hangs_through_a_default_ignorable_boundary() {
-    let mut fcx = create_font_context();
-    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let text = "X \u{200b}";
-    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-    set_roboto(&mut builder);
-    builder.push_default(StyleProperty::WhiteSpaceCollapse(
-        WhiteSpaceCollapse::Preserve,
-    ));
-    let mut layout = builder.build(text);
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
     layout.break_all_lines(None);
 
     assert!(layout.lines().next().unwrap().metrics().trailing_whitespace > 0.0);
