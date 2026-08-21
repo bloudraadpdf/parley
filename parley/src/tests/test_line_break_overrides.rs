@@ -568,3 +568,44 @@ fn rtl_paragraph_centres_ltr_hanging_whitespace_on_its_physical_side() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn rtl_override_centres_source_terminal_hanging_whitespace() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "\u{202e}one two three four\u{202c}";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.set_direction(BaseDirection::Rtl);
+    set_roboto(&mut builder);
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    let mut layout = builder.build(text);
+    layout.set_line_break_overrides(vec![
+        LineBreakOverride::suppress(text.find("two").unwrap()),
+        LineBreakOverride::suppress(text.find("three").unwrap()),
+        LineBreakOverride::opportunity(text.find("four").unwrap()),
+    ]);
+    layout.break_all_lines(Some(full_width("one two three") + 5.0));
+
+    let line = layout.lines().next().unwrap();
+    let trailing_whitespace = line.metrics().trailing_whitespace;
+    let content_advance = line.metrics().advance - trailing_whitespace;
+    let alignment_width = content_advance + 100.0;
+    assert!(
+        trailing_whitespace > 0.0,
+        "runs={:?}",
+        line.runs()
+            .map(|run| (run.text_range(), run.is_rtl(), run.advance()))
+            .collect::<Vec<_>>()
+    );
+
+    layout.align(
+        Some(alignment_width),
+        Alignment::Center,
+        AlignmentOptions::default(),
+    );
+
+    let offset = layout.lines().next().unwrap().metrics().offset;
+    assert!((offset - (50.0 - trailing_whitespace)).abs() < 0.01);
+}
