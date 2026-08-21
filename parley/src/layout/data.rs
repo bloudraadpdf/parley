@@ -1221,6 +1221,7 @@ impl<B: Brush> LayoutData<B> {
         let mut running_max_width = 0.0;
         let mut trailing_min_width = 0.0;
         let mut trailing_max_width = 0.0;
+        let mut trailing_unconditional_max_width = 0.0;
         let mut text_wrap_mode = TextWrapMode::Wrap;
         let mut projected_source_boundary: Option<ProjectedSourceBoundary> = None;
         for (item_index, item) in self.items.iter().enumerate() {
@@ -1274,9 +1275,11 @@ impl<B: Brush> LayoutData<B> {
                             running_min_width = 0.0;
                             trailing_min_width = 0.0;
                             if boundary == Boundary::Mandatory {
-                                max_width = max_width.max(running_max_width - trailing_max_width);
+                                max_width = max_width
+                                    .max(running_max_width - trailing_unconditional_max_width);
                                 running_max_width = 0.0;
                                 trailing_max_width = 0.0;
+                                trailing_unconditional_max_width = 0.0;
                             }
                         }
                         running_min_width += cluster.advance;
@@ -1287,9 +1290,15 @@ impl<B: Brush> LayoutData<B> {
                         ) {
                             trailing_min_width += cluster.advance;
                             trailing_max_width += cluster.advance;
-                        } else {
+                            if style.white_space_collapse == WhiteSpaceCollapse::Collapse {
+                                trailing_unconditional_max_width += cluster.advance;
+                            }
+                        } else if cluster.info.whitespace() != Whitespace::Newline
+                            && !cluster.info.is_default_ignorable()
+                        {
                             trailing_min_width = 0.0;
                             trailing_max_width = 0.0;
+                            trailing_unconditional_max_width = 0.0;
                         }
                     }
                     min_width = min_width.max(running_min_width - trailing_min_width);
@@ -1308,6 +1317,7 @@ impl<B: Brush> LayoutData<B> {
                             running_min_width += width;
                             trailing_min_width = 0.0;
                             trailing_max_width = 0.0;
+                            trailing_unconditional_max_width = 0.0;
                             if can_wrap && break_affinity.allows_break_after() {
                                 min_width = min_width.max(running_min_width);
                                 running_min_width = 0.0;
@@ -1340,6 +1350,7 @@ impl<B: Brush> LayoutData<B> {
                             if width != 0.0 {
                                 trailing_min_width = 0.0;
                                 trailing_max_width = 0.0;
+                                trailing_unconditional_max_width = 0.0;
                             }
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project

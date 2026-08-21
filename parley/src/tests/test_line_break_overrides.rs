@@ -199,6 +199,13 @@ fn pre_wrap_forced_break_spaces_only_hang_from_min_content() {
 }
 
 #[test]
+fn other_space_separator_before_forced_break_hangs_from_max_content() {
+    let layout = roboto_layout("XX\u{3000}\nX", None);
+
+    assert_eq!(layout.calculate_content_widths().max, full_width("XX"));
+}
+
+#[test]
 fn break_spaces_preserves_trailing_space_measurement() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
