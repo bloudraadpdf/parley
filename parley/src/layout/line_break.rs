@@ -14,7 +14,7 @@ use crate::analysis::{AuthoredBreakUnit, Boundary};
 use crate::data::ClusterData;
 use crate::inline_box::{
     InlineBoxBidiAttachment, InlineBoxLineBreakParticipation, InlineBoxLineMetricParticipation,
-    LogicalInlineEdgeSourceProjection,
+    InlineBoxShapingParticipation, LogicalInlineEdgeSourceProjection,
 };
 use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
@@ -1618,43 +1618,41 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         // Resolve trailing whitespace from source order. Bidi visual order can place an
         // internal styled run at a physical extreme without making that run source-terminal.
-        line.metrics.trailing_whitespace =
-            match source_trailing_line_item(&self.lines.line_items[line.item_range.clone()]) {
-                SourceTrailingLineItem::Text(run) if run.has_trailing_whitespace => {
-                    fn hanging_whitespace_advance<
-                        'c,
-                        B: Brush,
-                        I: Iterator<Item = &'c ClusterData>,
-                    >(
-                        clusters: I,
-                        styles: &[crate::layout::Style<B>],
-                    ) -> f32 {
-                        clusters
-                            .take_while(|cluster| {
-                                cluster.info.whitespace() != Whitespace::None
-                                    || cluster.info.is_default_ignorable()
-                            })
-                            .filter(|cluster| {
-                                whitespace_hangs_at_line_end(
-                                    cluster.info.whitespace(),
-                                    styles[cluster.style_index as usize].white_space_collapse,
-                                )
-                            })
-                            .map(|cluster| cluster.advance)
-                            .sum()
-                    }
-
-                    let clusters = &self.layout.data.clusters[run.cluster_range.clone()];
-                    if run.is_rtl() {
-                        hanging_whitespace_advance(clusters.iter(), &self.layout.data.styles)
-                    } else {
-                        hanging_whitespace_advance(clusters.iter().rev(), &self.layout.data.styles)
-                    }
+        line.metrics.trailing_whitespace = match source_trailing_line_item(
+            &self.lines.line_items[line.item_range.clone()],
+            &self.layout.data.inline_boxes,
+        ) {
+            SourceTrailingLineItem::Text(run) if run.has_trailing_whitespace => {
+                fn hanging_whitespace_advance<'c, B: Brush, I: Iterator<Item = &'c ClusterData>>(
+                    clusters: I,
+                    styles: &[crate::layout::Style<B>],
+                ) -> f32 {
+                    clusters
+                        .take_while(|cluster| {
+                            cluster.info.whitespace() != Whitespace::None
+                                || cluster.info.is_default_ignorable()
+                        })
+                        .filter(|cluster| {
+                            whitespace_hangs_at_line_end(
+                                cluster.info.whitespace(),
+                                styles[cluster.style_index as usize].white_space_collapse,
+                            )
+                        })
+                        .map(|cluster| cluster.advance)
+                        .sum()
                 }
-                SourceTrailingLineItem::Text(_)
-                | SourceTrailingLineItem::InlineBox
-                | SourceTrailingLineItem::Absent => 0.0,
-            };
+
+                let clusters = &self.layout.data.clusters[run.cluster_range.clone()];
+                if run.is_rtl() {
+                    hanging_whitespace_advance(clusters.iter(), &self.layout.data.styles)
+                } else {
+                    hanging_whitespace_advance(clusters.iter().rev(), &self.layout.data.styles)
+                }
+            }
+            SourceTrailingLineItem::Text(_)
+            | SourceTrailingLineItem::InlineBox
+            | SourceTrailingLineItem::Absent => 0.0,
+        };
 
         if !have_metrics {
             // Line consisting entirely of whitespace?
@@ -2067,9 +2065,19 @@ enum SourceTrailingLineItem<'a> {
     InlineBox,
 }
 
-fn source_trailing_line_item(line_items: &[LineItemData]) -> SourceTrailingLineItem<'_> {
+fn source_trailing_line_item<'a>(
+    line_items: &'a [LineItemData],
+    inline_boxes: &[crate::InlineBox],
+) -> SourceTrailingLineItem<'a> {
     let source_terminal = line_items
         .iter()
+        .filter(|item| {
+            item.kind == LayoutItemKind::TextRun
+                || inline_boxes.get(item.index).is_none_or(|inline_box| {
+                    inline_box.shaping_participation()
+                        != InlineBoxShapingParticipation::TransparentBoundary
+                })
+        })
         .filter_map(|item| {
             item.layout_item_index
                 .map(|source_index| (source_index, item))
@@ -2109,13 +2117,20 @@ mod tests {
         }
     }
 
+    fn inline_item(source_index: usize) -> LineItemData {
+        let mut item = text_item(source_index, 0..0);
+        item.kind = LayoutItemKind::InlineBox;
+        item.index = 0;
+        item
+    }
+
     #[test]
     fn source_terminal_run_owns_trailing_whitespace_across_visual_reordering() {
         let source_first = text_item(0, 0..6);
         let source_last = text_item(1, 6..12);
         let visual_order = [source_last, source_first];
 
-        let SourceTrailingLineItem::Text(selected) = source_trailing_line_item(&visual_order)
+        let SourceTrailingLineItem::Text(selected) = source_trailing_line_item(&visual_order, &[])
         else {
             panic!("the source-terminal text run must remain selected")
         };
@@ -2124,14 +2139,32 @@ mod tests {
 
     #[test]
     fn source_terminal_inline_box_cannot_supply_trailing_text_whitespace() {
-        let mut inline_box = text_item(1, 0..0);
-        inline_box.kind = LayoutItemKind::InlineBox;
-        let visual_order = [inline_box, text_item(0, 0..6)];
+        let visual_order = [inline_item(1), text_item(0, 0..6)];
+        let inline_boxes = [crate::InlineBox::new(1, 6, 0.0, 0.0)];
 
         assert!(matches!(
-            source_trailing_line_item(&visual_order),
+            source_trailing_line_item(&visual_order, &inline_boxes),
             SourceTrailingLineItem::InlineBox
         ));
+    }
+
+    #[test]
+    fn transparent_owner_end_leaves_trailing_text_source_terminal() {
+        let visual_order = [inline_item(1), text_item(0, 0..6)];
+        let inline_boxes = [crate::InlineBox::inline_end_edge(
+            1,
+            6,
+            0.0,
+            0.0,
+            crate::InlineBoxBreakAffinity::ToPrevious,
+        )];
+
+        let SourceTrailingLineItem::Text(selected) =
+            source_trailing_line_item(&visual_order, &inline_boxes)
+        else {
+            panic!("the transparent owner end must not replace the trailing text")
+        };
+        assert_eq!(selected.text_range, 0..6);
     }
 
     #[test]

@@ -185,6 +185,20 @@ fn break_spaces_measures_other_space_separators_as_content() {
 }
 
 #[test]
+fn pre_wrap_forced_break_spaces_only_hang_from_min_content() {
+    let forced_break = roboto_layout("XX   \nX", Some(WhiteSpaceCollapse::Preserve));
+    let expected_max = {
+        let mut layout = roboto_layout("XX   ", Some(WhiteSpaceCollapse::BreakSpaces));
+        layout.break_all_lines(None);
+        layout.full_width()
+    };
+    let terminal = roboto_layout("XX   ", Some(WhiteSpaceCollapse::Preserve));
+
+    assert_eq!(forced_break.calculate_content_widths().max, expected_max);
+    assert_eq!(terminal.calculate_content_widths().max, full_width("XX"));
+}
+
+#[test]
 fn break_spaces_preserves_trailing_space_measurement() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
