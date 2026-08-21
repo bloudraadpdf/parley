@@ -1,6 +1,7 @@
 // Copyright 2021 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use crate::WhiteSpaceCollapse;
 use crate::inline_box::{
     FollowingSourceSpace, InlineBox, InlineBoxLineBreakParticipation, LogicalInlineEdge,
     LogicalInlineEdgeSourceProjection,
@@ -1189,9 +1190,16 @@ impl<B: Brush> LayoutData<B> {
 
     // TODO: this method does not handle mixed direction text at all.
     pub(crate) fn calculate_content_widths(&self) -> ContentWidths {
-        fn whitespace_advance(cluster: Option<&ClusterData>) -> f32 {
+        fn hanging_whitespace_advance<B: Brush>(
+            cluster: Option<&ClusterData>,
+            styles: &[Style<B>],
+        ) -> f32 {
             cluster
-                .filter(|cluster| cluster.info.whitespace().is_space_or_nbsp())
+                .filter(|cluster| {
+                    cluster.info.whitespace().is_space_or_nbsp()
+                        && styles[cluster.style_index as usize].white_space_collapse
+                            != WhiteSpaceCollapse::BreakSpaces
+                })
                 .map_or(0.0, |cluster| cluster.advance)
         }
 
@@ -1254,7 +1262,8 @@ impl<B: Brush> LayoutData<B> {
                                     || (prev_text_wrap_mode == TextWrapMode::Wrap
                                         && style_resolved_opportunity)))
                         {
-                            let trailing_whitespace = whitespace_advance(prev_cluster);
+                            let trailing_whitespace =
+                                hanging_whitespace_advance(prev_cluster, &self.styles);
                             min_width = min_width.max(running_min_width - trailing_whitespace);
                             running_min_width = 0.0;
                             if boundary == Boundary::Mandatory {
@@ -1268,7 +1277,8 @@ impl<B: Brush> LayoutData<B> {
                             prev_cluster = Some(cluster);
                         }
                     }
-                    let trailing_whitespace = whitespace_advance(prev_cluster);
+                    let trailing_whitespace =
+                        hanging_whitespace_advance(prev_cluster, &self.styles);
                     min_width = min_width.max(running_min_width - trailing_whitespace);
                 }
                 LayoutItemKind::InlineBox => {
@@ -1279,7 +1289,8 @@ impl<B: Brush> LayoutData<B> {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
                             let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
                             if can_wrap && break_affinity.allows_break_before() {
-                                let trailing_whitespace = whitespace_advance(prev_cluster);
+                                let trailing_whitespace =
+                                    hanging_whitespace_advance(prev_cluster, &self.styles);
                                 min_width = min_width.max(running_min_width - trailing_whitespace);
                                 running_min_width = 0.0;
                             }
@@ -1308,7 +1319,8 @@ impl<B: Brush> LayoutData<B> {
                                 == LogicalInlineEdgeSourceProjection::BeforeGeometry
                                 && project
                             {
-                                let trailing_whitespace = whitespace_advance(prev_cluster);
+                                let trailing_whitespace =
+                                    hanging_whitespace_advance(prev_cluster, &self.styles);
                                 min_width = min_width.max(running_min_width - trailing_whitespace);
                                 running_min_width = 0.0;
                                 projected_source_boundary = projection;
@@ -1326,11 +1338,11 @@ impl<B: Brush> LayoutData<B> {
                     }
                 }
             }
-            let trailing_whitespace = whitespace_advance(prev_cluster);
+            let trailing_whitespace = hanging_whitespace_advance(prev_cluster, &self.styles);
             max_width = max_width.max(running_max_width - trailing_whitespace);
         }
 
-        let trailing_whitespace = whitespace_advance(prev_cluster);
+        let trailing_whitespace = hanging_whitespace_advance(prev_cluster, &self.styles);
         min_width = min_width.max(running_min_width - trailing_whitespace);
 
         ContentWidths {

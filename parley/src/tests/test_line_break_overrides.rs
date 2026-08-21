@@ -82,3 +82,38 @@ fn break_spaces_rewinds_before_an_overflowing_preserved_space() {
         .collect::<Vec<_>>();
     assert_eq!(lines, ["X\t", " X"]);
 }
+
+#[test]
+fn break_spaces_preserves_trailing_space_measurement() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "X  ";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::BreakSpaces,
+    ));
+    let mut layout = builder.build(text);
+    layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(2)]);
+
+    let expected_min = {
+        let text = "X ";
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::BreakSpaces,
+        ));
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        layout.full_width()
+    };
+    assert_eq!(layout.calculate_content_widths().min, expected_min);
+
+    layout.break_all_lines(None);
+    assert_eq!(
+        layout.lines().next().unwrap().metrics().trailing_whitespace,
+        0.0
+    );
+}

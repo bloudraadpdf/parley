@@ -1599,20 +1599,29 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         line.metrics.trailing_whitespace =
             match source_trailing_line_item(&self.lines.line_items[line.item_range.clone()]) {
                 SourceTrailingLineItem::Text(run) if run.has_trailing_whitespace => {
-                    fn whitespace_advance<'c, I: Iterator<Item = &'c ClusterData>>(
+                    fn hanging_whitespace_advance<
+                        'c,
+                        B: Brush,
+                        I: Iterator<Item = &'c ClusterData>,
+                    >(
                         clusters: I,
+                        styles: &[crate::layout::Style<B>],
                     ) -> f32 {
                         clusters
                             .take_while(|cluster| cluster.info.whitespace() != Whitespace::None)
+                            .filter(|cluster| {
+                                styles[cluster.style_index as usize].white_space_collapse
+                                    != WhiteSpaceCollapse::BreakSpaces
+                            })
                             .map(|cluster| cluster.advance)
                             .sum()
                     }
 
                     let clusters = &self.layout.data.clusters[run.cluster_range.clone()];
                     if run.is_rtl() {
-                        whitespace_advance(clusters.iter())
+                        hanging_whitespace_advance(clusters.iter(), &self.layout.data.styles)
                     } else {
-                        whitespace_advance(clusters.iter().rev())
+                        hanging_whitespace_advance(clusters.iter().rev(), &self.layout.data.styles)
                     }
                 }
                 SourceTrailingLineItem::Text(_)
