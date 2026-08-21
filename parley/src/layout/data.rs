@@ -10,20 +10,75 @@ use crate::inline_box::{
 use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
 
-pub(crate) const fn whitespace_hangs_at_line_end(
-    whitespace: Whitespace,
-    white_space_collapse: WhiteSpaceCollapse,
-) -> bool {
-    match white_space_collapse {
-        WhiteSpaceCollapse::BreakSpaces => false,
-        WhiteSpaceCollapse::Collapse => matches!(
-            whitespace,
-            Whitespace::Space | Whitespace::OtherSpaceSeparator
-        ),
-        WhiteSpaceCollapse::Preserve => matches!(
-            whitespace,
-            Whitespace::Space | Whitespace::OtherSpaceSeparator | Whitespace::Tab
-        ),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalWhitespaceDisposition {
+    Measured,
+    ConditionallyHanging,
+    Hanging,
+}
+
+impl TerminalWhitespaceDisposition {
+    pub(crate) const fn is_hanging(self) -> bool {
+        matches!(self, Self::ConditionallyHanging | Self::Hanging)
+    }
+
+    const fn is_unconditionally_hanging(self) -> bool {
+        matches!(self, Self::Hanging)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WhiteSpaceLayoutMode {
+    collapse: WhiteSpaceCollapse,
+    wrap: TextWrapMode,
+}
+
+impl WhiteSpaceLayoutMode {
+    pub(crate) const fn from_style<B: Brush>(style: &Style<B>) -> Self {
+        Self {
+            collapse: style.white_space_collapse,
+            wrap: style.text_wrap_mode,
+        }
+    }
+
+    pub(crate) const fn terminal_disposition(
+        self,
+        whitespace: Whitespace,
+    ) -> TerminalWhitespaceDisposition {
+        match (self.collapse, self.wrap) {
+            (WhiteSpaceCollapse::BreakSpaces, _)
+            | (WhiteSpaceCollapse::Preserve, TextWrapMode::NoWrap) => {
+                TerminalWhitespaceDisposition::Measured
+            }
+            (WhiteSpaceCollapse::Collapse, _)
+                if matches!(
+                    whitespace,
+                    Whitespace::Space | Whitespace::OtherSpaceSeparator
+                ) =>
+            {
+                TerminalWhitespaceDisposition::Hanging
+            }
+            (WhiteSpaceCollapse::Preserve, TextWrapMode::Wrap)
+                if matches!(
+                    whitespace,
+                    Whitespace::Space | Whitespace::OtherSpaceSeparator | Whitespace::Tab
+                ) =>
+            {
+                TerminalWhitespaceDisposition::ConditionallyHanging
+            }
+            (WhiteSpaceCollapse::Collapse | WhiteSpaceCollapse::Preserve, _) => {
+                TerminalWhitespaceDisposition::Measured
+            }
+        }
+    }
+
+    pub(crate) const fn wraps(self) -> bool {
+        matches!(self.wrap, TextWrapMode::Wrap)
+    }
+
+    pub(crate) const fn collapses_space(self, whitespace: Whitespace) -> bool {
+        matches!(self.collapse, WhiteSpaceCollapse::Collapse)
+            && matches!(whitespace, Whitespace::Space)
     }
 }
 
@@ -1284,13 +1339,12 @@ impl<B: Brush> LayoutData<B> {
                         }
                         running_min_width += cluster.advance;
                         running_max_width += cluster.advance;
-                        if whitespace_hangs_at_line_end(
-                            cluster.info.whitespace(),
-                            style.white_space_collapse,
-                        ) {
+                        let terminal_disposition = WhiteSpaceLayoutMode::from_style(style)
+                            .terminal_disposition(cluster.info.whitespace());
+                        if terminal_disposition.is_hanging() {
                             trailing_min_width += cluster.advance;
                             trailing_max_width += cluster.advance;
-                            if style.white_space_collapse == WhiteSpaceCollapse::Collapse {
+                            if terminal_disposition.is_unconditionally_hanging() {
                                 trailing_unconditional_max_width += cluster.advance;
                             }
                         } else if cluster.info.whitespace() != Whitespace::Newline

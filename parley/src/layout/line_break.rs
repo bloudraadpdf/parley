@@ -20,7 +20,7 @@ use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
     ProjectedSourceClusterParticipation, ProjectedSourceLineFill, SelectedSourceClusterAdvance,
-    whitespace_hangs_at_line_end,
+    WhiteSpaceLayoutMode,
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -28,7 +28,7 @@ use crate::layout::{
 };
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
-use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WhiteSpaceCollapse, WordBreak};
+use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WordBreak};
 
 use core::ops::Range;
 
@@ -206,20 +206,15 @@ enum LogicalOwnerEdgePlacement {
 }
 
 impl OverflowingWhitespace {
-    fn classify(
-        whitespace: Whitespace,
-        text_wrap_mode: TextWrapMode,
-        white_space_collapse: WhiteSpaceCollapse,
-    ) -> Self {
+    fn classify<B: Brush>(whitespace: Whitespace, style: &crate::layout::Style<B>) -> Self {
+        let white_space = WhiteSpaceLayoutMode::from_style(style);
         if whitespace == Whitespace::NoBreakSpace {
             Self::NoBreakGlue
-        } else if text_wrap_mode != TextWrapMode::Wrap {
+        } else if !white_space.wraps() {
             Self::Other
-        } else if whitespace == Whitespace::Space
-            && white_space_collapse == WhiteSpaceCollapse::Collapse
-        {
+        } else if white_space.collapses_space(whitespace) {
             Self::CollapsibleSoftWrap(SoftWrapOpportunity)
-        } else if whitespace_hangs_at_line_end(whitespace, white_space_collapse) {
+        } else if white_space.terminal_disposition(whitespace).is_hanging() {
             Self::PreservedHanging
         } else {
             Self::Other
@@ -994,11 +989,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let line_fit = if fits {
                             LineFit::Fits
                         } else {
-                            match OverflowingWhitespace::classify(
-                                whitespace,
-                                style.text_wrap_mode,
-                                style.white_space_collapse,
-                            ) {
+                            match OverflowingWhitespace::classify(whitespace, style) {
                                 OverflowingWhitespace::CollapsibleSoftWrap(opportunity) => {
                                     LineFit::TrailingCollapsibleSpaceOverflow(opportunity)
                                 }
@@ -1630,10 +1621,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 || cluster.info.is_default_ignorable()
                         })
                         .filter(|cluster| {
-                            whitespace_hangs_at_line_end(
-                                cluster.info.whitespace(),
-                                styles[cluster.style_index as usize].white_space_collapse,
-                            )
+                            WhiteSpaceLayoutMode::from_style(&styles[cluster.style_index as usize])
+                                .terminal_disposition(cluster.info.whitespace())
+                                .is_hanging()
                         })
                         .map(|cluster| cluster.advance)
                         .sum()
