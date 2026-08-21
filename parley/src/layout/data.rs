@@ -2,12 +2,30 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::WhiteSpaceCollapse;
+use crate::analysis::cluster::Whitespace;
 use crate::inline_box::{
     FollowingSourceSpace, InlineBox, InlineBoxLineBreakParticipation, LogicalInlineEdge,
     LogicalInlineEdgeSourceProjection,
 };
 use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
 use crate::style::Brush;
+
+pub(crate) const fn whitespace_hangs_at_line_end(
+    whitespace: Whitespace,
+    white_space_collapse: WhiteSpaceCollapse,
+) -> bool {
+    match white_space_collapse {
+        WhiteSpaceCollapse::BreakSpaces => false,
+        WhiteSpaceCollapse::Collapse => matches!(
+            whitespace,
+            Whitespace::Space | Whitespace::OtherSpaceSeparator
+        ),
+        WhiteSpaceCollapse::Preserve => matches!(
+            whitespace,
+            Whitespace::Space | Whitespace::OtherSpaceSeparator | Whitespace::Tab
+        ),
+    }
+}
 
 /// Selection policy among normal soft-wrap opportunities.
 ///
@@ -336,7 +354,6 @@ use skrifa::MetadataProvider as _;
 
 use alloc::vec::Vec;
 
-use crate::analysis::cluster::Whitespace;
 use crate::analysis::{AuthoredBreakUnit, Boundary, CharInfo};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -465,6 +482,9 @@ const fn to_whitespace(c: char) -> Whitespace {
         '\t' => Whitespace::Tab,
         '\n' | '\r' | LINE_SEPARATOR | PARAGRAPH_SEPARATOR => Whitespace::Newline,
         '\u{00A0}' => Whitespace::NoBreakSpace,
+        '\u{1680}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => {
+            Whitespace::OtherSpaceSeparator
+        }
         _ => Whitespace::None,
     }
 }
@@ -1194,36 +1214,20 @@ impl<B: Brush> LayoutData<B> {
 
     // TODO: this method does not handle mixed direction text at all.
     pub(crate) fn calculate_content_widths(&self) -> ContentWidths {
-        fn hanging_whitespace_advance<B: Brush>(
-            cluster: Option<&ClusterData>,
-            styles: &[Style<B>],
-        ) -> f32 {
-            cluster
-                .filter(|cluster| {
-                    cluster.info.whitespace().is_space_or_nbsp()
-                        && styles[cluster.style_index as usize].white_space_collapse
-                            != WhiteSpaceCollapse::BreakSpaces
-                })
-                .map_or(0.0, |cluster| cluster.advance)
-        }
-
         let mut min_width = 0.0_f32;
         let mut max_width = 0.0_f32;
 
         let mut running_min_width = 0.0;
         let mut running_max_width = 0.0;
+        let mut trailing_min_width = 0.0;
+        let mut trailing_max_width = 0.0;
         let mut text_wrap_mode = TextWrapMode::Wrap;
-        let mut prev_cluster: Option<&ClusterData> = None;
         let mut projected_source_boundary: Option<ProjectedSourceBoundary> = None;
-        let is_rtl = self.base_level & 1 == 1;
         for (item_index, item) in self.items.iter().enumerate() {
             match item.kind {
                 LayoutItemKind::TextRun => {
                     let run = &self.runs[item.index];
                     let clusters = &self.clusters[item.cluster_range.clone()];
-                    if is_rtl {
-                        prev_cluster = clusters.first();
-                    }
                     for cluster in clusters {
                         let boundary = cluster.info.boundary();
                         let byte_index = cluster.text_range(run).start;
@@ -1266,24 +1270,29 @@ impl<B: Brush> LayoutData<B> {
                                     || (prev_text_wrap_mode == TextWrapMode::Wrap
                                         && style_resolved_opportunity)))
                         {
-                            let trailing_whitespace =
-                                hanging_whitespace_advance(prev_cluster, &self.styles);
-                            min_width = min_width.max(running_min_width - trailing_whitespace);
+                            min_width = min_width.max(running_min_width - trailing_min_width);
                             running_min_width = 0.0;
+                            trailing_min_width = 0.0;
                             if boundary == Boundary::Mandatory {
-                                max_width = max_width.max(running_max_width - trailing_whitespace);
+                                max_width = max_width.max(running_max_width - trailing_max_width);
                                 running_max_width = 0.0;
+                                trailing_max_width = 0.0;
                             }
                         }
                         running_min_width += cluster.advance;
                         running_max_width += cluster.advance;
-                        if !is_rtl {
-                            prev_cluster = Some(cluster);
+                        if whitespace_hangs_at_line_end(
+                            cluster.info.whitespace(),
+                            style.white_space_collapse,
+                        ) {
+                            trailing_min_width += cluster.advance;
+                            trailing_max_width += cluster.advance;
+                        } else {
+                            trailing_min_width = 0.0;
+                            trailing_max_width = 0.0;
                         }
                     }
-                    let trailing_whitespace =
-                        hanging_whitespace_advance(prev_cluster, &self.styles);
-                    min_width = min_width.max(running_min_width - trailing_whitespace);
+                    min_width = min_width.max(running_min_width - trailing_min_width);
                 }
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
@@ -1293,17 +1302,16 @@ impl<B: Brush> LayoutData<B> {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
                             let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
                             if can_wrap && break_affinity.allows_break_before() {
-                                let trailing_whitespace =
-                                    hanging_whitespace_advance(prev_cluster, &self.styles);
-                                min_width = min_width.max(running_min_width - trailing_whitespace);
+                                min_width = min_width.max(running_min_width - trailing_min_width);
                                 running_min_width = 0.0;
                             }
                             running_min_width += width;
+                            trailing_min_width = 0.0;
+                            trailing_max_width = 0.0;
                             if can_wrap && break_affinity.allows_break_after() {
                                 min_width = min_width.max(running_min_width);
                                 running_min_width = 0.0;
                             }
-                            prev_cluster = None;
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             let source_projection = edge.source_projection(width);
@@ -1323,13 +1331,16 @@ impl<B: Brush> LayoutData<B> {
                                 == LogicalInlineEdgeSourceProjection::BeforeGeometry
                                 && project
                             {
-                                let trailing_whitespace =
-                                    hanging_whitespace_advance(prev_cluster, &self.styles);
-                                min_width = min_width.max(running_min_width - trailing_whitespace);
+                                min_width = min_width.max(running_min_width - trailing_min_width);
                                 running_min_width = 0.0;
+                                trailing_min_width = 0.0;
                                 projected_source_boundary = projection;
                             }
                             running_min_width += width;
+                            if width != 0.0 {
+                                trailing_min_width = 0.0;
+                                trailing_max_width = 0.0;
+                            }
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
                             {
@@ -1342,12 +1353,10 @@ impl<B: Brush> LayoutData<B> {
                     }
                 }
             }
-            let trailing_whitespace = hanging_whitespace_advance(prev_cluster, &self.styles);
-            max_width = max_width.max(running_max_width - trailing_whitespace);
+            max_width = max_width.max(running_max_width - trailing_max_width);
         }
 
-        let trailing_whitespace = hanging_whitespace_advance(prev_cluster, &self.styles);
-        min_width = min_width.max(running_min_width - trailing_whitespace);
+        min_width = min_width.max(running_min_width - trailing_min_width);
 
         ContentWidths {
             min: min_width,

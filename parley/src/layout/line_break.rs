@@ -20,6 +20,7 @@ use crate::layout::bidi::reorder_by_level_with_attachments;
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, ProjectedSourceBoundary,
     ProjectedSourceClusterParticipation, ProjectedSourceLineFill, SelectedSourceClusterAdvance,
+    whitespace_hangs_at_line_end,
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -205,20 +206,23 @@ enum LogicalOwnerEdgePlacement {
 }
 
 impl OverflowingWhitespace {
-    const fn classify(
+    fn classify(
         whitespace: Whitespace,
         text_wrap_mode: TextWrapMode,
         white_space_collapse: WhiteSpaceCollapse,
     ) -> Self {
-        match (whitespace, text_wrap_mode, white_space_collapse) {
-            (Whitespace::Space, TextWrapMode::Wrap, WhiteSpaceCollapse::Collapse) => {
-                Self::CollapsibleSoftWrap(SoftWrapOpportunity)
-            }
-            (Whitespace::Space, TextWrapMode::Wrap, WhiteSpaceCollapse::Preserve) => {
-                Self::PreservedHanging
-            }
-            (Whitespace::NoBreakSpace, _, _) => Self::NoBreakGlue,
-            _ => Self::Other,
+        if whitespace == Whitespace::NoBreakSpace {
+            Self::NoBreakGlue
+        } else if text_wrap_mode != TextWrapMode::Wrap {
+            Self::Other
+        } else if whitespace == Whitespace::Space
+            && white_space_collapse == WhiteSpaceCollapse::Collapse
+        {
+            Self::CollapsibleSoftWrap(SoftWrapOpportunity)
+        } else if whitespace_hangs_at_line_end(whitespace, white_space_collapse) {
+            Self::PreservedHanging
+        } else {
+            Self::Other
         }
     }
 }
@@ -1631,9 +1635,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     || cluster.info.is_default_ignorable()
                             })
                             .filter(|cluster| {
-                                cluster.info.whitespace() != Whitespace::None
-                                    && styles[cluster.style_index as usize].white_space_collapse
-                                        != WhiteSpaceCollapse::BreakSpaces
+                                whitespace_hangs_at_line_end(
+                                    cluster.info.whitespace(),
+                                    styles[cluster.style_index as usize].white_space_collapse,
+                                )
                             })
                             .map(|cluster| cluster.advance)
                             .sum()

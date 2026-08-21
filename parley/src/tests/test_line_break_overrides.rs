@@ -156,6 +156,35 @@ fn pre_wrap_space_hangs_through_a_default_ignorable_boundary() {
 }
 
 #[test]
+fn other_space_separators_hang_as_a_complete_sequence() {
+    let expected_width = full_width("XX");
+    let text = "XX\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{202f}\u{205f}\u{3000}";
+    let mut layout = roboto_layout(text, None);
+
+    layout.break_all_lines(None);
+
+    assert!(layout.lines().next().unwrap().metrics().trailing_whitespace > 0.0);
+    assert_eq!(layout.width(), expected_width);
+    assert_eq!(layout.calculate_content_widths().max, expected_width);
+}
+
+#[test]
+fn break_spaces_measures_other_space_separators_as_content() {
+    let expected_width = full_width("XX");
+    let text = "XX\u{1680}\u{2000}\u{3000}";
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::BreakSpaces));
+
+    layout.break_all_lines(None);
+
+    assert!(layout.full_width() > expected_width);
+    assert!(layout.calculate_content_widths().max > expected_width);
+    assert_eq!(
+        layout.lines().next().unwrap().metrics().trailing_whitespace,
+        0.0
+    );
+}
+
+#[test]
 fn break_spaces_preserves_trailing_space_measurement() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
