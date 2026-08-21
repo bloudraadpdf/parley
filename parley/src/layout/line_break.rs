@@ -880,7 +880,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let soft_break_policy = self.state.line.soft_break_policy;
                         self.state.line.soft_break_policy = style.soft_break_policy;
 
-                        let has_soft_break_opportunity = match boundary_override {
+                        let has_soft_break_opportunity = !is_newline && match boundary_override {
                             Some(LineBreakOverrideDisposition::Suppress) => false,
                             Some(
                                 LineBreakOverrideDisposition::NormalOpportunity
@@ -888,7 +888,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 | LineBreakOverrideDisposition::ResolvedCollapsedSourceOpportunity
                                 | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity,
                             ) => true,
-                            None => boundary == Boundary::Line,
+                            None => {
+                                soft_break_policy == SoftBreakPolicy::Anywhere
+                                    || boundary == Boundary::Line
+                            }
                         };
                         let projected_source_cluster =
                             self.state.taken_projected_source_boundary.map_or(

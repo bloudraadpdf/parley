@@ -17,7 +17,7 @@ use super::test_builders::create_font_context;
 use crate::{
     FontFamily, FontWeight, InlineBox, InlineBoxBreakAffinity, LayoutContext, LineBreakMode,
     LineBreakOverride, LineHeight, NormalSoftWrapSelection, OverflowWrap, RangedBuilder,
-    StyleProperty, TextWrapMode, WordBreak, layout::DiscretionaryBreak,
+    StyleProperty, TextWrapMode, WhiteSpaceCollapse, WordBreak, layout::DiscretionaryBreak,
 };
 
 use super::utils::ColorBrush;
@@ -183,7 +183,7 @@ fn zero_width_owner_end_does_not_follow_hanging_spaces_onto_an_empty_line() {
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(10.0));
     builder.push_default(StyleProperty::WhiteSpaceCollapse(
-        crate::WhiteSpaceCollapse::Preserve,
+        WhiteSpaceCollapse::Preserve,
     ));
     builder.push_inline_box(InlineBox::new(83, text.len(), 0.0, 0.0));
     let mut layout = builder.build(text);
@@ -1514,6 +1514,42 @@ fn anywhere_opportunities_are_not_prioritized() {
         layout.lines().next().map(|line| &text[line.text_range()]),
         Some(text),
         "line-break: anywhere opportunities must not be prioritized"
+    );
+}
+
+#[test]
+fn anywhere_chooses_the_latest_fitting_boundary_before_a_preserved_space() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "X XX X";
+    let build = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext, text| {
+        let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(25.0));
+        builder.push_default(StyleProperty::LineBreakMode(LineBreakMode::Anywhere));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::BreakSpaces,
+        ));
+        builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+        builder.build(text)
+    };
+
+    let mut probe = build(&mut lcx, &mut fcx, &text[..4]);
+    probe.break_all_lines(None);
+    let max_advance = probe.lines().next().unwrap().metrics().advance;
+    let mut layout = build(&mut lcx, &mut fcx, text);
+    layout.set_line_break_overrides(vec![
+        LineBreakOverride::opportunity(2),
+        LineBreakOverride::opportunity(5),
+    ]);
+    layout.break_all_lines(Some(max_advance));
+
+    assert_eq!(
+        layout
+            .lines()
+            .map(|line| line.text_range())
+            .collect::<Vec<_>>(),
+        [0..4, 4..6],
     );
 }
 
