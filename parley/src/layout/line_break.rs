@@ -1082,10 +1082,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             line_height,
                                             cluster.info().authored_break_unit(),
                                         );
-                                        if try_commit_line!(BreakReason::Regular) {
-                                            self.state.cluster_idx += 1;
-                                            return self.start_new_line();
-                                        }
+                                        self.state.cluster_idx += 1;
                                     }
                                 }
                             }

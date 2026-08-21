@@ -169,6 +169,16 @@ fn other_space_separators_hang_as_a_complete_sequence() {
 }
 
 #[test]
+fn mixed_other_space_separator_sequence_hangs_before_following_text() {
+    let text = "XX\u{3000}\u{3000} \u{3000} \u{3000}XX";
+    let mut layout = roboto_layout(text, None);
+
+    layout.break_all_lines(Some(30.0));
+
+    assert_eq!(line_texts(&layout, text), [&text[..text.len() - 2], "XX"]);
+}
+
+#[test]
 fn break_spaces_measures_other_space_separators_as_content() {
     let expected_width = full_width("XX");
     let text = "XX\u{1680}\u{2000}\u{3000}";
