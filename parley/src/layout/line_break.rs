@@ -279,6 +279,7 @@ impl TerminalSourceUnit {
             match WhiteSpaceLayoutMode::from_style(style).terminal_disposition(whitespace) {
                 TerminalWhitespaceDisposition::Measured => Self::Barrier,
                 disposition @ (TerminalWhitespaceDisposition::Removed
+                | TerminalWhitespaceDisposition::Hanging
                 | TerminalWhitespaceDisposition::ConditionallyHanging) => {
                     Self::Candidate(disposition)
                 }
@@ -305,6 +306,7 @@ impl OverflowingWhitespace {
         } else {
             match white_space.terminal_disposition(whitespace) {
                 TerminalWhitespaceDisposition::Removed
+                | TerminalWhitespaceDisposition::Hanging
                 | TerminalWhitespaceDisposition::ConditionallyHanging => Self::PreservedHanging,
                 TerminalWhitespaceDisposition::Measured => Self::Other,
             }

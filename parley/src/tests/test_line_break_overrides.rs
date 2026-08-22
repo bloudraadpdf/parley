@@ -292,6 +292,33 @@ fn other_space_separators_hang_as_a_complete_sequence() {
 }
 
 #[test]
+fn collapsed_line_end_removes_spaces_but_paints_hanging_separators() {
+    let text = "XX \u{1680}\u{2000}\u{3000}";
+    let mut layout = roboto_layout(text, None);
+    layout.break_all_lines(None);
+
+    let advance_for = |source: &str| {
+        layout
+            .lines()
+            .find_map(|line| {
+                line.runs().find_map(|run| {
+                    run.clusters().find_map(|cluster| {
+                        (&text[cluster.text_range()] == source).then(|| cluster.advance())
+                    })
+                })
+            })
+            .expect("the source separator has a shaped cluster")
+    };
+
+    assert_close(advance_for(" "), 0.0);
+    assert_close(advance_for("\u{1680}"), 0.0);
+    assert!(advance_for("\u{2000}") > 0.0);
+    assert!(advance_for("\u{3000}") > 0.0);
+    assert_eq!(layout.width(), full_width("XX"));
+    assert!(layout.full_width() > layout.width());
+}
+
+#[test]
 fn mixed_other_space_separator_sequence_hangs_before_following_text() {
     let text = "XX\u{3000}\u{3000} \u{3000} \u{3000}XX";
     let mut layout = roboto_layout(text, None);

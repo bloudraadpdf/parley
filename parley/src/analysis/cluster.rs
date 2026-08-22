@@ -68,12 +68,14 @@ pub(crate) enum Whitespace {
     Space = 1,
     /// Non-breaking space (U+00A0).
     NoBreakSpace = 2,
-    /// Unicode space separator other than U+0020 and U+00A0.
+    /// Unicode space separator other than U+0020, U+00A0, and U+1680.
     OtherSpaceSeparator = 3,
+    /// Ogham space mark (U+1680).
+    OghamSpace = 4,
     /// Horizontal tab.
-    Tab = 4,
+    Tab = 5,
     /// Newline (CR, LF, CRLF, LS, or PS).
-    Newline = 5,
+    Newline = 6,
 }
 
 impl Whitespace {

@@ -14,6 +14,7 @@ use crate::style::Brush;
 pub(crate) enum TerminalWhitespaceDisposition {
     Measured,
     Removed,
+    Hanging,
     ConditionallyHanging,
 }
 
@@ -36,6 +37,7 @@ impl PhysicalLineEdge {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct TerminalWhitespaceAdvances {
     removed: f32,
+    hanging: f32,
     conditional: f32,
 }
 
@@ -150,6 +152,9 @@ impl TerminalWhitespace {
             TerminalWhitespaceDisposition::Removed => {
                 advances.removed += advance;
             }
+            TerminalWhitespaceDisposition::Hanging => {
+                advances.hanging += advance;
+            }
             TerminalWhitespaceDisposition::ConditionallyHanging => {
                 advances.conditional += advance;
             }
@@ -170,7 +175,7 @@ impl TerminalWhitespace {
         else {
             return UsedTerminalWhitespace::Absent;
         };
-        let candidate_advance = (line_advance - advances.removed).max(0.0);
+        let candidate_advance = (line_advance - advances.removed - advances.hanging).max(0.0);
         let conditional = match UsedLineEnd::new(break_reason, candidate_advance, available_advance)
         {
             UsedLineEnd::ForcedBreak {
@@ -182,8 +187,8 @@ impl TerminalWhitespace {
             UsedLineEnd::SoftWrap | UsedLineEnd::ParagraphEnd => advances.conditional,
         };
         UsedTerminalWhitespace::Present {
-            advance: advances.removed + conditional,
-            occupied_advance: conditional,
+            advance: advances.removed + advances.hanging + conditional,
+            occupied_advance: advances.hanging + conditional,
             physical_side,
         }
     }
@@ -213,17 +218,22 @@ impl WhiteSpaceLayoutMode {
                 TerminalWhitespaceDisposition::Measured
             }
             (WhiteSpaceCollapse::Collapse, _)
-                if matches!(
-                    whitespace,
-                    Whitespace::Space | Whitespace::OtherSpaceSeparator
-                ) =>
+                if matches!(whitespace, Whitespace::Space | Whitespace::OghamSpace) =>
             {
                 TerminalWhitespaceDisposition::Removed
+            }
+            (WhiteSpaceCollapse::Collapse, _)
+                if matches!(whitespace, Whitespace::OtherSpaceSeparator) =>
+            {
+                TerminalWhitespaceDisposition::Hanging
             }
             (WhiteSpaceCollapse::Preserve, TextWrapMode::Wrap)
                 if matches!(
                     whitespace,
-                    Whitespace::Space | Whitespace::OtherSpaceSeparator | Whitespace::Tab
+                    Whitespace::Space
+                        | Whitespace::OghamSpace
+                        | Whitespace::OtherSpaceSeparator
+                        | Whitespace::Tab
                 ) =>
             {
                 TerminalWhitespaceDisposition::ConditionallyHanging
@@ -699,7 +709,8 @@ const fn to_whitespace(c: char) -> Whitespace {
         '\t' => Whitespace::Tab,
         '\n' | '\r' | LINE_SEPARATOR | PARAGRAPH_SEPARATOR => Whitespace::Newline,
         '\u{00A0}' => Whitespace::NoBreakSpace,
-        '\u{1680}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => {
+        '\u{1680}' => Whitespace::OghamSpace,
+        '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => {
             Whitespace::OtherSpaceSeparator
         }
         _ => Whitespace::None,
@@ -1527,6 +1538,11 @@ impl<B: Brush> LayoutData<B> {
                             .terminal_disposition(cluster.info.whitespace());
                         match terminal_disposition {
                             TerminalWhitespaceDisposition::Removed => {
+                                trailing_min_width += cluster.advance;
+                                trailing_max_width += cluster.advance;
+                                trailing_unconditional_max_width += cluster.advance;
+                            }
+                            TerminalWhitespaceDisposition::Hanging => {
                                 trailing_min_width += cluster.advance;
                                 trailing_max_width += cluster.advance;
                                 trailing_unconditional_max_width += cluster.advance;
