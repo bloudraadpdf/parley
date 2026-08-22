@@ -27,6 +27,16 @@ fn line_texts(layout: &Layout<ColorBrush>, text: &str) -> Vec<String> {
         .collect()
 }
 
+fn first_line_visible_advance(layout: &Layout<ColorBrush>) -> f32 {
+    layout
+        .lines()
+        .next()
+        .unwrap()
+        .runs()
+        .map(|run| run.clusters().map(|cluster| cluster.advance()).sum::<f32>())
+        .sum()
+}
+
 fn roboto_layout(
     text: &str,
     white_space_collapse: Option<WhiteSpaceCollapse>,
@@ -288,13 +298,52 @@ fn other_space_separators_hang_as_a_complete_sequence() {
 
     let line = layout.lines().next().unwrap();
     assert!(line.metrics().trailing_whitespace > 0.0);
-    let visible_advance = line
-        .runs()
-        .map(|run| run.clusters().map(|cluster| cluster.advance()).sum::<f32>())
-        .sum::<f32>();
+    let visible_advance = first_line_visible_advance(&layout);
     assert!(visible_advance > expected_width);
     assert_eq!(layout.width(), expected_width);
     assert_eq!(layout.calculate_content_widths().max, expected_width);
+}
+
+#[test]
+fn collapsed_terminal_sequence_preserves_interspersed_spaces() {
+    let text = "XX\u{3000} \u{3000}";
+    let mut measured = roboto_layout(text, Some(WhiteSpaceCollapse::BreakSpaces));
+    measured.break_all_lines(None);
+    let expected_visible = first_line_visible_advance(&measured);
+    let mut layout = roboto_layout(text, None);
+
+    layout.break_all_lines(None);
+
+    let visible_advance = first_line_visible_advance(&layout);
+    assert_close(visible_advance, expected_visible);
+    assert_close(layout.width(), full_width("XX"));
+}
+
+#[test]
+fn collapsed_terminal_sequence_removes_only_the_collapsible_suffix() {
+    let visible_advance = |text| {
+        let mut layout = roboto_layout(text, None);
+        layout.break_all_lines(None);
+        first_line_visible_advance(&layout)
+    };
+
+    assert_close(
+        visible_advance("XX\u{3000} "),
+        visible_advance("XX\u{3000}"),
+    );
+    let mut terminal_ogham = roboto_layout("XX\u{1680}", None);
+    terminal_ogham.break_all_lines(None);
+    assert_eq!(
+        terminal_ogham.data.lines[0].removed_terminal_source_ranges,
+        [2..5]
+    );
+    let mut interspersed_ogham = roboto_layout("XX\u{1680}\u{3000}", None);
+    interspersed_ogham.break_all_lines(None);
+    assert!(
+        interspersed_ogham.data.lines[0]
+            .removed_terminal_source_ranges
+            .is_empty()
+    );
 }
 
 #[test]

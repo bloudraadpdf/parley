@@ -120,6 +120,14 @@ impl UsedLineEnd {
 }
 
 impl TerminalWhitespace {
+    pub(crate) fn removes_source(self, disposition: TerminalWhitespaceDisposition) -> bool {
+        disposition == TerminalWhitespaceDisposition::Removed
+            && !matches!(
+                self,
+                Self::Present { advances, .. } if advances.hanging > 0.0
+            )
+    }
+
     pub(crate) fn include(
         &mut self,
         disposition: TerminalWhitespaceDisposition,
@@ -150,7 +158,11 @@ impl TerminalWhitespace {
         match disposition {
             TerminalWhitespaceDisposition::Measured => unreachable!(),
             TerminalWhitespaceDisposition::Removed => {
-                advances.removed += advance;
+                if advances.hanging > 0.0 {
+                    advances.hanging += advance;
+                } else {
+                    advances.removed += advance;
+                }
             }
             TerminalWhitespaceDisposition::Hanging => {
                 advances.hanging += advance;

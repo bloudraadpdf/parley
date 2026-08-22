@@ -276,7 +276,14 @@ impl TerminalSourceUnit {
         } else if whitespace == Whitespace::None {
             Self::Barrier
         } else {
-            match WhiteSpaceLayoutMode::from_style(style).terminal_disposition(whitespace) {
+            let mut disposition =
+                WhiteSpaceLayoutMode::from_style(style).terminal_disposition(whitespace);
+            if disposition == TerminalWhitespaceDisposition::Hanging
+                && cluster.info.source_char() == '\u{1680}'
+            {
+                disposition = TerminalWhitespaceDisposition::Removed;
+            }
+            match disposition {
                 TerminalWhitespaceDisposition::Measured => Self::Barrier,
                 disposition @ (TerminalWhitespaceDisposition::Removed
                 | TerminalWhitespaceDisposition::Hanging
@@ -2241,12 +2248,13 @@ fn collect_terminal_whitespace<B: Brush>(
                             let range = cluster.text_range(run);
                             let advance = selected_source_cluster_advance
                                 .resolve(range.start, cluster.advance);
+                            let removes_source = terminal.removes_source(disposition);
                             if terminal.include(disposition, advance, physical_side)
                                 == TerminalWhitespaceScan::Stop
                             {
                                 break 'items;
                             }
-                            if disposition == TerminalWhitespaceDisposition::Removed {
+                            if removes_source {
                                 match removed_source_ranges.last_mut() {
                                     Some(existing) if range.end == existing.start => {
                                         existing.start = range.start;
