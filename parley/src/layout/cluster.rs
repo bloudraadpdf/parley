@@ -159,8 +159,7 @@ impl<'a, B: Brush> Cluster<'a, B> {
         self.run.line_data.map_or(self.data.advance, |_| {
             self.line()
                 .data
-                .selected_source_cluster_advance
-                .resolve(self.text_range().start, self.data.advance)
+                .resolve_cluster_advance(self.text_range().start, self.data.advance)
         })
     }
 

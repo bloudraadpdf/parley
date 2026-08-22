@@ -13,6 +13,7 @@ use alloc::{
     vec,
     vec::Vec,
 };
+use peniko::color::palette;
 
 fn set_roboto(builder: &mut RangedBuilder<'_, ColorBrush>) {
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
@@ -627,4 +628,56 @@ fn selected_line_end_uses_the_automatic_level_of_its_paragraph() {
     let second = layout.lines().nth(1).unwrap();
     assert_eq!(&text[second.text_range()], "א XXX ");
     assert_eq!(second.runs().next().unwrap().text_range(), 10..11);
+}
+
+#[test]
+fn soft_wrapped_collapsible_space_is_removed_before_bidi_reordering() {
+    let text = "A B ا ب";
+    let final_word = text.rfind('ب').unwrap();
+    let mut layout = configured_layout(text, |builder| {
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Collapse,
+        ));
+        builder.push(
+            StyleProperty::Brush(ColorBrush::new(palette::css::BLUE)),
+            1..2,
+        );
+        builder.push(
+            StyleProperty::Brush(ColorBrush::new(palette::css::RED)),
+            3..4,
+        );
+        builder.push(
+            StyleProperty::Brush(ColorBrush::new(palette::css::GREEN)),
+            final_word - 1..final_word,
+        );
+        for (id, range) in [(10, 1..2), (20, 3..4), (30, final_word - 1..final_word)] {
+            builder.push_inline_box(InlineBox::inline_start_edge(
+                id,
+                range.start,
+                0.0,
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            ));
+            builder.push_inline_box(InlineBox::inline_end_edge(
+                id + 1,
+                range.end,
+                0.0,
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ));
+        }
+    });
+    layout.break_all_lines(Some(full_width("A B ا")));
+
+    let first = layout.lines().next().unwrap();
+    assert_eq!(&text[first.text_range()], "A B ا ");
+    let terminal_space_advance = first
+        .runs()
+        .find_map(|run| {
+            run.clusters()
+                .find(|cluster| cluster.text_range() == (final_word - 1..final_word))
+                .map(|cluster| cluster.advance())
+        })
+        .expect("the selected line retains its terminal source cluster");
+    assert_close(terminal_space_advance, 0.0);
 }

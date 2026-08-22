@@ -194,13 +194,12 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
             )
         };
         let trailing_whitespace_advance = trailing_whitespace.advance();
+        let left_occupied_advance = trailing_whitespace.occupied_advance(PhysicalLineEdge::Left);
 
         // Paragraph direction controls alignment semantics; the source-terminal
         // run controls which physical edge contains hanging whitespace.
         layout.lines[line_index].metrics.offset = if is_rtl { 0.0 } else { indent };
-        if trailing_whitespace.occupies(PhysicalLineEdge::Left) {
-            layout.lines[line_index].metrics.offset -= trailing_whitespace_advance;
-        }
+        layout.lines[line_index].metrics.offset -= left_occupied_advance;
 
         // Compute free space.
         let free_space = alignment_width - indent - line_advance + trailing_whitespace_advance;

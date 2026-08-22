@@ -219,6 +219,17 @@ impl RegularBreakCandidate {
             Self::ProjectedSource { snapshot, boundary } => (snapshot, Some(boundary)),
         }
     }
+
+    fn preempts_overflowing_collapsible_space(&self, whitespace_byte_index: usize) -> bool {
+        match self {
+            Self::InlineBoxEdge(_) => true,
+            Self::ProjectedSource { boundary, .. } => boundary.target() > whitespace_byte_index,
+            Self::AuthoredDashPunctuation(_)
+            | Self::Ordinary(_)
+            | Self::ConditionalMaterial(_)
+            | Self::Unprioritized(_) => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -267,8 +278,10 @@ impl TerminalSourceUnit {
         } else {
             match WhiteSpaceLayoutMode::from_style(style).terminal_disposition(whitespace) {
                 TerminalWhitespaceDisposition::Measured => Self::Barrier,
-                disposition @ (TerminalWhitespaceDisposition::ConditionallyHanging
-                | TerminalWhitespaceDisposition::Hanging) => Self::Candidate(disposition),
+                disposition @ (TerminalWhitespaceDisposition::Removed
+                | TerminalWhitespaceDisposition::ConditionallyHanging) => {
+                    Self::Candidate(disposition)
+                }
             }
         }
     }
@@ -291,8 +304,8 @@ impl OverflowingWhitespace {
             Self::CollapsibleSoftWrap(SoftWrapOpportunity)
         } else {
             match white_space.terminal_disposition(whitespace) {
-                TerminalWhitespaceDisposition::ConditionallyHanging
-                | TerminalWhitespaceDisposition::Hanging => Self::PreservedHanging,
+                TerminalWhitespaceDisposition::Removed
+                | TerminalWhitespaceDisposition::ConditionallyHanging => Self::PreservedHanging,
                 TerminalWhitespaceDisposition::Measured => Self::Other,
             }
         }
@@ -1131,15 +1144,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             return self.start_new_line();
                                         }
                                     }
-                                    (
-                                        _,
-                                        Some(
-                                            candidate @ (RegularBreakCandidate::InlineBoxEdge(_)
-                                            | RegularBreakCandidate::ProjectedSource {
-                                                ..
-                                            }),
-                                        ),
-                                    ) => {
+                                    (_, Some(candidate))
+                                        if candidate.preempts_overflowing_collapsible_space(
+                                            cluster.text_range().start,
+                                        ) =>
+                                    {
                                         let (prev, projected_source_boundary) =
                                             candidate.into_snapshot();
                                         self.state.line = prev.state;
@@ -1552,7 +1561,18 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             self.lines.lines[line_idx].item_range.end = item_range.start + item_count;
             self.state.items = self.lines.line_items.len();
         }
+        let item_range = self.lines.lines[line_idx].item_range.clone();
+        let selected_source_cluster_advance = self.lines.lines[line_idx]
+            .selected_source_cluster_advance
+            .clone();
+        let terminal = collect_terminal_whitespace(
+            &self.lines.line_items[item_range],
+            &self.layout.data,
+            &selected_source_cluster_advance,
+        );
         let line = &mut self.lines.lines[line_idx];
+        line.terminal_whitespace = terminal.whitespace;
+        line.removed_terminal_source_ranges = terminal.removed_source_ranges;
 
         // Reset metrics for line
         line.metrics.ascent = 0.;
@@ -1608,9 +1628,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 }
                                 cluster.advance = new_advance;
                             }
-                            line_x += line
-                                .selected_source_cluster_advance
-                                .resolve(cluster.text_range(run).start, cluster.advance);
+                            line_x += line.resolve_cluster_advance(
+                                cluster.text_range(run).start,
+                                cluster.advance,
+                            );
                         }
                     }
                 }
@@ -1677,8 +1698,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     line_item.advance = self.layout.data.clusters[line_item.cluster_range.clone()]
                         .iter()
                         .map(|cluster| {
-                            line.selected_source_cluster_advance
-                                .resolve(cluster.text_range(run).start, cluster.advance)
+                            line.resolve_cluster_advance(
+                                cluster.text_range(run).start,
+                                cluster.advance,
+                            )
                         })
                         .sum();
 
@@ -1709,11 +1732,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Resolve the source-terminal sequence while line items are still in
         // logical source order. The immutable summary retains physical
         // placement for later bidi reordering and re-alignment.
-        line.terminal_whitespace = collect_terminal_whitespace(
-            &self.lines.line_items[line.item_range.clone()],
-            &self.layout.data,
-            &line.selected_source_cluster_advance,
-        );
         line.metrics.trailing_whitespace =
             line.used_terminal_whitespace(line.max_advance).advance();
 
@@ -2188,12 +2206,18 @@ fn line_end_bidi_items<B: Brush>(
     Some(resolved)
 }
 
+struct CollectedTerminalWhitespace {
+    whitespace: TerminalWhitespace,
+    removed_source_ranges: Vec<Range<usize>>,
+}
+
 fn collect_terminal_whitespace<B: Brush>(
     line_items: &[LineItemData],
     layout_data: &LayoutData<B>,
     selected_source_cluster_advance: &SelectedSourceClusterAdvance,
-) -> TerminalWhitespace {
+) -> CollectedTerminalWhitespace {
     let mut terminal = TerminalWhitespace::Absent;
+    let mut removed_source_ranges: Vec<Range<usize>> = Vec::new();
     'items: for line_item in line_items.iter().rev() {
         match line_item.kind {
             LayoutItemKind::InlineBox => {
@@ -2212,13 +2236,21 @@ fn collect_terminal_whitespace<B: Brush>(
                         TerminalSourceUnit::Bridge => {}
                         TerminalSourceUnit::Barrier => break 'items,
                         TerminalSourceUnit::Candidate(disposition) => {
-                            let byte_index = cluster.text_range(run).start;
+                            let range = cluster.text_range(run);
                             let advance = selected_source_cluster_advance
-                                .resolve(byte_index, cluster.advance);
+                                .resolve(range.start, cluster.advance);
                             if terminal.include(disposition, advance, physical_side)
                                 == TerminalWhitespaceScan::Stop
                             {
                                 break 'items;
+                            }
+                            if disposition == TerminalWhitespaceDisposition::Removed {
+                                match removed_source_ranges.last_mut() {
+                                    Some(existing) if range.end == existing.start => {
+                                        existing.start = range.start;
+                                    }
+                                    Some(_) | None => removed_source_ranges.push(range),
+                                }
                             }
                         }
                     }
@@ -2226,7 +2258,10 @@ fn collect_terminal_whitespace<B: Brush>(
             }
         }
     }
-    terminal
+    CollectedTerminalWhitespace {
+        whitespace: terminal,
+        removed_source_ranges,
+    }
 }
 
 /// Reorder items within line according to the bidi levels of the items

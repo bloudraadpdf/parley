@@ -13,8 +13,8 @@ use crate::style::Brush;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalWhitespaceDisposition {
     Measured,
+    Removed,
     ConditionallyHanging,
-    Hanging,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,7 +35,7 @@ impl PhysicalLineEdge {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct TerminalWhitespaceAdvances {
-    unconditional: f32,
+    removed: f32,
     conditional: f32,
 }
 
@@ -61,6 +61,7 @@ pub(crate) enum UsedTerminalWhitespace {
     Absent,
     Present {
         advance: f32,
+        occupied_advance: f32,
         physical_side: PhysicalLineEdge,
     },
 }
@@ -73,8 +74,15 @@ impl UsedTerminalWhitespace {
         }
     }
 
-    pub(crate) fn occupies(self, side: PhysicalLineEdge) -> bool {
-        matches!(self, Self::Present { physical_side, .. } if physical_side == side)
+    pub(crate) fn occupied_advance(self, side: PhysicalLineEdge) -> f32 {
+        match self {
+            Self::Present {
+                occupied_advance,
+                physical_side,
+                ..
+            } if physical_side == side => occupied_advance,
+            Self::Absent | Self::Present { .. } => 0.0,
+        }
     }
 }
 
@@ -139,11 +147,11 @@ impl TerminalWhitespace {
         };
         match disposition {
             TerminalWhitespaceDisposition::Measured => unreachable!(),
+            TerminalWhitespaceDisposition::Removed => {
+                advances.removed += advance;
+            }
             TerminalWhitespaceDisposition::ConditionallyHanging => {
                 advances.conditional += advance;
-            }
-            TerminalWhitespaceDisposition::Hanging => {
-                advances.unconditional += advance;
             }
         }
         TerminalWhitespaceScan::Continue
@@ -162,7 +170,7 @@ impl TerminalWhitespace {
         else {
             return UsedTerminalWhitespace::Absent;
         };
-        let candidate_advance = (line_advance - advances.unconditional).max(0.0);
+        let candidate_advance = (line_advance - advances.removed).max(0.0);
         let conditional = match UsedLineEnd::new(break_reason, candidate_advance, available_advance)
         {
             UsedLineEnd::ForcedBreak {
@@ -174,7 +182,8 @@ impl TerminalWhitespace {
             UsedLineEnd::SoftWrap | UsedLineEnd::ParagraphEnd => advances.conditional,
         };
         UsedTerminalWhitespace::Present {
-            advance: advances.unconditional + conditional,
+            advance: advances.removed + conditional,
+            occupied_advance: conditional,
             physical_side,
         }
     }
@@ -209,7 +218,7 @@ impl WhiteSpaceLayoutMode {
                     Whitespace::Space | Whitespace::OtherSpaceSeparator
                 ) =>
             {
-                TerminalWhitespaceDisposition::Hanging
+                TerminalWhitespaceDisposition::Removed
             }
             (WhiteSpaceCollapse::Preserve, TextWrapMode::Wrap)
                 if matches!(
@@ -757,6 +766,8 @@ pub(crate) struct LineData {
     pub(crate) num_spaces: usize,
     /// Source-cluster advance selected for this materialised line.
     pub(crate) selected_source_cluster_advance: SelectedSourceClusterAdvance,
+    /// Collapsible terminal source clusters removed on this materialised line.
+    pub(crate) removed_terminal_source_ranges: Vec<Range<usize>>,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
     /// Advance inserted only because this line ended at a discretionary
@@ -779,6 +790,19 @@ impl LineData {
     ) -> UsedTerminalWhitespace {
         self.terminal_whitespace
             .resolve(self.break_reason, self.metrics.advance, available_advance)
+    }
+
+    pub(crate) fn resolve_cluster_advance(&self, byte_index: usize, natural_advance: f32) -> f32 {
+        if self
+            .removed_terminal_source_ranges
+            .iter()
+            .any(|range| range.contains(&byte_index))
+        {
+            0.0
+        } else {
+            self.selected_source_cluster_advance
+                .resolve(byte_index, natural_advance)
+        }
     }
 }
 
@@ -1502,14 +1526,14 @@ impl<B: Brush> LayoutData<B> {
                         let terminal_disposition = WhiteSpaceLayoutMode::from_style(style)
                             .terminal_disposition(cluster.info.whitespace());
                         match terminal_disposition {
-                            TerminalWhitespaceDisposition::ConditionallyHanging => {
-                                trailing_min_width += cluster.advance;
-                                trailing_max_width += cluster.advance;
-                            }
-                            TerminalWhitespaceDisposition::Hanging => {
+                            TerminalWhitespaceDisposition::Removed => {
                                 trailing_min_width += cluster.advance;
                                 trailing_max_width += cluster.advance;
                                 trailing_unconditional_max_width += cluster.advance;
+                            }
+                            TerminalWhitespaceDisposition::ConditionallyHanging => {
+                                trailing_min_width += cluster.advance;
+                                trailing_max_width += cluster.advance;
                             }
                             TerminalWhitespaceDisposition::Measured
                                 if cluster.info.whitespace() != Whitespace::Newline
