@@ -794,6 +794,8 @@ pub(crate) struct LineData {
     pub(crate) selected_source_cluster_advance: SelectedSourceClusterAdvance,
     /// Collapsible terminal source clusters removed on this materialised line.
     pub(crate) removed_terminal_source_ranges: Vec<Range<usize>>,
+    /// Collapsible leading source clusters removed on this materialised line.
+    pub(crate) removed_leading_source_ranges: Vec<Range<usize>>,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
     /// Advance inserted only because this line ended at a discretionary
@@ -822,6 +824,7 @@ impl LineData {
         if self
             .removed_terminal_source_ranges
             .iter()
+            .chain(&self.removed_leading_source_ranges)
             .any(|range| range.contains(&byte_index))
         {
             0.0

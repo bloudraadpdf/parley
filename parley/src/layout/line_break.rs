@@ -117,6 +117,80 @@ struct LineState {
     discretionary_advance: f32,
     discretionary_break: bool,
     source_end_contribution: SourceEndContribution,
+    source_start_whitespace: SourceStartWhitespace,
+    removed_leading_source_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SourceStartWhitespace {
+    #[default]
+    RemoveCollapsible,
+    Retain,
+}
+
+impl SourceStartWhitespace {
+    const fn following_break(break_reason: BreakReason) -> Self {
+        match break_reason {
+            BreakReason::Explicit => Self::RemoveCollapsible,
+            BreakReason::None | BreakReason::Regular | BreakReason::Emergency => Self::Retain,
+        }
+    }
+
+    fn include_inline_box(&mut self, participation: InlineBoxShapingParticipation) {
+        if participation == InlineBoxShapingParticipation::InterveningInlineAdvance {
+            *self = Self::Retain;
+        }
+    }
+
+    fn removes_collapsible_space<B: Brush>(
+        &mut self,
+        whitespace: Whitespace,
+        is_default_ignorable: bool,
+        style: &crate::layout::Style<B>,
+    ) -> bool {
+        if is_default_ignorable {
+            return false;
+        }
+        if *self == Self::RemoveCollapsible
+            && WhiteSpaceLayoutMode::from_style(style).collapses_space(whitespace)
+        {
+            return true;
+        }
+        *self = Self::Retain;
+        false
+    }
+}
+
+impl LineState {
+    fn removes_leading_source_at(&self, byte_index: usize) -> bool {
+        self.removed_leading_source_ranges
+            .iter()
+            .any(|range| range.contains(&byte_index))
+    }
+
+    fn resolve_source_start_cluster<B: Brush>(
+        &mut self,
+        source_range: Range<usize>,
+        whitespace: Whitespace,
+        is_default_ignorable: bool,
+        style: &crate::layout::Style<B>,
+        advances: (f32, f32),
+    ) -> (f32, f32) {
+        if !self.source_start_whitespace.removes_collapsible_space(
+            whitespace,
+            is_default_ignorable,
+            style,
+        ) {
+            return advances;
+        }
+        match self.removed_leading_source_ranges.last_mut() {
+            Some(previous) if previous.end == source_range.start => {
+                previous.end = source_range.end;
+            }
+            _ => self.removed_leading_source_ranges.push(source_range),
+        }
+        (0.0, 0.0)
+    }
 }
 
 #[derive(Clone, Default)]
@@ -402,13 +476,22 @@ impl BreakerState {
     }
 
     /// Add inline box to line
-    fn append_inline_box_to_line(&mut self, next_x: f32, next_fit_x: f32, box_height: f32) {
+    fn append_inline_box_to_line(
+        &mut self,
+        next_x: f32,
+        next_fit_x: f32,
+        box_height: f32,
+        participation: InlineBoxShapingParticipation,
+    ) {
         // self.item_idx += 1;
         self.line.items.end += 1;
         self.line.x = next_x;
         self.line.fit_x = next_fit_x;
         self.add_line_height(box_height);
         self.last_appended_authored_unit = AuthoredBreakUnit::Other;
+        self.line
+            .source_start_whitespace
+            .include_inline_box(participation);
         // Would like to add:
         // self.item_idx += 1;
     }
@@ -541,6 +624,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     fn start_new_line(&mut self) -> Option<(f32, f32)> {
         let line_height = self.state.line.running_line_height;
         let ended_at_discretionary = self.state.line.discretionary_break;
+        let preceding_break = self
+            .lines
+            .lines
+            .last()
+            .expect("a committed line must precede its successor")
+            .break_reason;
 
         self.state.items = self.lines.line_items.len();
         self.state.lines = self.lines.lines.len();
@@ -550,6 +639,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.discretionary_advance = 0.;
         self.state.line.discretionary_break = false;
         self.state.line.source_end_contribution = SourceEndContribution::Empty;
+        self.state.line.source_start_whitespace =
+            SourceStartWhitespace::following_break(preceding_break);
+        self.state.line.removed_leading_source_ranges.clear();
         self.state.prev_boundary = None; // Added by Nico
         self.state.emergency_boundary = None;
         self.state.last_appended_authored_unit = AuthoredBreakUnit::Other;
@@ -716,6 +808,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             match item.kind {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
+                    let shaping_participation = inline_box.shaping_participation();
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
@@ -774,6 +867,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.x + edge_width,
                                 self.state.line.fit_x + edge_width,
                                 edge_height,
+                                shaping_participation,
                             );
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
@@ -789,6 +883,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.x,
                                 self.state.line.fit_x,
                                 0.0,
+                                shaping_participation,
                             );
                             continue;
                         }
@@ -811,8 +906,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         self.state.item_idx += 1;
 
-                        self.state
-                            .append_inline_box_to_line(next_x, next_fit_x, height);
+                        self.state.append_inline_box_to_line(
+                            next_x,
+                            next_fit_x,
+                            height,
+                            shaping_participation,
+                        );
 
                         // We can always line break after a REPLACED inline
                         // box; a glued box (inline border/padding shim)
@@ -828,8 +927,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // to hang before the next break opportunity is used.
                         if self.state.line.fit_x == 0.0 {
                             self.state.item_idx += 1;
-                            self.state
-                                .append_inline_box_to_line(next_x, next_fit_x, height);
+                            self.state.append_inline_box_to_line(
+                                next_x,
+                                next_fit_x,
+                                height,
+                                shaping_participation,
+                            );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if !break_affinity.allows_break_before() {
                             // A glued box (inline border/padding shim) binds
@@ -838,8 +941,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // the tail of an unbreakable word.
                             let (next_x, box_height) = (next_x, height);
                             self.state.item_idx += 1;
-                            self.state
-                                .append_inline_box_to_line(next_x, next_fit_x, box_height);
+                            self.state.append_inline_box_to_line(
+                                next_x,
+                                next_fit_x,
+                                box_height,
+                                shaping_participation,
+                            );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if let Some(reclaimed_x) = {
                             let (box_width, box_height) = (width, height);
@@ -861,8 +968,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // the golden keeps the field on the text line.
                             let (next_x, next_fit_x, box_height) = reclaimed_x;
                             self.state.item_idx += 1;
-                            self.state
-                                .append_inline_box_to_line(next_x, next_fit_x, box_height);
+                            self.state.append_inline_box_to_line(
+                                next_x,
+                                next_fit_x,
+                                box_height,
+                                shaping_participation,
+                            );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else {
                             // println!("BOX BREAK");
@@ -1057,6 +1168,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             }
                             ProjectedSourceClusterParticipation::CollapsedSourceSpace => (0.0, 0.0),
                         };
+                        (advance, fit_advance) = self.state.line.resolve_source_start_cluster(
+                            cluster.text_range(),
+                            whitespace,
+                            cluster.info().is_default_ignorable(),
+                            style,
+                            (advance, fit_advance),
+                        );
                         if cluster.is_ligature_start() {
                             while let Some(cluster) =
                                 run.get(self.state.cluster_idx + 1 - run_data.cluster_range.start)
@@ -1125,6 +1243,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 if is_space
                                     && projected_source_cluster
                                         == ProjectedSourceClusterParticipation::Normal
+                                    && !self.state.line.removes_leading_source_at(byte_index)
                                 {
                                     self.state.line.num_spaces += 1;
                                 }
@@ -1335,6 +1454,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.line.x,
                             self.state.line.fit_x,
                             0.0,
+                            inline_box.shaping_participation(),
                         );
                         continue;
                     }
@@ -1352,8 +1472,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let next_x = self.state.line.x + inline_box.width();
                     let next_fit_x = self.state.line.fit_x + inline_box.width();
                     self.state.item_idx += 1;
-                    self.state
-                        .append_inline_box_to_line(next_x, next_fit_x, inline_box.height());
+                    self.state.append_inline_box_to_line(
+                        next_x,
+                        next_fit_x,
+                        inline_box.height(),
+                        inline_box.shaping_participation(),
+                    );
                     self.state
                         .line
                         .source_end_contribution
@@ -1407,8 +1531,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let whitespace = cluster.info().whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
                         let is_space = whitespace.is_space_or_nbsp();
-                        let advance = cluster.advance();
-                        let fit_advance = cluster.data.line_break_advance;
+                        let style = &self.layout.data.styles[cluster.data.style_index as usize];
+                        let (advance, fit_advance) = self.state.line.resolve_source_start_cluster(
+                            cluster.text_range(),
+                            whitespace,
+                            cluster.info().is_default_ignorable(),
+                            style,
+                            (cluster.advance(), cluster.data.line_break_advance),
+                        );
 
                         // Compute the x position.
                         // Newlines don't contribute to line width (matching break_next behavior).
@@ -1436,7 +1566,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             .source_end_contribution
                             .include_cluster(whitespace, cluster.info().is_default_ignorable());
 
-                        if is_space {
+                        if is_space
+                            && !self
+                                .state
+                                .line
+                                .removes_leading_source_at(cluster.text_range().start)
+                        {
                             self.state.line.num_spaces += 1;
                         }
 
@@ -2112,6 +2247,7 @@ fn try_commit_line<B: Brush>(
         indent: line_indent,
         discretionary_advance: state.discretionary_advance,
         selected_source_cluster_advance: state.selected_source_cluster_advance.clone(),
+        removed_leading_source_ranges: state.removed_leading_source_ranges.clone(),
         ends_at_discretionary_break: state.discretionary_break,
         metrics: LineMetrics {
             advance: state.x,

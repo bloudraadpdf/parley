@@ -102,6 +102,40 @@ fn split_ranged_pre_wrap_layout(text: &str) -> Layout<ColorBrush> {
     })
 }
 
+fn split_collapsible_bidi_layout(text: &str) -> Layout<ColorBrush> {
+    configured_layout(text, |builder| {
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Collapse,
+        ));
+        for (space_index, (start, character)) in text
+            .char_indices()
+            .filter(|(_, character)| *character == ' ')
+            .enumerate()
+        {
+            let range = start..start + character.len_utf8();
+            builder.push(
+                StyleProperty::Brush(ColorBrush::new(palette::css::BLUE)),
+                range.clone(),
+            );
+            let id = 10 + space_index as u64 * 2;
+            builder.push_inline_box(InlineBox::inline_start_edge(
+                id,
+                range.start,
+                0.0,
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            ));
+            builder.push_inline_box(InlineBox::inline_end_edge(
+                id + 1,
+                range.end,
+                0.0,
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ));
+        }
+    })
+}
+
 fn align_first_line(
     layout: &mut Layout<ColorBrush>,
     width: f32,
@@ -740,39 +774,7 @@ fn selected_line_end_uses_the_automatic_level_of_its_paragraph() {
 fn soft_wrapped_collapsible_space_is_removed_before_bidi_reordering() {
     let text = "A B ا ب";
     let final_word = text.rfind('ب').unwrap();
-    let mut layout = configured_layout(text, |builder| {
-        builder.push_default(StyleProperty::WhiteSpaceCollapse(
-            WhiteSpaceCollapse::Collapse,
-        ));
-        builder.push(
-            StyleProperty::Brush(ColorBrush::new(palette::css::BLUE)),
-            1..2,
-        );
-        builder.push(
-            StyleProperty::Brush(ColorBrush::new(palette::css::RED)),
-            3..4,
-        );
-        builder.push(
-            StyleProperty::Brush(ColorBrush::new(palette::css::GREEN)),
-            final_word - 1..final_word,
-        );
-        for (id, range) in [(10, 1..2), (20, 3..4), (30, final_word - 1..final_word)] {
-            builder.push_inline_box(InlineBox::inline_start_edge(
-                id,
-                range.start,
-                0.0,
-                0.0,
-                InlineBoxBreakAffinity::ToNext,
-            ));
-            builder.push_inline_box(InlineBox::inline_end_edge(
-                id + 1,
-                range.end,
-                0.0,
-                0.0,
-                InlineBoxBreakAffinity::ToPrevious,
-            ));
-        }
-    });
+    let mut layout = split_collapsible_bidi_layout(text);
     layout.break_all_lines(Some(full_width("A B ا")));
 
     let first = layout.lines().next().unwrap();
@@ -786,4 +788,24 @@ fn soft_wrapped_collapsible_space_is_removed_before_bidi_reordering() {
         })
         .expect("the selected line retains its terminal source cluster");
     assert_close(terminal_space_advance, 0.0);
+}
+
+#[test]
+fn collapsed_bidi_source_edges_do_not_force_an_exact_fit_wrap() {
+    let text = " A B ا ب ";
+    let expected_width = full_width("A B ا ب");
+    let mut unbounded = split_collapsible_bidi_layout(text);
+    unbounded.break_all_lines(None);
+    assert_close(unbounded.width(), expected_width);
+    assert_close(first_line_visible_advance(&unbounded), expected_width);
+
+    let mut layout = split_collapsible_bidi_layout(text);
+    layout.set_line_break_overrides(vec![
+        LineBreakOverride::resolved_collapsed_source_opportunity(3),
+        LineBreakOverride::resolved_collapsed_source_opportunity(5),
+        LineBreakOverride::resolved_collapsed_source_opportunity(text.rfind('ب').unwrap()),
+    ]);
+    layout.break_all_lines(Some(expected_width));
+
+    assert_eq!(line_texts(&layout, text), [text]);
 }
