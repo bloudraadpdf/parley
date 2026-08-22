@@ -6,7 +6,7 @@ use alloc::{string::String, vec::Vec};
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
 use crate::{
-    BidiAtomId, BidiVisualAtomKind, FontFamily, InlineBox, Layout, LayoutContext,
+    BaseDirection, BidiAtomId, BidiVisualAtomKind, FontFamily, InlineBox, Layout, LayoutContext,
     PositionedLayoutItem, StyleProperty,
 };
 
@@ -14,15 +14,52 @@ fn build_layout(
     text: &str,
     inline_boxes: impl IntoIterator<Item = InlineBox>,
 ) -> Layout<ColorBrush> {
+    build_layout_with_direction(text, inline_boxes, None)
+}
+
+fn build_layout_with_direction(
+    text: &str,
+    inline_boxes: impl IntoIterator<Item = InlineBox>,
+    direction: Option<BaseDirection>,
+) -> Layout<ColorBrush> {
     let mut font_context = create_font_context();
     let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
     let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(10.0));
+    if let Some(direction) = direction {
+        builder.set_direction(direction);
+    }
     for inline_box in inline_boxes {
         builder.push_inline_box(inline_box);
     }
     builder.build(text)
+}
+
+#[test]
+fn source_start_atomic_uses_the_rtl_paragraph_level_before_ltr_text() {
+    let layout = build_layout_with_direction(
+        "foo",
+        [InlineBox::new(52, 0, 4.0, 4.0)],
+        Some(BaseDirection::Rtl),
+    );
+    let atoms = layout.bidi_topology();
+
+    assert_eq!(
+        atoms
+            .atoms()
+            .iter()
+            .map(|atom| atom.kind())
+            .collect::<Vec<_>>(),
+        [
+            &BidiVisualAtomKind::Text(0..3),
+            &BidiVisualAtomKind::InlineBox {
+                id: 52,
+                source_boundary: 0,
+            },
+        ],
+    );
+    assert!(atoms.atoms()[1].level().is_rtl());
 }
 
 fn text_atom_ids(layout: &Layout<ColorBrush>) -> Vec<BidiAtomId> {

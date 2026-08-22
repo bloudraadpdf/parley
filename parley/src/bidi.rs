@@ -59,6 +59,14 @@ impl BidiResolver {
         if self.levels.is_empty() {
             return self.base_level;
         }
+        // An atomic inline participates in bidi resolution as U+FFFC (ON).
+        // At either paragraph boundary its matching strong type on that side
+        // is sos/eos, so N1 resolves it to that type when the other side
+        // agrees and N2 resolves it to the embedding direction otherwise.
+        // Both paths therefore leave the object at the paragraph base level.
+        if char_boundary == 0 || char_boundary == self.levels.len() {
+            return self.base_level;
+        }
         if char_boundary < self.levels.len() {
             self.levels[char_boundary]
         } else {
