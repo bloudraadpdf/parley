@@ -1741,8 +1741,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Resolve the source-terminal sequence while line items are still in
         // logical source order. The immutable summary retains physical
         // placement for later bidi reordering and re-alignment.
-        line.metrics.trailing_whitespace =
-            line.used_terminal_whitespace(line.max_advance).advance();
+        let used_terminal_whitespace = line.used_terminal_whitespace(line.max_advance);
+        line.metrics.trailing_whitespace = used_terminal_whitespace.advance();
+        line.metrics.hanging_whitespace = used_terminal_whitespace.total_occupied_advance();
 
         // Reorder the items within the line (if required). Reordering is required if the line contains
         // a mix of bidi levels (a mix of LTR and RTL text)

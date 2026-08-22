@@ -86,6 +86,15 @@ impl UsedTerminalWhitespace {
             Self::Absent | Self::Present { .. } => 0.0,
         }
     }
+
+    pub(crate) const fn total_occupied_advance(self) -> f32 {
+        match self {
+            Self::Absent => 0.0,
+            Self::Present {
+                occupied_advance, ..
+            } => occupied_advance,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

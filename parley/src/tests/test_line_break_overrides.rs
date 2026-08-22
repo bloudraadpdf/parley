@@ -614,6 +614,36 @@ fn break_spaces_preserves_trailing_space_measurement() {
 }
 
 #[test]
+fn terminal_space_metrics_distinguish_measured_and_hanging_advance() {
+    let width = full_width("XXX");
+
+    let mut pre = roboto_layout_with_white_space(
+        "XXX \nX",
+        Some(WhiteSpaceCollapse::Preserve),
+        TextWrapMode::NoWrap,
+    );
+    pre.break_all_lines(Some(width));
+    let pre_metrics = *pre.lines().next().unwrap().metrics();
+    assert_eq!(pre_metrics.trailing_whitespace, 0.0);
+    assert_eq!(pre_metrics.hanging_whitespace, 0.0);
+
+    let mut pre_wrap = roboto_layout("XXX X", Some(WhiteSpaceCollapse::Preserve));
+    pre_wrap.break_all_lines(Some(width));
+    let pre_wrap_metrics = *pre_wrap.lines().next().unwrap().metrics();
+    assert!(pre_wrap_metrics.trailing_whitespace > 0.0);
+    assert_eq!(
+        pre_wrap_metrics.hanging_whitespace,
+        pre_wrap_metrics.trailing_whitespace
+    );
+
+    let mut break_spaces = roboto_layout("XXX X", Some(WhiteSpaceCollapse::BreakSpaces));
+    break_spaces.break_all_lines(Some(width));
+    let break_spaces_metrics = *break_spaces.lines().next().unwrap().metrics();
+    assert_eq!(break_spaces_metrics.trailing_whitespace, 0.0);
+    assert_eq!(break_spaces_metrics.hanging_whitespace, 0.0);
+}
+
+#[test]
 fn rtl_override_centres_source_terminal_hanging_whitespace() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

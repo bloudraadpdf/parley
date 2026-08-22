@@ -137,6 +137,9 @@ pub struct LineMetrics {
     pub advance: f32,
     /// Advance of trailing whitespace.
     pub trailing_whitespace: f32,
+    /// Advance of trailing whitespace that remains physically present but is
+    /// excluded from line fitting and alignment.
+    pub hanging_whitespace: f32,
     /// Minimum coordinate in the direction orthogonal to line
     /// direction.
     ///
