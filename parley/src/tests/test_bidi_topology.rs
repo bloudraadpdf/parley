@@ -327,7 +327,10 @@ fn trailing_edge_box_is_positioned_after_the_reordered_override_text() {
         )],
     );
     layout.break_all_lines(None);
-    let items = layout.lines().flat_map(|line| line.items()).collect::<Vec<_>>();
+    let items = layout
+        .lines()
+        .flat_map(|line| line.items())
+        .collect::<Vec<_>>();
     let owner_index = items
         .iter()
         .position(|item| {
