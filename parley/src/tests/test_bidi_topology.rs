@@ -62,6 +62,30 @@ fn source_start_atomic_uses_the_rtl_paragraph_level_before_ltr_text() {
     assert!(atoms.atoms()[1].level().is_rtl());
 }
 
+#[test]
+fn post_separator_atomic_uses_the_next_rtl_paragraph_level_before_ltr_text() {
+    let text = "foo\nbar";
+    let layout = build_layout_with_direction(
+        text,
+        [InlineBox::new(53, "foo\n".len(), 4.0, 4.0)],
+        Some(BaseDirection::Rtl),
+    );
+    let atoms = layout.bidi_topology();
+    let box_index = atoms
+        .atoms()
+        .iter()
+        .position(|atom| matches!(atom.kind(), BidiVisualAtomKind::InlineBox { id: 53, .. }))
+        .expect("the second paragraph atomic remains in the topology");
+    let second_text_index = atoms
+        .atoms()
+        .iter()
+        .position(|atom| matches!(atom.kind(), BidiVisualAtomKind::Text(range) if range.start >= "foo\n".len()))
+        .expect("the second paragraph text remains in the topology");
+
+    assert!(second_text_index < box_index);
+    assert!(atoms.atoms()[box_index].level().is_rtl());
+}
+
 fn text_atom_ids(layout: &Layout<ColorBrush>) -> Vec<BidiAtomId> {
     layout
         .bidi_topology()
