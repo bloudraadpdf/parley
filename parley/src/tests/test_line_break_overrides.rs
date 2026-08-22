@@ -13,6 +13,7 @@ use alloc::{
     vec,
     vec::Vec,
 };
+use core::ops::Range;
 use peniko::color::palette;
 
 fn set_roboto(builder: &mut RangedBuilder<'_, ColorBrush>) {
@@ -149,6 +150,21 @@ fn assert_terminal_space_is_measured(mut layout: Layout<ColorBrush>, expected: f
     assert_eq!(
         layout.lines().next().unwrap().metrics().trailing_whitespace,
         0.0
+    );
+}
+
+fn assert_first_line_visual_runs(
+    mut layout: Layout<ColorBrush>,
+    text: &str,
+    width: f32,
+    expected: &[Range<usize>],
+) {
+    layout.break_all_lines(Some(width));
+    let first = layout.lines().next().unwrap();
+    assert_eq!(&text[first.text_range()], "XXX ");
+    assert_eq!(
+        first.runs().map(|run| run.text_range()).collect::<Vec<_>>(),
+        expected
     );
 }
 
@@ -691,14 +707,19 @@ fn selected_line_end_applies_paragraph_level_before_bidi_reordering() {
         builder.set_direction(BaseDirection::Rtl);
     });
     layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(4)]);
-    layout.break_all_lines(Some(full_width("XXX")));
+    assert_first_line_visual_runs(layout, text, full_width("XXX"), &[3..4, 0..3]);
+}
 
-    let first = layout.lines().next().unwrap();
-    assert_eq!(&text[first.text_range()], "XXX ");
-    assert_eq!(
-        first.runs().map(|run| run.text_range()).collect::<Vec<_>>(),
-        [3..4, 0..3]
-    );
+#[test]
+fn measured_rtl_terminal_space_retains_its_source_run() {
+    let text = "XXX X";
+    let layout = configured_layout(text, |builder| {
+        builder.set_direction(BaseDirection::Rtl);
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::BreakSpaces,
+        ));
+    });
+    assert_first_line_visual_runs(layout, text, full_width("XXX"), &[0..4]);
 }
 
 #[test]

@@ -2163,14 +2163,14 @@ fn line_end_bidi_items<B: Brush>(
                 .enumerate()
                 .rev()
                 {
-                    let whitespace = cluster.info.whitespace();
-                    if whitespace == Whitespace::NoBreakSpace
-                        || whitespace == Whitespace::None && !cluster.info.is_default_ignorable()
-                    {
-                        break 'items;
+                    let style = &layout_data.styles[cluster.style_index as usize];
+                    match TerminalSourceUnit::classify(cluster, style) {
+                        TerminalSourceUnit::Bridge | TerminalSourceUnit::Candidate(_) => {
+                            terminal_start =
+                                Some((item_offset, line_item.cluster_range.start + cluster_offset));
+                        }
+                        TerminalSourceUnit::Barrier => break 'items,
                     }
-                    terminal_start =
-                        Some((item_offset, line_item.cluster_range.start + cluster_offset));
                 }
             }
         }
