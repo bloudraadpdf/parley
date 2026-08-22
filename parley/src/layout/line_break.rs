@@ -1542,6 +1542,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             0 => None,
             idx => Some(self.lines.lines[idx - 1].metrics),
         };
+        let item_range = self.lines.lines[line_idx].item_range.clone();
+        if let Some(line_items) = line_end_bidi_items(
+            &self.lines.line_items[item_range.clone()],
+            &self.layout.data,
+        ) {
+            let item_count = line_items.len();
+            self.lines.line_items.splice(item_range.clone(), line_items);
+            self.lines.lines[line_idx].item_range.end = item_range.start + item_count;
+            self.state.items = self.lines.line_items.len();
+        }
         let line = &mut self.lines.lines[line_idx];
 
         // Reset metrics for line
@@ -2101,6 +2111,81 @@ fn try_commit_line<B: Brush>(
     };
 
     true
+}
+
+fn line_end_bidi_items<B: Brush>(
+    line_items: &[LineItemData],
+    layout_data: &LayoutData<B>,
+) -> Option<Vec<LineItemData>> {
+    let mut terminal_start = None;
+
+    'items: for (item_offset, line_item) in line_items.iter().enumerate().rev() {
+        match line_item.kind {
+            LayoutItemKind::InlineBox => {
+                if layout_data.inline_boxes[line_item.index].shaping_participation()
+                    != InlineBoxShapingParticipation::TransparentBoundary
+                {
+                    break;
+                }
+            }
+            LayoutItemKind::TextRun => {
+                for (cluster_offset, cluster) in layout_data.clusters
+                    [line_item.cluster_range.clone()]
+                .iter()
+                .enumerate()
+                .rev()
+                {
+                    let whitespace = cluster.info.whitespace();
+                    if whitespace == Whitespace::NoBreakSpace
+                        || whitespace == Whitespace::None && !cluster.info.is_default_ignorable()
+                    {
+                        break 'items;
+                    }
+                    terminal_start =
+                        Some((item_offset, line_item.cluster_range.start + cluster_offset));
+                }
+            }
+        }
+    }
+
+    let (terminal_item, terminal_cluster) = terminal_start?;
+    let paragraph_level = layout_data.runs[line_items[terminal_item].index].paragraph_level;
+    if line_items[terminal_item..]
+        .iter()
+        .filter(|line_item| line_item.kind == LayoutItemKind::TextRun)
+        .all(|line_item| line_item.bidi_level == paragraph_level)
+    {
+        return None;
+    }
+    let mut resolved = Vec::with_capacity(line_items.len() + 1);
+    for (item_offset, line_item) in line_items.iter().enumerate() {
+        if item_offset < terminal_item || line_item.kind == LayoutItemKind::InlineBox {
+            resolved.push(line_item.clone());
+            continue;
+        }
+
+        if item_offset > terminal_item || terminal_cluster == line_item.cluster_range.start {
+            let mut terminal = line_item.clone();
+            terminal.bidi_level = paragraph_level;
+            resolved.push(terminal);
+            continue;
+        }
+
+        let run = &layout_data.runs[line_item.index];
+        let terminal_text_start = layout_data.clusters[terminal_cluster].text_range(run).start;
+        let mut prefix = line_item.clone();
+        prefix.cluster_range.end = terminal_cluster;
+        prefix.text_range.end = terminal_text_start;
+        resolved.push(prefix);
+
+        let mut terminal = line_item.clone();
+        terminal.bidi_level = paragraph_level;
+        terminal.cluster_range.start = terminal_cluster;
+        terminal.text_range.start = terminal_text_start;
+        resolved.push(terminal);
+    }
+
+    Some(resolved)
 }
 
 fn collect_terminal_whitespace<B: Brush>(

@@ -52,6 +52,10 @@ impl BidiResolver {
         &self.levels
     }
 
+    pub(crate) fn paragraph_base_levels(&self) -> &[BidiLevel] {
+        &self.paragraph_base_levels
+    }
+
     pub(crate) fn level_at_byte_boundary(&self, text: &str, boundary: usize) -> BidiLevel {
         let char_boundary = text
             .get(..boundary)

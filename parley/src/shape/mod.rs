@@ -53,6 +53,7 @@ struct Item {
     size: f32,
     script: Script,
     level: u8,
+    paragraph_level: u8,
     locale: Option<Language>,
     variations: Resolved<FontVariation>,
     features: Resolved<FontFeature>,
@@ -97,6 +98,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
         style_index: 0,
         size: style.font_size,
         level: levels.first().copied().unwrap_or(0),
+        paragraph_level: bidi.paragraph_base_levels().first().copied().unwrap_or(0),
         script: infos
             .iter()
             .map(|x| x.0.script)
@@ -126,6 +128,11 @@ pub(crate) fn shape_text<'a, B: Brush>(
             script = item.script;
         }
         let level = levels.get(char_index).copied().unwrap_or(0);
+        let paragraph_level = bidi
+            .paragraph_base_levels()
+            .get(char_index)
+            .copied()
+            .unwrap_or_default();
         // The pending run must keep ITS OWN style index until it is
         // flushed below: adopting the new index here used to stamp every
         // finished run with the FOLLOWING range's style, resolving its
@@ -151,7 +158,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             style = next_style;
         }
 
-        if level != item.level || script != item.script {
+        if level != item.level || paragraph_level != item.paragraph_level || script != item.script {
             break_run = true;
         }
 
@@ -213,6 +220,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             transparent_boxes.clear();
             item.size = style.font_size;
             item.level = level;
+            item.paragraph_level = paragraph_level;
             item.script = script;
             item.locale = style.locale;
             item.variations = style.font_variations;
@@ -526,6 +534,7 @@ fn shape_item<'a, B: Brush>(
             &glyph_buffer,
             item.script,
             item.level,
+            item.paragraph_level,
             item.style_index,
             item.word_spacing,
             item.letter_spacing,

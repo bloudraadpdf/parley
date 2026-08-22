@@ -459,7 +459,7 @@ fn conditional_terminal_scans_rtl_clusters_in_logical_order() {
 }
 
 #[test]
-fn conditional_terminal_alignment_uses_ltr_run_side_in_an_rtl_paragraph() {
+fn conditional_terminal_alignment_uses_rtl_paragraph_end() {
     let text = "one two three four";
     let mut layout = configured_pre_wrap_layout(text, |builder| {
         builder.set_direction(BaseDirection::Rtl);
@@ -467,18 +467,18 @@ fn conditional_terminal_alignment_uses_ltr_run_side_in_an_rtl_paragraph() {
     layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(14)]);
     layout.break_all_lines(Some(full_width("one two three")));
 
-    assert_centered_terminal_side(&mut layout, |_| 50.0);
+    assert_centered_terminal_side(&mut layout, |trailing| 50.0 - trailing);
 }
 
 #[test]
-fn conditional_terminal_alignment_uses_rtl_run_side_in_an_ltr_paragraph() {
+fn conditional_terminal_alignment_uses_ltr_paragraph_end() {
     let text = "\u{202e}one two \u{202c}";
     let mut layout = configured_pre_wrap_layout(text, |builder| {
         builder.set_direction(BaseDirection::Ltr);
     });
     layout.break_all_lines(None);
 
-    assert_centered_terminal_side(&mut layout, |trailing| 50.0 - trailing);
+    assert_centered_terminal_side(&mut layout, |_| 50.0);
 }
 
 #[test]
@@ -558,44 +558,6 @@ fn break_spaces_preserves_trailing_space_measurement() {
 }
 
 #[test]
-fn rtl_paragraph_centres_ltr_hanging_whitespace_on_its_physical_side() {
-    let mut fcx = create_font_context();
-    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-    let text = "one two three four";
-    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-    builder.set_direction(BaseDirection::Rtl);
-    set_roboto(&mut builder);
-    builder.push_default(StyleProperty::WhiteSpaceCollapse(
-        WhiteSpaceCollapse::Preserve,
-    ));
-    let mut layout = builder.build(text);
-    layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(14)]);
-    layout.break_all_lines(Some(full_width("one two three")));
-
-    let line = layout.lines().next().unwrap();
-    let content_advance = line.metrics().advance - line.metrics().trailing_whitespace;
-    let alignment_width = content_advance + 100.0;
-    assert!(line.metrics().trailing_whitespace > 0.0);
-
-    layout.align(
-        Some(alignment_width),
-        Alignment::Center,
-        AlignmentOptions::default(),
-    );
-
-    let line = layout.lines().next().unwrap();
-    assert!(
-        (line.metrics().offset - 50.0).abs() < 0.01,
-        "offset={}, trailing={}, runs={:?}",
-        line.metrics().offset,
-        line.metrics().trailing_whitespace,
-        line.runs()
-            .map(|run| (run.text_range(), run.is_rtl()))
-            .collect::<Vec<_>>()
-    );
-}
-
-#[test]
 fn rtl_override_centres_source_terminal_hanging_whitespace() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
@@ -634,4 +596,35 @@ fn rtl_override_centres_source_terminal_hanging_whitespace() {
 
     let offset = layout.lines().next().unwrap().metrics().offset;
     assert!((offset - (50.0 - trailing_whitespace)).abs() < 0.01);
+}
+
+#[test]
+fn selected_line_end_applies_paragraph_level_before_bidi_reordering() {
+    let text = "XXX X";
+    let mut layout = configured_pre_wrap_layout(text, |builder| {
+        builder.set_direction(BaseDirection::Rtl);
+    });
+    layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(4)]);
+    layout.break_all_lines(Some(full_width("XXX")));
+
+    let first = layout.lines().next().unwrap();
+    assert_eq!(&text[first.text_range()], "XXX ");
+    assert_eq!(
+        first.runs().map(|run| run.text_range()).collect::<Vec<_>>(),
+        [3..4, 0..3]
+    );
+}
+
+#[test]
+fn selected_line_end_uses_the_automatic_level_of_its_paragraph() {
+    let text = "abc\nא XXX X";
+    let mut layout = configured_pre_wrap_layout(text, |builder| {
+        builder.set_direction(BaseDirection::Auto);
+    });
+    layout.set_line_break_overrides(vec![LineBreakOverride::opportunity(11)]);
+    layout.break_all_lines(Some(full_width("א XXX")));
+
+    let second = layout.lines().nth(1).unwrap();
+    assert_eq!(&text[second.text_range()], "א XXX ");
+    assert_eq!(second.runs().next().unwrap().text_range(), 10..11);
 }
