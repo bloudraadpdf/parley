@@ -14,6 +14,7 @@ pub(crate) type BidiLevel = u8;
 pub(crate) struct BidiResolver {
     base_level: BidiLevel,
     levels: Vec<BidiLevel>,
+    paragraph_base_levels: Vec<BidiLevel>,
     initial_types: Vec<BidiClass>,
     types: Vec<BidiClass>,
     brackets: Vec<(usize, char, BidiMirroringGlyph)>,
@@ -29,6 +30,7 @@ impl BidiResolver {
         Self {
             base_level: 0,
             levels: Vec::new(),
+            paragraph_base_levels: Vec::new(),
             initial_types: Vec::new(),
             types: Vec::new(),
             brackets: Vec::new(),
@@ -60,12 +62,24 @@ impl BidiResolver {
             return self.base_level;
         }
         // An atomic inline participates in bidi resolution as U+FFFC (ON).
-        // At either paragraph boundary its matching strong type on that side
+        // At either bidi-paragraph boundary its matching strong type on that side
         // is sos/eos, so N1 resolves it to that type when the other side
         // agrees and N2 resolves it to the embedding direction otherwise.
         // Both paths therefore leave the object at the paragraph base level.
-        if char_boundary == 0 || char_boundary == self.levels.len() {
-            return self.base_level;
+        if char_boundary == 0 {
+            return self.paragraph_base_levels[0];
+        }
+        if char_boundary == self.levels.len() {
+            return *self
+                .paragraph_base_levels
+                .last()
+                .expect("resolved characters have paragraph base levels");
+        }
+        if self.initial_types[char_boundary - 1] == BidiClass::ParagraphSeparator {
+            return self.paragraph_base_levels[char_boundary];
+        }
+        if self.initial_types[char_boundary] == BidiClass::ParagraphSeparator {
+            return self.paragraph_base_levels[char_boundary];
         }
         if char_boundary < self.levels.len() {
             self.levels[char_boundary]
@@ -78,6 +92,7 @@ impl BidiResolver {
     pub(crate) fn clear(&mut self) {
         self.initial_types.clear();
         self.levels.clear();
+        self.paragraph_base_levels.clear();
         self.types.clear();
         self.brackets.clear();
         self.bracket_pairs.clear();
@@ -119,6 +134,10 @@ impl BidiResolver {
         if self.initial_types.is_empty() {
             self.base_level = paragraph.base_level;
         }
+        self.paragraph_base_levels.extend(core::iter::repeat_n(
+            paragraph.base_level,
+            paragraph.levels.len(),
+        ));
         self.initial_types.extend(paragraph.initial_types);
         self.levels.extend(paragraph.levels);
     }
