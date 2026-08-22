@@ -286,7 +286,13 @@ fn other_space_separators_hang_as_a_complete_sequence() {
 
     layout.break_all_lines(None);
 
-    assert!(layout.lines().next().unwrap().metrics().trailing_whitespace > 0.0);
+    let line = layout.lines().next().unwrap();
+    assert!(line.metrics().trailing_whitespace > 0.0);
+    let visible_advance = line
+        .runs()
+        .map(|run| run.clusters().map(|cluster| cluster.advance()).sum::<f32>())
+        .sum::<f32>();
+    assert!(visible_advance > expected_width);
     assert_eq!(layout.width(), expected_width);
     assert_eq!(layout.calculate_content_widths().max, expected_width);
 }
