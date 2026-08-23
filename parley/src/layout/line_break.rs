@@ -1878,7 +1878,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // placement for later bidi reordering and re-alignment.
         let used_terminal_whitespace = line.used_terminal_whitespace(line.max_advance);
         line.metrics.trailing_whitespace = used_terminal_whitespace.advance();
-        line.metrics.hanging_whitespace = used_terminal_whitespace.total_occupied_advance();
+        line.metrics.hanging_whitespace = used_terminal_whitespace.hanging_whitespace();
 
         // Reorder the items within the line (if required). Reordering is required if the line contains
         // a mix of bidi levels (a mix of LTR and RTL text)

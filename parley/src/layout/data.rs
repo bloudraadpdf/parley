@@ -7,7 +7,9 @@ use crate::inline_box::{
     FollowingSourceSpace, InlineBox, InlineBoxLineBreakParticipation, LogicalInlineEdge,
     LogicalInlineEdgeSourceProjection,
 };
-use crate::layout::{ContentWidths, Glyph, JustificationMode, LineMetrics, RunMetrics, Style};
+use crate::layout::{
+    ContentWidths, Glyph, HangingWhitespace, JustificationMode, LineMetrics, RunMetrics, Style,
+};
 use crate::style::Brush;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,12 +89,19 @@ impl UsedTerminalWhitespace {
         }
     }
 
-    pub(crate) const fn total_occupied_advance(self) -> f32 {
+    pub(crate) fn hanging_whitespace(self) -> HangingWhitespace {
         match self {
-            Self::Absent => 0.0,
+            Self::Absent => HangingWhitespace::default(),
             Self::Present {
-                occupied_advance, ..
-            } => occupied_advance,
+                occupied_advance,
+                physical_side: PhysicalLineEdge::Left,
+                ..
+            } => HangingWhitespace::line_start(occupied_advance),
+            Self::Present {
+                occupied_advance,
+                physical_side: PhysicalLineEdge::Right,
+                ..
+            } => HangingWhitespace::line_end(occupied_advance),
         }
     }
 }

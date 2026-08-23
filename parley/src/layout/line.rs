@@ -118,6 +118,56 @@ impl<'a, B: Brush> Line<'a, B> {
     }
 }
 
+/// Physically occupied trailing whitespace which is excluded from line fitting
+/// and alignment.
+#[derive(Copy, Clone, Default, Debug, PartialEq)]
+pub struct HangingWhitespace(HangingWhitespaceInner);
+
+#[derive(Copy, Clone, Default, Debug, PartialEq)]
+enum HangingWhitespaceInner {
+    #[default]
+    Absent,
+    LineStart(f32),
+    LineEnd(f32),
+}
+
+impl HangingWhitespace {
+    pub(crate) fn line_start(advance: f32) -> Self {
+        assert!(advance.is_finite() && advance >= 0.0);
+        Self(HangingWhitespaceInner::LineStart(advance))
+    }
+
+    pub(crate) fn line_end(advance: f32) -> Self {
+        assert!(advance.is_finite() && advance >= 0.0);
+        Self(HangingWhitespaceInner::LineEnd(advance))
+    }
+
+    /// Returns the occupied advance.
+    pub const fn advance(self) -> f32 {
+        match self.0 {
+            HangingWhitespaceInner::Absent => 0.0,
+            HangingWhitespaceInner::LineStart(advance)
+            | HangingWhitespaceInner::LineEnd(advance) => advance,
+        }
+    }
+
+    /// Returns the advance at the lower-coordinate edge of the line.
+    pub const fn line_start_advance(self) -> f32 {
+        match self.0 {
+            HangingWhitespaceInner::LineStart(advance) => advance,
+            HangingWhitespaceInner::Absent | HangingWhitespaceInner::LineEnd(_) => 0.0,
+        }
+    }
+
+    /// Returns the advance at the higher-coordinate edge of the line.
+    pub const fn line_end_advance(self) -> f32 {
+        match self.0 {
+            HangingWhitespaceInner::LineEnd(advance) => advance,
+            HangingWhitespaceInner::Absent | HangingWhitespaceInner::LineStart(_) => 0.0,
+        }
+    }
+}
+
 /// Metrics information for a line.
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct LineMetrics {
@@ -137,9 +187,9 @@ pub struct LineMetrics {
     pub advance: f32,
     /// Advance of trailing whitespace.
     pub trailing_whitespace: f32,
-    /// Advance of trailing whitespace that remains physically present but is
-    /// excluded from line fitting and alignment.
-    pub hanging_whitespace: f32,
+    /// Trailing whitespace that remains physically present but is excluded
+    /// from line fitting and alignment.
+    pub hanging_whitespace: HangingWhitespace,
     /// Minimum coordinate in the direction orthogonal to line
     /// direction.
     ///

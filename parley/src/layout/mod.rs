@@ -30,7 +30,9 @@ pub use cluster::{Affinity, Cluster, ClusterPath, ClusterSide};
 pub use data::{BreakReason, DiscretionaryBreak, LineBreakOverride, NormalSoftWrapSelection};
 pub use glyph::Glyph;
 pub use layout::Layout;
-pub use line::{GlyphRun, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem};
+pub use line::{
+    GlyphRun, HangingWhitespace, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem,
+};
 pub use line_break::BreakLines;
 pub use run::{Run, RunMetrics};
 

@@ -675,22 +675,26 @@ fn terminal_space_metrics_distinguish_measured_and_hanging_advance() {
     pre.break_all_lines(Some(width));
     let pre_metrics = *pre.lines().next().unwrap().metrics();
     assert_eq!(pre_metrics.trailing_whitespace, 0.0);
-    assert_eq!(pre_metrics.hanging_whitespace, 0.0);
+    assert_eq!(pre_metrics.hanging_whitespace.advance(), 0.0);
 
     let mut pre_wrap = roboto_layout("XXX X", Some(WhiteSpaceCollapse::Preserve));
     pre_wrap.break_all_lines(Some(width));
     let pre_wrap_metrics = *pre_wrap.lines().next().unwrap().metrics();
     assert!(pre_wrap_metrics.trailing_whitespace > 0.0);
     assert_eq!(
-        pre_wrap_metrics.hanging_whitespace,
-        pre_wrap_metrics.trailing_whitespace
+        pre_wrap_metrics.hanging_whitespace.line_start_advance(),
+        0.0
+    );
+    assert_eq!(
+        pre_wrap_metrics.hanging_whitespace.line_end_advance(),
+        pre_wrap_metrics.trailing_whitespace,
     );
 
     let mut break_spaces = roboto_layout("XXX X", Some(WhiteSpaceCollapse::BreakSpaces));
     break_spaces.break_all_lines(Some(width));
     let break_spaces_metrics = *break_spaces.lines().next().unwrap().metrics();
     assert_eq!(break_spaces_metrics.trailing_whitespace, 0.0);
-    assert_eq!(break_spaces_metrics.hanging_whitespace, 0.0);
+    assert_eq!(break_spaces_metrics.hanging_whitespace.advance(), 0.0);
 }
 
 #[test]
@@ -723,6 +727,11 @@ fn rtl_override_centres_source_terminal_hanging_whitespace() {
             .map(|run| (run.text_range(), run.is_rtl(), run.advance()))
             .collect::<Vec<_>>()
     );
+    assert_eq!(
+        line.metrics().hanging_whitespace.line_start_advance(),
+        trailing_whitespace,
+    );
+    assert_eq!(line.metrics().hanging_whitespace.line_end_advance(), 0.0);
 
     layout.align(
         Some(alignment_width),
