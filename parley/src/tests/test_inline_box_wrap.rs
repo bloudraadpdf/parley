@@ -91,6 +91,44 @@ fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
 }
 
 #[test]
+fn contextual_spacing_disappears_when_its_boundary_wraps() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "AB";
+    let spacing = 5.0;
+
+    let mut unwrapped = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        10.0,
+        None,
+        [InlineBox::contextual_spacing(78, 1, spacing, 0.0)],
+    );
+    unwrapped.break_all_lines(None);
+    let unwrapped_advance = unwrapped.lines().next().unwrap().metrics().advance;
+
+    let mut wrapped = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        10.0,
+        None,
+        [InlineBox::contextual_spacing(79, 1, spacing, 0.0)],
+    );
+    wrapped.break_all_lines(Some((unwrapped_advance - spacing) * 0.6));
+
+    assert_eq!(wrapped.len(), 2);
+    let wrapped_advance = wrapped
+        .lines()
+        .map(|line| line.metrics().advance)
+        .sum::<f32>();
+    assert!((wrapped_advance + spacing - unwrapped_advance).abs() < 0.01);
+    let positioned = positioned_inline_box_ids(&wrapped);
+    assert!(positioned.is_empty(), "{positioned:?}");
+}
+
+#[test]
 fn empty_text_retains_every_transparent_anchor_on_its_line() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

@@ -811,6 +811,39 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let shaping_participation = inline_box.shaping_participation();
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
+                        InlineBoxLineBreakParticipation::ContextualSpacing => {
+                            let width = inline_box.width();
+                            let height = inline_box.height();
+                            if self.state.line.text_wrap_mode == TextWrapMode::Wrap
+                                && self.state.line.fit_x != 0.0
+                            {
+                                self.state.item_idx += 1;
+                                self.state
+                                    .mark_line_break_opportunity(RegularBreakKind::Ordinary);
+                                let next_fit_x = self.state.line.fit_x + width;
+                                if !self.advance_contribution_fits(width, next_fit_x, max_advance) {
+                                    if try_commit_line!(BreakReason::Regular) {
+                                        return self.start_new_line();
+                                    }
+                                } else {
+                                    self.state.append_inline_box_to_line(
+                                        self.state.line.x + width,
+                                        next_fit_x,
+                                        height,
+                                        shaping_participation,
+                                    );
+                                }
+                            } else {
+                                self.state.item_idx += 1;
+                                self.state.append_inline_box_to_line(
+                                    self.state.line.x + width,
+                                    self.state.line.fit_x + width,
+                                    height,
+                                    shaping_participation,
+                                );
+                            }
+                            continue;
+                        }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             let edge_width = inline_box.width();
                             let edge_height = inline_box.height();
@@ -2138,7 +2171,6 @@ fn try_commit_line<B: Brush>(
 
     // Iterate over the items to commit
     // println!("\nCOMMIT LINE");
-    let mut last_item_kind = LayoutItemKind::TextRun;
     let mut committed_text_run = false;
     for (i, item) in items_to_commit.iter().enumerate() {
         // println!("i = {} index = {} {:?}", i, item.index, item.kind);
@@ -2161,7 +2193,6 @@ fn try_commit_line<B: Brush>(
                     text_range: 0..0,
                 });
 
-                last_item_kind = item.kind;
             }
             LayoutItemKind::TextRun => {
                 let run_data = &layout.data.runs[item.index];
@@ -2183,7 +2214,6 @@ fn try_commit_line<B: Brush>(
                     continue;
                 }
 
-                last_item_kind = item.kind;
                 committed_text_run = true;
 
                 // Push run to line
@@ -2214,7 +2244,28 @@ fn try_commit_line<B: Brush>(
             }
         }
     }
-    // let end_run_idx = lines.line_items.last().map(|item| item.index).unwrap_or(0);
+    let committed_text_range = lines.line_items[start_item_idx..]
+        .iter()
+        .filter(|item| item.kind == LayoutItemKind::TextRun)
+        .map(|item| item.text_range.clone())
+        .reduce(|before, after| before.start.min(after.start)..before.end.max(after.end));
+    let mut committed_items = lines.line_items.split_off(start_item_idx);
+    committed_items.retain(|item| {
+        if item.kind != LayoutItemKind::InlineBox {
+            return true;
+        }
+        let inline_box = &layout.data.inline_boxes[item.index];
+        !matches!(
+            inline_box.line_break_participation(),
+            InlineBoxLineBreakParticipation::ContextualSpacing
+        ) || committed_text_range
+            .as_ref()
+            .is_some_and(|range| range.start < inline_box.index && inline_box.index < range.end)
+    });
+    let last_item_kind = committed_items
+        .last()
+        .map_or(LayoutItemKind::TextRun, |item| item.kind);
+    lines.line_items.extend(committed_items);
     let end_item_idx = lines.line_items.len();
 
     // Return false and don't commit line if there were no items to process

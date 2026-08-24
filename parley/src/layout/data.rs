@@ -1051,6 +1051,7 @@ impl<B: Brush> LayoutData<B> {
                         || !matches!(
                             inline_box.line_break_participation(),
                             InlineBoxLineBreakParticipation::LogicalOwnerEdge(_)
+                                | InlineBoxLineBreakParticipation::ContextualSpacing
                                 | InlineBoxLineBreakParticipation::TransparentAnchor
                         )
                     {
@@ -1606,6 +1607,17 @@ impl<B: Brush> LayoutData<B> {
                                 min_width = min_width.max(running_min_width);
                                 running_min_width = 0.0;
                             }
+                        }
+                        InlineBoxLineBreakParticipation::ContextualSpacing => {
+                            let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
+                            if can_wrap {
+                                min_width = min_width.max(running_min_width - trailing_min_width);
+                                running_min_width = 0.0;
+                            }
+                            running_min_width += width;
+                            trailing_min_width = 0.0;
+                            trailing_max_width = 0.0;
+                            trailing_unconditional_max_width = 0.0;
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             let source_projection = edge.source_projection(width);

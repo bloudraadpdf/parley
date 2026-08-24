@@ -50,6 +50,8 @@ enum InlineBoxParticipation {
         height: f32,
         break_affinity: InlineBoxBreakAffinity,
     },
+    /// Contextual inline spacing which disappears when its boundary wraps.
+    ContextualSpacing { width: f32, height: f32 },
     /// A logical owner edge which contributes geometry but no soft-wrap
     /// opportunity of its own.
     LogicalOwnerStart { width: f32, height: f32 },
@@ -68,6 +70,7 @@ enum InlineBoxParticipation {
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub(crate) enum InlineBoxLineBreakParticipation {
     Atomic(InlineBoxBreakAffinity),
+    ContextualSpacing,
     LogicalOwnerEdge(LogicalInlineEdge),
     TransparentAnchor,
 }
@@ -108,6 +111,7 @@ impl InlineBoxParticipation {
     pub(crate) const fn width(self) -> f32 {
         match self {
             Self::Atomic { width, .. }
+            | Self::ContextualSpacing { width, .. }
             | Self::LogicalOwnerStart { width, .. }
             | Self::LogicalOwnerEnd { width, .. } => width,
             Self::TransparentAnchor => 0.0,
@@ -117,6 +121,7 @@ impl InlineBoxParticipation {
     pub(crate) const fn height(self) -> f32 {
         match self {
             Self::Atomic { height, .. }
+            | Self::ContextualSpacing { height, .. }
             | Self::LogicalOwnerStart { height, .. }
             | Self::LogicalOwnerEnd { height, .. } => height,
             Self::TransparentAnchor => 0.0,
@@ -128,6 +133,7 @@ impl InlineBoxParticipation {
             Self::Atomic { break_affinity, .. } => {
                 InlineBoxLineBreakParticipation::Atomic(break_affinity)
             }
+            Self::ContextualSpacing { .. } => InlineBoxLineBreakParticipation::ContextualSpacing,
             Self::LogicalOwnerStart { .. } => {
                 InlineBoxLineBreakParticipation::LogicalOwnerEdge(LogicalInlineEdge::Start)
             }
@@ -143,7 +149,9 @@ impl InlineBoxParticipation {
 
     pub(crate) const fn shaping_participation(self) -> InlineBoxShapingParticipation {
         match self {
-            Self::Atomic { .. } => InlineBoxShapingParticipation::InterveningInlineAdvance,
+            Self::Atomic { .. } | Self::ContextualSpacing { .. } => {
+                InlineBoxShapingParticipation::InterveningInlineAdvance
+            }
             Self::LogicalOwnerStart { width, .. } | Self::LogicalOwnerEnd { width, .. } => {
                 if width == 0.0 {
                     InlineBoxShapingParticipation::TransparentBoundary
@@ -160,7 +168,8 @@ impl InlineBoxParticipation {
             Self::Atomic { height, .. } => {
                 InlineBoxLineMetricParticipation::AtomicBlockExtent(height)
             }
-            Self::LogicalOwnerStart { .. }
+            Self::ContextualSpacing { .. }
+            | Self::LogicalOwnerStart { .. }
             | Self::LogicalOwnerEnd { .. }
             | Self::TransparentAnchor => InlineBoxLineMetricParticipation::BoundaryOnly,
         }
@@ -243,6 +252,18 @@ impl InlineBox {
                 height,
                 break_affinity,
             },
+            bidi_attachment: InlineBoxBidiAttachment::Independent,
+        }
+    }
+
+    /// Inline spacing which participates only while adjacent content remains
+    /// on the same line. If its boundary is selected for wrapping, the spacing
+    /// is consumed without contributing to either line.
+    pub fn contextual_spacing(id: u64, index: usize, width: f32, height: f32) -> Self {
+        Self {
+            id,
+            index,
+            participation: InlineBoxParticipation::ContextualSpacing { width, height },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
         }
     }
