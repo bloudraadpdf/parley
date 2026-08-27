@@ -4,7 +4,7 @@
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
 use crate::{
-    Alignment, AlignmentOptions, BaseDirection, BreakReason, FontFamily, InlineBox,
+    Alignment, AlignmentOptions, BaseDirection, BreakReason, FontFamily, IndentOptions, InlineBox,
     InlineBoxBreakAffinity, Layout, LayoutContext, LineBreakOverride, RangedBuilder, StyleProperty,
     TabSize, TextWrapMode, WhiteSpaceCollapse,
 };
@@ -267,6 +267,45 @@ fn tabs_observe_the_half_zero_advance_threshold() {
 
         assert!((layout.full_width() - (interval * stop_count + following_advance)).abs() < 0.01);
     }
+}
+
+#[test]
+fn text_indent_moves_the_tab_cursor_but_alignment_does_not() {
+    let layout = || {
+        configured_layout("X\tX", |builder| {
+            builder.push_default(StyleProperty::TabSize(TabSize::Length(80.0)));
+            builder.push_default(StyleProperty::WhiteSpaceCollapse(
+                WhiteSpaceCollapse::Preserve,
+            ));
+        })
+    };
+    let tab_advance = |layout: &Layout<ColorBrush>| {
+        layout
+            .lines()
+            .next()
+            .unwrap()
+            .runs()
+            .find_map(|run| {
+                run.clusters()
+                    .find(|cluster| cluster.text_range() == (1..2))
+                    .map(|cluster| cluster.advance())
+            })
+            .unwrap()
+    };
+
+    let mut control = layout();
+    control.break_all_lines(None);
+    let control_tab = tab_advance(&control);
+
+    let mut indented = layout();
+    indented.set_text_indent(20.0, IndentOptions::default());
+    indented.break_all_lines(None);
+    assert_close(tab_advance(&indented), control_tab - 20.0);
+
+    let mut centred = layout();
+    centred.break_all_lines(Some(200.0));
+    centred.align(Some(200.0), Alignment::Center, AlignmentOptions::default());
+    assert_close(tab_advance(&centred), control_tab);
 }
 
 #[test]

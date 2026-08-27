@@ -807,6 +807,8 @@ pub(crate) struct LineData {
     pub(crate) removed_leading_source_ranges: Vec<Range<usize>>,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
+    /// Inline position of the local line origin on the block tab grid.
+    pub(crate) tab_origin: f32,
     /// Advance inserted only because this line ended at a discretionary
     /// break. Zero for ordinary and mandatory breaks.
     pub(crate) discretionary_advance: f32,

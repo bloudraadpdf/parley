@@ -99,6 +99,7 @@ impl SourceEndContribution {
 struct LineState {
     x: f32,
     fit_x: f32,
+    tab_origin: f32,
     items: Range<usize>,
     clusters: Range<usize>,
     num_spaces: usize,
@@ -594,6 +595,24 @@ fn tab_advance(cursor: f32, interval: f32, minimum: f32) -> f32 {
     next_stop - cursor
 }
 
+/// Inline position of a shaped line's local origin on the block tab grid.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LineTabOrigin(f32);
+
+impl LineTabOrigin {
+    /// The block content edge.
+    pub const ZERO: Self = Self(0.0);
+
+    /// Creates a finite line tab origin.
+    pub fn new(origin: f32) -> Option<Self> {
+        origin.is_finite().then_some(Self(origin))
+    }
+
+    const fn raw(self) -> f32 {
+        self.0
+    }
+}
+
 /// Line breaking support for a paragraph.
 pub struct BreakLines<'a, B: Brush> {
     layout: &'a mut Layout<B>,
@@ -753,7 +772,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
     /// Computes the next line in the paragraph. Returns the advance and size
     /// (width and height for horizontal layouts) of the line.
-    pub fn break_next(&mut self, max_advance: f32) -> Option<(f32, f32)> {
+    pub fn break_next(
+        &mut self,
+        max_advance: f32,
+        tab_origin: LineTabOrigin,
+    ) -> Option<(f32, f32)> {
         // Maintain iterator state
         if self.done {
             return None;
@@ -770,6 +793,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             };
 
         let line_indent = self.resolve_indent();
+        self.state.line.tab_origin = tab_origin.raw() + line_indent;
 
         let max_advance = max_advance - line_indent;
 
@@ -1228,9 +1252,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 style.tab_size.interval(run_data.metrics.space_advance);
                             if tab_interval > 0.0 {
                                 let minimum = run_data.metrics.zero_advance * 0.5;
-                                advance = tab_advance(self.state.line.x, tab_interval, minimum);
-                                fit_advance =
-                                    tab_advance(self.state.line.fit_x, tab_interval, minimum);
+                                advance = tab_advance(
+                                    self.state.line.tab_origin + self.state.line.x,
+                                    tab_interval,
+                                    minimum,
+                                );
+                                fit_advance = tab_advance(
+                                    self.state.line.tab_origin + self.state.line.fit_x,
+                                    tab_interval,
+                                    minimum,
+                                );
                             } else {
                                 advance = 0.0;
                                 fit_advance = 0.0;
@@ -1454,6 +1485,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
 
         let line_indent = self.resolve_indent();
+        self.state.line.tab_origin = line_indent;
 
         // Track cluster count for this line
         let mut char_count: u32 = 0;
@@ -1686,7 +1718,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         // println!("\nBREAK ALL");
 
-        while self.break_next(max_advance).is_some() {}
+        while self.break_next(max_advance, LineTabOrigin::ZERO).is_some() {}
         self.finish();
     }
 
@@ -1772,7 +1804,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Forward pass: fix tab cluster advances for correct rendering.
         // Tabs are position-dependent, so we need cumulative x from line start.
         {
-            let mut line_x = 0.0_f32;
+            let mut line_x = line.tab_origin;
             for line_item in &self.lines.line_items[line.item_range.clone()] {
                 match line_item.kind {
                     LayoutItemKind::InlineBox => {
@@ -2197,7 +2229,6 @@ fn try_commit_line<B: Brush>(
                     cluster_range: 0..0,
                     text_range: 0..0,
                 });
-
             }
             LayoutItemKind::TextRun => {
                 let run_data = &layout.data.runs[item.index];
@@ -2286,6 +2317,7 @@ fn try_commit_line<B: Brush>(
         break_reason,
         num_spaces: state.num_spaces,
         indent: line_indent,
+        tab_origin: state.tab_origin,
         discretionary_advance: state.discretionary_advance,
         selected_source_cluster_advance: state.selected_source_cluster_advance.clone(),
         removed_leading_source_ranges: state.removed_leading_source_ranges.clone(),
