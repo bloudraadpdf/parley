@@ -1,20 +1,17 @@
 // Copyright 2025 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use icu_normalizer::properties::Decomposed;
 use icu_properties::{CodePointSetData, props::DefaultIgnorableCodePoint};
 
 use crate::analysis::AnalysisDataSources;
 
-/// The maximum number of characters in a single cluster.
-const MAX_CLUSTER_SIZE: usize = 32;
-
 #[derive(Debug, Default)]
 pub(crate) struct CharCluster {
     pub chars: Vec<Char>,
     pub is_emoji: bool,
-    pub map_len: u8,
+    pub map_len: usize,
     pub start: u32,
     pub end: u32,
     pub force_normalize: bool,
@@ -217,7 +214,7 @@ impl CharCluster {
         if len == 0 {
             return Status::Complete;
         }
-        let mut glyph_ids = [0_u16; MAX_CLUSTER_SIZE];
+        let mut glyph_ids = vec![0; len];
         let prev_ratio = self.best_ratio;
         let mut ratio;
         if self.force_normalize && self.composed(analysis_data_sources).is_some() {
@@ -290,7 +287,7 @@ enum FormState {
 pub(crate) struct Form {
     chars: [Char; 2],
     len: u8,
-    map_len: u8,
+    map_len: usize,
     state: FormState,
 }
 
@@ -328,16 +325,11 @@ impl Form {
             .chars()
             .iter()
             .filter(|c| c.contributes_to_font_coverage)
-            .count() as u8;
+            .count();
     }
 
     #[inline(always)]
-    fn map(
-        &mut self,
-        f: &impl Fn(char) -> u16,
-        glyphs: &mut [u16; MAX_CLUSTER_SIZE],
-        best_ratio: f32,
-    ) -> f32 {
+    fn map(&mut self, f: &impl Fn(char) -> u16, glyphs: &mut [u16], best_ratio: f32) -> f32 {
         Mapper {
             chars: &mut self.chars[..self.len as usize],
             map_len: self.map_len,
@@ -348,16 +340,11 @@ impl Form {
 
 struct Mapper<'a> {
     chars: &'a mut [Char],
-    map_len: u8,
+    map_len: usize,
 }
 
 impl<'a> Mapper<'a> {
-    fn map(
-        &mut self,
-        f: &impl Fn(char) -> u16,
-        glyphs: &mut [u16; MAX_CLUSTER_SIZE],
-        best_ratio: f32,
-    ) -> f32 {
+    fn map(&mut self, f: &impl Fn(char) -> u16, glyphs: &mut [u16], best_ratio: f32) -> f32 {
         if self.map_len == 0 {
             return 1.;
         }
@@ -396,7 +383,7 @@ mod tests {
 
         for ch in sequence.chars() {
             let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, &data);
-            cluster.map_len += u8::from(contributes_to_font_coverage);
+            cluster.map_len += usize::from(contributes_to_font_coverage);
             cluster.chars.push(Char {
                 ch,
                 contributes_to_font_coverage,
@@ -421,5 +408,25 @@ mod tests {
             Status::Complete,
             "ZWJ and variation selectors are shaping controls, not nominal-glyph coverage requirements",
         );
+    }
+
+    #[test]
+    fn font_coverage_maps_every_character_in_a_large_cluster() {
+        let data = AnalysisDataSources::new();
+        let mut cluster = CharCluster::default();
+
+        for ch in core::iter::once('e').chain(core::iter::repeat_n('\u{0301}', 35_000)) {
+            let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, &data);
+            cluster.map_len += usize::from(contributes_to_font_coverage);
+            cluster.chars.push(Char {
+                ch,
+                contributes_to_font_coverage,
+                glyph_id: 0,
+                style_index: 0,
+            });
+        }
+
+        assert_eq!(cluster.map(|_| 1, &data), Status::Complete);
+        assert!(cluster.chars.iter().all(|ch| ch.glyph_id == 1));
     }
 }

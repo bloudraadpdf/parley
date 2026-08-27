@@ -293,7 +293,7 @@ fn fill_cluster_in_place(
 
     let mut force_normalize = false;
     let mut is_emoji_or_pictograph = false;
-    let mut map_len: u8 = 0;
+    let mut map_len: usize = 0;
     let start = *code_unit_offset_in_string as u32;
 
     for ((_, ch), (info, style_index)) in segment_text.char_indices().zip(item_infos_iter.by_ref())
