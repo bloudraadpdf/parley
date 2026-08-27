@@ -330,6 +330,33 @@ fn pre_wrap_hanging_space_does_not_take_an_earlier_opportunity_across_controls()
 }
 
 #[test]
+fn pre_wrap_justification_excludes_a_terminal_space_before_a_default_ignorable() {
+    let measure = full_width("X X");
+    let text = "X \u{200b}X \u{200b}X \u{200b}X ";
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
+    layout.break_all_lines(Some(measure));
+
+    layout.align(
+        Some(measure + 10.0),
+        Alignment::Justify,
+        AlignmentOptions::default(),
+    );
+
+    let first = layout.lines().next().unwrap();
+    let spaces = first
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .filter(|cluster| &text[cluster.text_range()] == " ")
+                .map(|cluster| cluster.advance())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(spaces.len(), 2);
+    assert!((spaces[0] - spaces[1] - 10.0).abs() < 0.01, "{spaces:?}");
+}
+
+#[test]
 fn pre_wrap_space_hangs_through_a_default_ignorable_boundary() {
     let text = "X \u{200b}";
     let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));

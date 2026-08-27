@@ -1750,6 +1750,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let line = &mut self.lines.lines[line_idx];
         line.terminal_whitespace = terminal.whitespace;
         line.removed_terminal_source_ranges = terminal.removed_source_ranges;
+        if line.break_reason == BreakReason::Regular {
+            line.num_spaces = line
+                .num_spaces
+                .saturating_sub(terminal.justification_spaces);
+        }
 
         // Reset metrics for line
         line.metrics.ascent = 0.;
@@ -2275,26 +2280,11 @@ fn try_commit_line<B: Brush>(
     //     return false;
     // }
 
-    // Exclude the trailing space from justification space count.
-    // Only subtract if the line actually ends with a space — with
-    // WordBreak::BreakAll, regular breaks can land between non-space
-    // characters, in which case there is no trailing space to exclude.
-    let mut num_spaces = state.num_spaces;
-    if break_reason == BreakReason::Regular
-        && state.clusters.start < state.clusters.end
-        && layout.data.clusters[state.clusters.end - 1]
-            .info
-            .whitespace()
-            .is_space_or_nbsp()
-    {
-        num_spaces = num_spaces.saturating_sub(1);
-    }
-
     lines.lines.push(LineData {
         item_range: start_item_idx..end_item_idx,
         max_advance,
         break_reason,
-        num_spaces,
+        num_spaces: state.num_spaces,
         indent: line_indent,
         discretionary_advance: state.discretionary_advance,
         selected_source_cluster_advance: state.selected_source_cluster_advance.clone(),
@@ -2406,6 +2396,7 @@ fn line_end_bidi_items<B: Brush>(
 struct CollectedTerminalWhitespace {
     whitespace: TerminalWhitespace,
     removed_source_ranges: Vec<Range<usize>>,
+    justification_spaces: usize,
 }
 
 fn collect_terminal_whitespace<B: Brush>(
@@ -2415,6 +2406,7 @@ fn collect_terminal_whitespace<B: Brush>(
 ) -> CollectedTerminalWhitespace {
     let mut terminal = TerminalWhitespace::Absent;
     let mut removed_source_ranges: Vec<Range<usize>> = Vec::new();
+    let mut justification_spaces = 0;
     'items: for line_item in line_items.iter().rev() {
         match line_item.kind {
             LayoutItemKind::InlineBox => {
@@ -2433,6 +2425,8 @@ fn collect_terminal_whitespace<B: Brush>(
                         TerminalSourceUnit::Bridge => {}
                         TerminalSourceUnit::Barrier => break 'items,
                         TerminalSourceUnit::Candidate(disposition) => {
+                            justification_spaces +=
+                                usize::from(cluster.info.whitespace().is_space_or_nbsp());
                             let range = cluster.text_range(run);
                             let advance = selected_source_cluster_advance
                                 .resolve(range.start, cluster.advance);
@@ -2459,6 +2453,7 @@ fn collect_terminal_whitespace<B: Brush>(
     CollectedTerminalWhitespace {
         whitespace: terminal,
         removed_source_ranges,
+        justification_spaces,
     }
 }
 
