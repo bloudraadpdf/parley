@@ -38,9 +38,15 @@ impl PhysicalLineEdge {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct TerminalWhitespaceAdvances {
+    /// Phase II step 3 removes this terminal collapsible suffix.
     removed: f32,
+    /// Phase II step 4 always hangs this terminal suffix.
     hanging: f32,
+    /// The final conditionally hanging suffix before a forced break.
     conditional: f32,
+    /// An unconditional prefix which can hang only after the conditional
+    /// suffix fully overflows and therefore exposes this prefix at line end.
+    conditional_prefix: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -116,15 +122,13 @@ enum ConditionalFit {
 enum UsedLineEnd {
     SoftWrap,
     ForcedBreak { conditional_fit: ConditionalFit },
-    ParagraphEnd,
 }
 
 impl UsedLineEnd {
     fn new(break_reason: BreakReason, candidate_advance: f32, available_advance: f32) -> Self {
         match break_reason {
-            BreakReason::None => Self::ParagraphEnd,
             BreakReason::Regular | BreakReason::Emergency => Self::SoftWrap,
-            BreakReason::Explicit => {
+            BreakReason::None | BreakReason::Explicit => {
                 let overflow = candidate_advance - available_advance;
                 let conditional_fit = if overflow > 0.0 {
                     ConditionalFit::Overflows { advance: overflow }
@@ -142,7 +146,10 @@ impl TerminalWhitespace {
         disposition == TerminalWhitespaceDisposition::Removed
             && !matches!(
                 self,
-                Self::Present { advances, .. } if advances.hanging > 0.0
+                Self::Present { advances, .. }
+                    if advances.hanging > 0.0
+                        || advances.conditional > 0.0
+                        || advances.conditional_prefix > 0.0
             )
     }
 
@@ -176,17 +183,31 @@ impl TerminalWhitespace {
         match disposition {
             TerminalWhitespaceDisposition::Measured => unreachable!(),
             TerminalWhitespaceDisposition::Removed => {
-                if advances.hanging > 0.0 {
+                if advances.conditional_prefix > 0.0 || advances.conditional > 0.0 {
+                    advances.conditional_prefix += advance;
+                } else if advances.hanging > 0.0 {
                     advances.hanging += advance;
                 } else {
                     advances.removed += advance;
                 }
             }
             TerminalWhitespaceDisposition::Hanging => {
-                advances.hanging += advance;
+                if advances.conditional > 0.0 {
+                    advances.conditional_prefix += advance;
+                } else {
+                    advances.hanging += advance;
+                }
             }
             TerminalWhitespaceDisposition::ConditionallyHanging => {
-                advances.conditional += advance;
+                if advances.conditional_prefix > 0.0 || advances.hanging > 0.0 {
+                    if advances.conditional_prefix > 0.0 {
+                        advances.conditional_prefix += advance;
+                    } else {
+                        advances.hanging += advance;
+                    }
+                } else {
+                    advances.conditional += advance;
+                }
             }
         }
         TerminalWhitespaceScan::Continue
@@ -206,19 +227,27 @@ impl TerminalWhitespace {
             return UsedTerminalWhitespace::Absent;
         };
         let candidate_advance = (line_advance - advances.removed - advances.hanging).max(0.0);
-        let conditional = match UsedLineEnd::new(break_reason, candidate_advance, available_advance)
-        {
-            UsedLineEnd::ForcedBreak {
-                conditional_fit: ConditionalFit::Fits,
-            } => 0.0,
-            UsedLineEnd::ForcedBreak {
-                conditional_fit: ConditionalFit::Overflows { advance },
-            } => advance.min(advances.conditional),
-            UsedLineEnd::SoftWrap | UsedLineEnd::ParagraphEnd => advances.conditional,
-        };
+        let (conditional, conditional_prefix) =
+            match UsedLineEnd::new(break_reason, candidate_advance, available_advance) {
+                UsedLineEnd::ForcedBreak {
+                    conditional_fit: ConditionalFit::Fits,
+                } => (0.0, 0.0),
+                UsedLineEnd::ForcedBreak {
+                    conditional_fit: ConditionalFit::Overflows { advance },
+                } => {
+                    let conditional = advance.min(advances.conditional);
+                    let conditional_prefix = if conditional >= advances.conditional {
+                        advances.conditional_prefix
+                    } else {
+                        0.0
+                    };
+                    (conditional, conditional_prefix)
+                }
+                UsedLineEnd::SoftWrap => (advances.conditional, advances.conditional_prefix),
+            };
         UsedTerminalWhitespace::Present {
-            advance: advances.removed + advances.hanging + conditional,
-            occupied_advance: advances.hanging + conditional,
+            advance: advances.removed + advances.hanging + conditional + conditional_prefix,
+            occupied_advance: advances.hanging + conditional + conditional_prefix,
             physical_side,
         }
     }
@@ -1666,6 +1695,7 @@ impl<B: Brush> LayoutData<B> {
         }
 
         min_width = min_width.max(running_min_width - trailing_min_width);
+        max_width = max_width.max(running_max_width - trailing_unconditional_max_width);
 
         ContentWidths {
             min: min_width,

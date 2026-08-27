@@ -76,6 +76,12 @@ fn full_width(text: &str) -> f32 {
     layout.full_width()
 }
 
+fn measured_white_space_width(text: &str) -> f32 {
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::BreakSpaces));
+    layout.break_all_lines(None);
+    layout.full_width()
+}
+
 fn assert_close(actual: f32, expected: f32) {
     assert!(
         (actual - expected).abs() < 0.001,
@@ -93,6 +99,15 @@ fn configured_pre_wrap_layout(
         ));
         builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
         configure(builder);
+    })
+}
+
+fn mixed_terminal_layout(text: &str, preserved: Range<usize>) -> Layout<ColorBrush> {
+    configured_layout(text, |builder| {
+        builder.push(
+            StyleProperty::WhiteSpaceCollapse(WhiteSpaceCollapse::Preserve),
+            preserved,
+        );
     })
 }
 
@@ -396,12 +411,15 @@ fn pre_wrap_justification_excludes_a_terminal_space_before_a_default_ignorable()
 }
 
 #[test]
-fn pre_wrap_space_hangs_through_a_default_ignorable_boundary() {
+fn pre_wrap_space_before_a_default_ignorable_fits_at_paragraph_end() {
     let text = "X \u{200b}";
     let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
     layout.break_all_lines(None);
 
-    assert!(layout.lines().next().unwrap().metrics().trailing_whitespace > 0.0);
+    assert_eq!(
+        layout.lines().next().unwrap().metrics().trailing_whitespace,
+        0.0
+    );
 }
 
 #[test]
@@ -650,7 +668,62 @@ fn conditional_terminal_alignment_uses_ltr_paragraph_end() {
     });
     layout.break_all_lines(None);
 
-    assert_centered_terminal_side(&mut layout, |_| 50.0);
+    let line_advance = layout.lines().next().unwrap().metrics().advance;
+    let (offset, trailing) = align_first_line(&mut layout, line_advance + 100.0, Alignment::Center);
+    assert_close(offset, 50.0);
+    assert_eq!(trailing, 0.0);
+}
+
+#[test]
+fn conditional_terminal_paragraph_end_measures_a_fitting_space() {
+    let text = "XX ";
+    let expected = full_width(text);
+    let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::Preserve));
+
+    layout.break_all_lines(Some(expected));
+
+    let line = layout.lines().next().unwrap();
+    assert_eq!(line.break_reason(), BreakReason::None);
+    assert_close(line.metrics().advance, expected);
+    assert_eq!(line.metrics().trailing_whitespace, 0.0);
+}
+
+#[test]
+fn unconditional_terminal_suffix_promotes_preceding_preserved_spaces() {
+    let text = "X  \u{3000}";
+    let content = full_width("X");
+    let expected_hanging = full_width(text) - content;
+    let mut layout = mixed_terminal_layout(text, 1..3);
+
+    layout.break_all_lines(Some(content));
+
+    let line = layout.lines().next().unwrap();
+    assert_close(line.metrics().trailing_whitespace, expected_hanging);
+    assert_close(layout.width(), content);
+}
+
+#[test]
+fn unconditional_prefix_hangs_only_after_conditional_suffix_overflows() {
+    let text = "X\u{3000}\u{3000}  ";
+    let content = measured_white_space_width("X");
+    let conditional = measured_white_space_width("  ");
+    let prefix = measured_white_space_width("\u{3000}\u{3000}");
+    let total = measured_white_space_width(text);
+    let mut layout = mixed_terminal_layout(text, 7..9);
+
+    layout.break_all_lines(Some(content + prefix + conditional * 0.5));
+
+    let line = layout.lines().next().unwrap();
+    assert_close(line.metrics().trailing_whitespace, conditional * 0.5);
+    assert_close(
+        line.metrics().advance - line.metrics().trailing_whitespace,
+        total - conditional * 0.5,
+    );
+
+    let mut layout = mixed_terminal_layout(text, 7..9);
+    layout.break_all_lines(Some(content + prefix));
+    let line = layout.lines().next().unwrap();
+    assert_close(line.metrics().trailing_whitespace, total - content);
 }
 
 #[test]
@@ -686,7 +759,7 @@ fn pre_wrap_forced_break_spaces_only_hang_from_min_content() {
     let terminal = roboto_layout("XX   ", Some(WhiteSpaceCollapse::Preserve));
 
     assert_eq!(forced_break.calculate_content_widths().max, expected_max);
-    assert_eq!(terminal.calculate_content_widths().max, full_width("XX"));
+    assert_eq!(terminal.calculate_content_widths().max, expected_max);
 }
 
 #[test]
