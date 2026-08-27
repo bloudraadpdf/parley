@@ -624,7 +624,7 @@ pub(crate) struct ClusterData {
     /// taken from the owning run.
     pub(crate) glyph_offset: u32,
     /// Offset into the text for this cluster
-    pub(crate) text_offset: u16,
+    pub(crate) text_offset: usize,
     /// Advance width for this cluster
     pub(crate) advance: f32,
     /// Advance used only for greedy line-fit decisions. This normally equals
@@ -649,7 +649,7 @@ impl ClusterData {
 
     #[inline(always)]
     pub(crate) fn text_range(self, run: &RunData) -> Range<usize> {
-        let start = run.text_range.start + self.text_offset as usize;
+        let start = run.text_range.start + self.text_offset;
         start..start + self.text_len as usize
     }
 }
@@ -2085,7 +2085,7 @@ fn push_cluster(
         glyph_len: final_glyph_len,
         text_len: cluster_start_char.1.len_utf8() as u8,
         glyph_offset: final_glyph_offset,
-        text_offset: cluster_start_char.0 as u16,
+        text_offset: cluster_start_char.0,
         advance: final_advance,
         line_break_advance: final_line_break_advance,
     });

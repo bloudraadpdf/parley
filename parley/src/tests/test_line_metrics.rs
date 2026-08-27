@@ -124,6 +124,22 @@ fn unquantized_uniform_line_box_still_equals_the_line_height() {
 }
 
 #[test]
+fn large_grapheme_cluster_preserves_the_full_line_text_range() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = core::iter::once('e')
+        .chain(core::iter::repeat_n('\u{0301}', 35_000))
+        .chain(core::iter::once('X'))
+        .collect::<alloc::string::String>();
+    let mut builder = lcx.ranged_builder(&mut fcx, &text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    let mut layout = builder.build(&text);
+    layout.break_all_lines(None);
+
+    assert_eq!(layout.lines().next().unwrap().text_range(), 0..text.len());
+}
+
+#[test]
 fn unquantized_uniform_negative_leading_keeps_the_authored_line_height() {
     let layout = negative_leading_layout([]);
 
