@@ -4,6 +4,42 @@ use std::sync::Arc;
 
 use fontique::{Blob, FontInfo, FontStyle, FontStyleSynthesis, SourceId, SourceInfo, SourceKind};
 
+#[test]
+fn declared_slant_range_limits_high_level_style_selection() {
+    let font = variable_face();
+    let SourceKind::Memory(data) = &font.source().kind else {
+        panic!("fixture is in memory")
+    };
+    let tag = font
+        .axes()
+        .iter()
+        .find(|axis| axis.tag.to_be_bytes() == *b"slnt")
+        .unwrap()
+        .tag;
+    let ranges = [fontique::AxisRange::new(tag, 0.0, 10.0).unwrap()];
+    let mut collection = fontique::Collection::new(Default::default());
+    let registered = collection.register_fonts(
+        data.clone(),
+        Some(fontique::FontInfoOverride {
+            axis_ranges: Some(&ranges),
+            ..Default::default()
+        }),
+    );
+    let font = &registered[0].1[0];
+    let selected = font.synthesis(
+        font.width(),
+        FontStyle::Oblique(Some(10.0)),
+        font.weight(),
+        FontStyleSynthesis::Forbidden,
+    );
+    assert!(
+        selected
+            .variation_settings()
+            .iter()
+            .any(|(tag, value)| tag.to_be_bytes() == *b"slnt" && *value == 0.0)
+    );
+}
+
 fn variable_face() -> FontInfo {
     let bytes =
         include_bytes!("../../parley_dev/assets/fonts/roboto_fonts/RobotoFlex-VariableFont.ttf");

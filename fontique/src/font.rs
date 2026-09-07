@@ -23,6 +23,7 @@ pub struct FontInfo {
     style: FontStyle,
     weight: FontWeight,
     axes: AxisVec,
+    selection_ranges: SmallVec<[AxisRange; 3]>,
     attr_axes: u8,
     charmap_index: CharmapIndex,
 }
@@ -131,6 +132,11 @@ impl FontInfo {
                 FontStyle::Italic => 14,
                 FontStyle::Oblique(angle) => angle.unwrap_or(14.0) as i8,
             };
+        }
+        for (tag, value) in &mut synth.vars[..len] {
+            if let Some(range) = self.selection_ranges.iter().find(|range| range.tag == *tag) {
+                *value = value.clamp(range.min, range.max);
+            }
         }
         synth.len = len as u8;
         synth
@@ -242,6 +248,7 @@ impl FontInfo {
             style,
             weight,
             axes,
+            selection_ranges: SmallVec::default(),
             attr_axes,
             charmap_index,
         })
@@ -266,6 +273,9 @@ impl FontInfo {
     }
 
     pub(crate) fn apply_override(&mut self, info_override: &FontInfoOverride<'_>) {
+        if let Some(ranges) = info_override.axis_ranges {
+            self.selection_ranges = SmallVec::from_slice(ranges);
+        }
         if let Some(width) = info_override.width {
             self.width = width;
         }
@@ -486,4 +496,21 @@ pub struct FontInfoOverride<'a> {
     /// Default values for the font's variation axes. Axes not included within
     /// the font will be ignored.
     pub axes: Option<&'a [(Tag, f32)]>,
+    /// Bounds applied when selecting axes from high-level font attributes.
+    pub axis_ranges: Option<&'a [AxisRange]>,
+}
+
+/// A finite, ordered range for high-level variable-font axis selection.
+#[derive(Clone, Copy, Debug)]
+pub struct AxisRange {
+    tag: Tag,
+    min: f32,
+    max: f32,
+}
+
+impl AxisRange {
+    /// Returns a range when both bounds are finite and ordered.
+    pub fn new(tag: Tag, min: f32, max: f32) -> Option<Self> {
+        (min.is_finite() && max.is_finite() && min <= max).then_some(Self { tag, min, max })
+    }
 }
