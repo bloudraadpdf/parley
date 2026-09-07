@@ -24,6 +24,23 @@ pub struct Layout<B: Brush> {
 }
 
 impl<B: Brush> Layout<B> {
+    /// Set position-dependent fitting advances for line-start shaping.
+    /// These constraints do not change the shaped glyphs or add break opportunities.
+    pub fn set_line_start_fit_advances(&mut self, mut advances: Vec<super::LineStartFitAdvance>) {
+        advances.sort_by_key(|entry| entry.byte_index);
+        advances.dedup_by_key(|entry| entry.byte_index);
+        advances.retain(|entry| entry.byte_index < self.data.text_len);
+        self.data.line_start_fit_advances = advances;
+    }
+
+    pub(crate) fn line_start_fit_advance(&self, byte_index: usize) -> Option<f32> {
+        self.data
+            .line_start_fit_advances
+            .binary_search_by_key(&byte_index, |entry| entry.byte_index)
+            .ok()
+            .map(|index| self.data.line_start_fit_advances[index].inside_line)
+    }
+
     /// Creates an empty layout.
     pub fn new() -> Self {
         Self::default()

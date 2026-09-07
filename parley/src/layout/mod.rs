@@ -27,7 +27,10 @@ pub use accessibility::LayoutAccessibility;
 pub use alignment::{Alignment, AlignmentOptions, JustificationMode};
 pub use bidi::{BidiAtomId, BidiLevel, BidiTopology, BidiVisualAtom, BidiVisualAtomKind};
 pub use cluster::{Affinity, Cluster, ClusterPath, ClusterSide};
-pub use data::{BreakReason, DiscretionaryBreak, LineBreakOverride, NormalSoftWrapSelection};
+pub use data::{
+    BreakReason, DiscretionaryBreak, LineBreakOverride, LineStartFitAdvance,
+    NormalSoftWrapSelection,
+};
 pub use glyph::Glyph;
 pub use layout::Layout;
 pub use line::{

@@ -76,6 +76,22 @@ fn full_width(text: &str) -> f32 {
     layout.full_width()
 }
 
+#[test]
+fn line_start_fit_advance_is_available_only_after_a_break() {
+    let text = "A B";
+    let width = full_width(text) + 1.0;
+    let mut layout = roboto_layout(text, None);
+    layout.set_line_start_fit_advances(vec![
+        crate::LineStartFitAdvance::new(2, width * 2.0).unwrap(),
+    ]);
+    layout.break_all_lines(Some(width));
+    assert_eq!(line_texts(&layout, text), ["A ", "B"]);
+    assert!(layout.lines().nth(1).unwrap().metrics().advance < width);
+    layout.set_line_start_fit_advances(vec![]);
+    layout.break_all_lines(Some(width));
+    assert_eq!(line_texts(&layout, text), [text]);
+}
+
 fn measured_white_space_width(text: &str) -> f32 {
     let mut layout = roboto_layout(text, Some(WhiteSpaceCollapse::BreakSpaces));
     layout.break_all_lines(None);

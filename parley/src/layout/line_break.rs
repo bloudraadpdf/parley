@@ -97,6 +97,7 @@ impl SourceEndContribution {
 
 #[derive(Clone, Default)]
 struct LineState {
+    start_position: LineStartPosition,
     x: f32,
     fit_x: f32,
     tab_origin: f32,
@@ -120,6 +121,13 @@ struct LineState {
     source_end_contribution: SourceEndContribution,
     source_start_whitespace: SourceStartWhitespace,
     removed_leading_source_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum LineStartPosition {
+    #[default]
+    Start,
+    Interior,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -175,13 +183,22 @@ impl LineState {
         whitespace: Whitespace,
         is_default_ignorable: bool,
         style: &crate::layout::Style<B>,
-        advances: (f32, f32),
+        mut advances: (f32, f32),
+        inside_line_advance: Option<f32>,
     ) -> (f32, f32) {
         if !self.source_start_whitespace.removes_collapsible_space(
             whitespace,
             is_default_ignorable,
             style,
         ) {
+            if self.start_position == LineStartPosition::Interior {
+                if let Some(inside_line_advance) = inside_line_advance {
+                    advances.1 = advances.1.max(inside_line_advance);
+                }
+            }
+            if !is_default_ignorable {
+                self.start_position = LineStartPosition::Interior;
+            }
             return advances;
         }
         match self.removed_leading_source_ranges.last_mut() {
@@ -493,6 +510,9 @@ impl BreakerState {
         self.line
             .source_start_whitespace
             .include_inline_box(participation);
+        if participation == InlineBoxShapingParticipation::InterveningInlineAdvance {
+            self.line.start_position = LineStartPosition::Interior;
+        }
         // Would like to add:
         // self.item_idx += 1;
     }
@@ -658,6 +678,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.discretionary_advance = 0.;
         self.state.line.discretionary_break = false;
         self.state.line.source_end_contribution = SourceEndContribution::Empty;
+        self.state.line.start_position = LineStartPosition::Start;
         self.state.line.source_start_whitespace =
             SourceStartWhitespace::following_break(preceding_break);
         self.state.line.removed_leading_source_ranges.clear();
@@ -1231,6 +1252,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             cluster.info().is_default_ignorable(),
                             style,
                             (advance, fit_advance),
+                            self.layout.line_start_fit_advance(byte_index),
                         );
                         if cluster.is_ligature_start() {
                             while let Some(cluster) =
@@ -1603,6 +1625,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             cluster.info().is_default_ignorable(),
                             style,
                             (cluster.advance(), cluster.data.line_break_advance),
+                            self.layout
+                                .line_start_fit_advance(cluster.text_range().start),
                         );
 
                         // Compute the x position.
