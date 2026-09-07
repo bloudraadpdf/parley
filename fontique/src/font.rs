@@ -96,49 +96,41 @@ impl FontInfo {
     ) -> Synthesis {
         let mut synth = Synthesis::default();
         let mut len = 0_usize;
-        if self.has_width_axis() && self.width != width {
+        if self.has_width_axis() {
             synth.vars[len] = (Tag::new(b"wdth"), width.percentage());
             len += 1;
         }
-        if self.weight != weight {
-            if self.has_weight_axis() {
-                synth.vars[len] = (Tag::new(b"wght"), weight.value());
-                len += 1;
-            } else if weight.value() > self.weight.value() {
-                synth.embolden = true;
-            }
+        if self.has_weight_axis() {
+            synth.vars[len] = (Tag::new(b"wght"), weight.value());
+            len += 1;
+        } else if weight.value() > self.weight.value() {
+            synth.embolden = true;
         }
-        if self.style != style && style_synthesis == FontStyleSynthesis::Allowed {
-            match style {
-                FontStyle::Normal => {}
-                FontStyle::Italic => {
-                    if self.style == FontStyle::Normal {
-                        if self.has_italic_axis() {
-                            synth.vars[len] = (Tag::new(b"ital"), 1.0);
-                            len += 1;
-                        } else if self.has_slant_axis() {
-                            synth.vars[len] = (Tag::new(b"slnt"), 14.0);
-                            len += 1;
-                        } else {
-                            synth.skew = 14;
-                        }
-                    }
-                }
-                FontStyle::Oblique(angle) => {
-                    if self.style == FontStyle::Normal {
-                        let degrees = angle.unwrap_or(14.0);
-                        if self.has_slant_axis() {
-                            synth.vars[len] = (Tag::new(b"slnt"), degrees);
-                            len += 1;
-                        } else if self.has_italic_axis() && degrees > 0. {
-                            synth.vars[len] = (Tag::new(b"ital"), 1.0);
-                            len += 1;
-                        } else {
-                            synth.skew = degrees as i8;
-                        }
-                    }
-                }
+        let style_axis = match style {
+            FontStyle::Normal if self.has_italic_axis() => Some((Tag::new(b"ital"), 0.0)),
+            FontStyle::Normal if self.has_slant_axis() => Some((Tag::new(b"slnt"), 0.0)),
+            FontStyle::Italic if self.has_italic_axis() => Some((Tag::new(b"ital"), 1.0)),
+            FontStyle::Italic if self.has_slant_axis() => Some((Tag::new(b"slnt"), -14.0)),
+            FontStyle::Oblique(angle) if self.has_slant_axis() => {
+                Some((Tag::new(b"slnt"), -angle.unwrap_or(14.0)))
             }
+            FontStyle::Oblique(angle) if self.has_italic_axis() && angle.unwrap_or(14.0) > 0.0 => {
+                Some((Tag::new(b"ital"), 1.0))
+            }
+            _ => None,
+        };
+        if let Some(axis) = style_axis {
+            synth.vars[len] = axis;
+            len += 1;
+        } else if self.style != style
+            && self.style == FontStyle::Normal
+            && style_synthesis == FontStyleSynthesis::Allowed
+        {
+            synth.skew = match style {
+                FontStyle::Normal => 0,
+                FontStyle::Italic => 14,
+                FontStyle::Oblique(angle) => angle.unwrap_or(14.0) as i8,
+            };
         }
         synth.len = len as u8;
         synth
@@ -376,41 +368,19 @@ impl Synthesis {
         }
     }
 
-    /// Returns synthesis suggestions with faux/variable weight synthesis removed.
+    /// Returns synthesis suggestions with faux bold removed, retaining variable axes.
     pub fn without_weight_synthesis(mut self) -> Self {
-        let mut next = 0usize;
-        for i in 0..self.len as usize {
-            let (tag, value) = self.vars[i];
-            if tag.to_be_bytes() == *b"wght" {
-                continue;
-            }
-            self.vars[next] = (tag, value);
-            next += 1;
-        }
-        self.len = next as u8;
         self.embolden = false;
         self
     }
 
-    /// Returns synthesis suggestions with faux/variable italic/oblique synthesis removed.
+    /// Returns synthesis suggestions with faux oblique removed, retaining variable axes.
     pub fn without_style_synthesis(mut self) -> Self {
-        let mut next = 0usize;
-        for i in 0..self.len as usize {
-            let (tag, value) = self.vars[i];
-            let bytes = tag.to_be_bytes();
-            if bytes == *b"ital" || bytes == *b"slnt" {
-                continue;
-            }
-            self.vars[next] = (tag, value);
-            next += 1;
-        }
-        self.len = next as u8;
         self.skew = 0;
         self
     }
 }
 
-#[allow(clippy::missing_fields_in_debug)]
 impl fmt::Debug for Synthesis {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Synthesis")
