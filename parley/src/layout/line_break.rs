@@ -493,6 +493,19 @@ impl BreakerState {
         // self.cluster_idx += 1;
     }
 
+    fn accept_cluster(
+        &mut self,
+        next_x: f32,
+        next_fit_x: f32,
+        height: f32,
+        authored_break_unit: AuthoredBreakUnit,
+        justification_space: bool,
+    ) {
+        self.append_cluster_to_line(next_x, next_fit_x, height, authored_break_unit);
+        self.cluster_idx += 1;
+        self.line.num_spaces += usize::from(justification_space);
+    }
+
     /// Add inline box to line
     fn append_inline_box_to_line(
         &mut self,
@@ -1296,11 +1309,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // println!("Cluster {} next_x: {}", self.state.cluster_idx, next_x);
 
-                        let fits = if whitespace == Whitespace::Tab && fit_advance != 0.0 {
-                            self.tab_stop_advance_fits(next_fit_x, max_advance)
-                        } else {
-                            self.advance_contribution_fits(fit_advance, next_fit_x, max_advance)
-                        };
+                        let fits =
+                            self.advance_contribution_fits(fit_advance, next_fit_x, max_advance);
                         let line_fit = if fits {
                             LineFit::Fits
                         } else {
@@ -1316,23 +1326,20 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             }
                         };
 
+                        let contributes_justification_space = is_space
+                            && projected_source_cluster
+                                == ProjectedSourceClusterParticipation::Normal
+                            && !self.state.line.removes_leading_source_at(byte_index);
                         match line_fit {
                             LineFit::Fits | LineFit::TrailingPreservedSpaceOverflow => {
                                 let line_height = run.metrics().line_height;
-                                self.state.append_cluster_to_line(
+                                self.state.accept_cluster(
                                     next_x,
                                     next_fit_x,
                                     line_height,
                                     cluster.info().authored_break_unit(),
+                                    contributes_justification_space,
                                 );
-                                self.state.cluster_idx += 1;
-                                if is_space
-                                    && projected_source_cluster
-                                        == ProjectedSourceClusterParticipation::Normal
-                                    && !self.state.line.removes_leading_source_at(byte_index)
-                                {
-                                    self.state.line.num_spaces += 1;
-                                }
                             }
                             LineFit::TrailingCollapsibleSpaceOverflow(opportunity) => {
                                 let SoftWrapOpportunity = opportunity;
@@ -1379,13 +1386,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     (_, candidate) => {
                                         self.state.prev_boundary = candidate;
                                         let line_height = run.metrics().line_height;
-                                        self.state.append_cluster_to_line(
+                                        self.state.accept_cluster(
                                             next_x,
                                             next_fit_x,
                                             line_height,
                                             cluster.info().authored_break_unit(),
+                                            contributes_justification_space,
                                         );
-                                        self.state.cluster_idx += 1;
                                     }
                                 }
                             }
@@ -1447,23 +1454,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         None
     }
 
-    /// Compare an accumulated line advance with its measure.
-    ///
-    /// Fixed-grid projection gives each cluster an exact decimal meaning, but
-    /// the public layout representation stores those advances as `f32`.
-    /// Repeated positive additions can therefore finish a handful of ulps on
-    /// the wrong side of the same grid-aligned measure. Use the standard
-    /// forward-error bound for a sum of positive floating-point terms only
-    /// when that fixed-grid contract is active; ordinary shaping retains its
-    /// strict comparison.
+    /// Compare positive advances within their floating-point error bound.
     fn advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
-        candidate <= max_advance
-            || (self.layout.data.font_metric_advance_quantization.is_some()
-                && line_advance_fits(
-                    candidate,
-                    max_advance,
-                    self.state.line.clusters.len() + self.state.line.items.len() + 1,
-                ))
+        line_advance_fits(
+            candidate,
+            max_advance,
+            self.state.line.clusters.len() + self.state.line.items.len() + 1,
+        )
     }
 
     fn advance_contribution_fits(
@@ -1473,21 +1470,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         max_advance: f32,
     ) -> bool {
         contribution == 0.0 || self.advance_fits(candidate, max_advance)
-    }
-
-    /// Compare a position-dependent tab stop with the line measure.
-    ///
-    /// A tab stop and an independently resolved measure can represent the
-    /// same exact CSS length on opposite sides of one `f32` rounding. Unlike
-    /// ordinary shaped advances, that arithmetic has the same closed
-    /// positive-sum error contract as fixed-grid metric projection.
-    fn tab_stop_advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
-        self.advance_fits(candidate, max_advance)
-            || line_advance_fits(
-                candidate,
-                max_advance,
-                self.state.line.clusters.len() + self.state.line.items.len() + 1,
-            )
     }
 
     /// Computes the next line in the paragraph by character count.

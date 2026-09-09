@@ -12,6 +12,62 @@ use parley::style::FontFamily;
 use parley::{Alignment, AlignmentOptions, InlineBox, PositionedLayoutItem, StyleProperty};
 
 #[test]
+fn unquantized_inline_advances_allow_only_float_roundoff() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let mut builder = env.ranged_builder("");
+    builder.push_inline_box(InlineBox::new(0, 0, 1.8843753, 2.0));
+    builder.push_inline_box(InlineBox::new(1, 0, 1.1646081, 2.0));
+    let mut layout = builder.build("");
+    for (width, lines) in [(3.048983, 1), (3.047, 2)] {
+        layout.break_all_lines(Some(width));
+        assert_eq!(layout.len(), lines, "width {width}");
+    }
+}
+
+#[test]
+fn overflowing_terminal_space_preserves_interior_justification_opportunities() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let text = "aa aa aa aa";
+    let builder = env.ranged_builder(text);
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    let first = layout.get(0).unwrap();
+    let clusters: Vec<_> = first
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| cluster.advance())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let space = clusters[2];
+    let content: f32 = clusters[..8].iter().sum();
+    let width = content + space * 0.5;
+    layout.break_all_lines(Some(width));
+    assert_eq!(layout.get(0).unwrap().text_range(), 0..9);
+    layout.align(Some(width), Alignment::Justify, AlignmentOptions::default());
+    let spaces: Vec<_> = layout
+        .get(0)
+        .unwrap()
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .filter(|cluster| matches!(cluster.text_range().start, 2 | 5))
+                .map(|cluster| cluster.advance())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(spaces.len(), 2);
+    for advance in spaces {
+        assert!(
+            (advance - space * 1.25).abs() < 0.001,
+            "{advance} instead of {}",
+            space * 1.25
+        );
+    }
+}
+
+#[test]
 fn break_by_length_basic() {
     let mut env = TestEnv::new(test_name!(), None);
 
