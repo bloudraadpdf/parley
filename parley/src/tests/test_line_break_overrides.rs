@@ -77,6 +77,35 @@ fn full_width(text: &str) -> f32 {
 }
 
 #[test]
+fn committed_line_metrics_follow_breaking_and_reversion() {
+    let text = "Text flows around the float";
+    let mut layout = roboto_layout(text, None);
+    let mut breaker = layout.break_lines();
+    assert!(breaker.last_line().is_none());
+    let (advance, _) = breaker
+        .break_next(32.0, crate::LineTabOrigin::ZERO)
+        .unwrap();
+    let first = breaker.last_line().unwrap();
+    let first_range = first.text_range();
+    assert_eq!(&text[first_range.clone()], "Text ");
+    assert_eq!(first.break_reason(), BreakReason::Regular);
+    assert_close(first.metrics().advance, advance);
+    assert!(first.metrics().trailing_whitespace > 0.0);
+    breaker
+        .break_next(32.0, crate::LineTabOrigin::ZERO)
+        .unwrap();
+    assert_ne!(breaker.last_line().unwrap().text_range(), first_range);
+    assert!(breaker.revert());
+    assert_eq!(breaker.last_line().unwrap().text_range(), first_range);
+    breaker
+        .break_next(200.0, crate::LineTabOrigin::ZERO)
+        .unwrap();
+    let last = breaker.last_line().unwrap();
+    assert_eq!(&text[last.text_range()], "flows around the float");
+    assert_eq!(last.break_reason(), BreakReason::None);
+}
+
+#[test]
 fn line_start_fit_advance_is_available_only_after_a_break() {
     let text = "A B";
     let width = full_width(text) + 1.0;

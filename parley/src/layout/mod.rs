@@ -36,7 +36,7 @@ pub use layout::Layout;
 pub use line::{
     GlyphRun, HangingWhitespace, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem,
 };
-pub use line_break::{BreakLines, LineTabOrigin};
+pub use line_break::{BreakLines, CommittedLine, LineTabOrigin};
 pub use run::{Run, RunMetrics};
 
 pub(crate) use data::{LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData};

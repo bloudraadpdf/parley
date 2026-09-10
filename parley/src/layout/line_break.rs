@@ -646,6 +646,28 @@ impl LineTabOrigin {
     }
 }
 
+/// Read-only metrics and source bounds of a committed line.
+pub struct CommittedLine<'a> {
+    data: &'a LineData,
+}
+
+impl CommittedLine<'_> {
+    /// Returns the line metrics before paragraph alignment.
+    pub fn metrics(&self) -> &LineMetrics {
+        &self.data.metrics
+    }
+
+    /// Returns the source text range of the line.
+    pub fn text_range(&self) -> Range<usize> {
+        self.data.text_range.clone()
+    }
+
+    /// Returns the reason for ending this line.
+    pub fn break_reason(&self) -> BreakReason {
+        self.data.break_reason
+    }
+}
+
 /// Line breaking support for a paragraph.
 pub struct BreakLines<'a, B: Brush> {
     layout: &'a mut Layout<B>,
@@ -797,6 +819,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Returns the y-coordinate of the top of the current line
     pub fn committed_y(&self) -> f64 {
         self.state.committed_y
+    }
+
+    /// Returns the last committed line, including after a reversion.
+    pub fn last_line(&self) -> Option<CommittedLine<'_>> {
+        self.lines.lines.last().map(|data| CommittedLine { data })
     }
 
     /// Returns true if all the text has been placed into lines.
