@@ -43,6 +43,56 @@ fn build_inline_box_layout(
 }
 
 #[test]
+fn source_text_affinity_retains_source_breaks_in_intrinsic_measurement() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let mut failures = Vec::new();
+    for (text, override_, expected) in [
+        ("", None, 200.0),
+        (" ", None, 150.0),
+        ("\u{200b}", None, 150.0),
+        ("A B", None, 150.0),
+        ("A\u{200b}B", None, 150.0),
+        ("AB", None, 200.0),
+        ("\u{a0}", None, 200.0),
+        ("\u{2060}", None, 200.0),
+        (" \u{2060}", None, 200.0),
+        (" ", Some(LineBreakOverride::suppress(1)), 200.0),
+        ("A", Some(LineBreakOverride::opportunity(1)), 150.0),
+    ] {
+        let mut layout = build_inline_box_layout(
+            &mut lcx,
+            &mut fcx,
+            text,
+            0.0,
+            None,
+            (0..4).map(|id| {
+                InlineBox::atomic_with_break_affinity(
+                    id,
+                    if id == 0 { 0 } else { text.len() },
+                    50.0,
+                    20.0,
+                    InlineBoxBreakAffinity::SourceText,
+                )
+            }),
+        );
+        layout.set_line_break_overrides(override_.into_iter().collect());
+        let intrinsic = layout.calculate_content_widths().min;
+        layout.break_all_lines(Some(0.0));
+        let measured = layout
+            .lines()
+            .map(|line| line.metrics().advance)
+            .fold(0.0_f32, f32::max);
+        if (intrinsic - expected).abs() > 0.01 || (measured - expected).abs() > 0.01 {
+            failures.push(format!(
+                "{text:?}: intrinsic={intrinsic}, measured={measured}, expected={expected}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
 fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

@@ -1082,6 +1082,50 @@ impl<B: Brush> Default for LayoutData<B> {
 }
 
 impl<B: Brush> LayoutData<B> {
+    pub(crate) fn source_soft_wrap_before_inline_box(
+        &self,
+        item_index: usize,
+        byte_index: usize,
+    ) -> bool {
+        use icu_properties::{CodePointMapData, props::LineBreak};
+
+        let override_ = self
+            .line_break_overrides
+            .binary_search_by_key(&byte_index, |entry| entry.byte_index())
+            .ok()
+            .map(|index| self.line_break_overrides[index].disposition());
+        for item in self.items[..item_index].iter().rev() {
+            match item.kind {
+                LayoutItemKind::InlineBox => {
+                    if matches!(
+                        self.inline_boxes[item.index].line_break_participation(),
+                        InlineBoxLineBreakParticipation::Atomic(_)
+                            | InlineBoxLineBreakParticipation::ContextualSpacing
+                    ) {
+                        return false;
+                    }
+                }
+                LayoutItemKind::TextRun => {
+                    let Some(cluster) = self.clusters[item.cluster_range.clone()].last() else {
+                        continue;
+                    };
+                    return cluster.text_range(&self.runs[item.index]).end == byte_index
+                        && override_.map_or_else(
+                            || {
+                                matches!(
+                                    CodePointMapData::<LineBreak>::new()
+                                        .get(cluster.info.source_char()),
+                                    LineBreak::Space | LineBreak::ZWSpace
+                                )
+                            },
+                            |disposition| disposition != LineBreakOverrideDisposition::Suppress,
+                        );
+                }
+            }
+        }
+        false
+    }
+
     pub(crate) fn source_soft_wrap_boundary_after(
         &self,
         item_index: usize,
@@ -1647,7 +1691,10 @@ impl<B: Brush> LayoutData<B> {
                     match ibox.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
                             let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
-                            if can_wrap && break_affinity.allows_break_before() {
+                            let source_break = break_affinity
+                                == crate::InlineBoxBreakAffinity::SourceText
+                                && self.source_soft_wrap_before_inline_box(item_index, ibox.index);
+                            if can_wrap && (break_affinity.allows_break_before() || source_break) {
                                 min_width = min_width.max(running_min_width - trailing_min_width);
                                 running_min_width = 0.0;
                             }

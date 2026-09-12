@@ -570,7 +570,9 @@ impl BreakerState {
             InlineBoxBreakAffinity::ToPrevious => {
                 self.mark_line_break_opportunity(RegularBreakKind::InlineBoxEdge);
             }
-            InlineBoxBreakAffinity::ToNext | InlineBoxBreakAffinity::Both => {}
+            InlineBoxBreakAffinity::ToNext
+            | InlineBoxBreakAffinity::Both
+            | InlineBoxBreakAffinity::SourceText => {}
         }
     }
 
@@ -874,6 +876,24 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             };
         }
 
+        macro_rules! try_commit_regular_candidate {
+            ($candidate:expr) => {{
+                let (previous, projected_source_boundary) = $candidate.into_snapshot();
+                self.state.line = previous.state;
+                if try_commit_line!(BreakReason::Regular) {
+                    self.state.resume_after_regular_break(
+                        previous.item_idx,
+                        previous.run_idx,
+                        previous.cluster_idx,
+                        projected_source_boundary,
+                    );
+                    true
+                } else {
+                    false
+                }
+            }};
+        }
+
         // dbg!(&self.layout.items);
 
         // println!("\nBREAK NEXT");
@@ -966,16 +986,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             ) {
                                 LogicalOwnerEdgePlacement::Append => {}
                                 LogicalOwnerEdgePlacement::Rewind(candidate) => {
-                                    let (previous, projected_source_boundary) =
-                                        candidate.into_snapshot();
-                                    self.state.line = previous.state;
-                                    if try_commit_line!(BreakReason::Regular) {
-                                        self.state.resume_after_regular_break(
-                                            previous.item_idx,
-                                            previous.run_idx,
-                                            previous.cluster_idx,
-                                            projected_source_boundary,
-                                        );
+                                    if try_commit_regular_candidate!(candidate) {
                                         return self.start_new_line();
                                     }
                                 }
@@ -1008,6 +1019,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     };
                     let width = inline_box.width();
                     let height = inline_box.height();
+                    if break_affinity == InlineBoxBreakAffinity::SourceText
+                        && self.state.line.text_wrap_mode == TextWrapMode::Wrap
+                        && self.state.line.fit_x != 0.0
+                        && self.layout.data.source_soft_wrap_before_inline_box(
+                            self.state.item_idx,
+                            inline_box.index,
+                        )
+                    {
+                        self.state
+                            .mark_line_break_opportunity(RegularBreakKind::Ordinary);
+                    }
 
                     // Compute the x position of the content being currently processed
                     let next_x = self.state.line.x + width;
@@ -1053,6 +1075,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if !break_affinity.allows_break_before() {
+                            if break_affinity == InlineBoxBreakAffinity::SourceText {
+                                if let Some(candidate) = self.state.prev_boundary.take() {
+                                    if try_commit_regular_candidate!(candidate) {
+                                        return self.start_new_line();
+                                    }
+                                }
+                            }
                             // A glued box (inline border/padding shim) binds
                             // to the adjacent text: no break exists before
                             // it, so it overflows with its run exactly like
@@ -1428,16 +1457,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 // provenance. Priority only changes the overflowing-separator
                                 // case above; actual content overflow remains greedy.
                                 if let Some(candidate) = self.state.prev_boundary.take() {
-                                    let (prev, projected_source_boundary) =
-                                        candidate.into_snapshot();
-                                    self.state.line = prev.state;
-                                    if try_commit_line!(BreakReason::Regular) {
-                                        self.state.resume_after_regular_break(
-                                            prev.item_idx,
-                                            prev.run_idx,
-                                            prev.cluster_idx,
-                                            projected_source_boundary,
-                                        );
+                                    if try_commit_regular_candidate!(candidate) {
                                         return self.start_new_line();
                                     }
                                 } else if let Some(prev_emergency) =

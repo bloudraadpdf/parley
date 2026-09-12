@@ -13,6 +13,8 @@ pub enum InlineBoxBreakAffinity {
     ToNext,
     /// The box stays with content on both sides.
     Both,
+    /// Only source text can supply soft-wrap opportunities around the box.
+    SourceText,
 }
 
 /// The advance participation of a collapsible source space after an inline-end
