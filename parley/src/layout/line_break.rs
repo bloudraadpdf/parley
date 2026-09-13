@@ -3,7 +3,7 @@
 
 //! Greedy line breaking.
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 
 #[cfg(feature = "libm")]
 #[allow(unused_imports)]
@@ -22,6 +22,9 @@ use crate::layout::data::{
     ProjectedSourceBoundary, ProjectedSourceClusterParticipation, ProjectedSourceLineFill,
     SelectedSourceClusterAdvance, TerminalWhitespace, TerminalWhitespaceDisposition,
     TerminalWhitespaceScan, WhiteSpaceLayoutMode,
+};
+use crate::layout::inline_fragmentation::{
+    ClonedInlineEdgeMap, ClonedInlineFlow, blocks_source_whitespace,
 };
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -97,6 +100,8 @@ impl SourceEndContribution {
 
 #[derive(Clone, Default)]
 struct LineState {
+    cloned_owners: ClonedInlineFlow,
+    cloned_start_edges: Vec<u64>,
     start_position: LineStartPosition,
     x: f32,
     fit_x: f32,
@@ -390,7 +395,7 @@ impl TerminalSourceUnit {
 #[derive(Clone)]
 enum LogicalOwnerEdgePlacement {
     Append,
-    Rewind(RegularBreakCandidate),
+    Rewind(Box<RegularBreakCandidate>),
 }
 
 impl OverflowingWhitespace {
@@ -677,6 +682,21 @@ pub struct BreakLines<'a, B: Brush> {
     state: BreakerState,
     prev_state: Option<BreakerState>,
     done: bool,
+    cloned_edges: ClonedInlineEdgeMap,
+}
+
+macro_rules! commit_current_line {
+    ($breaker:ident, $advance:expr, $indent:expr, $reason:expr) => {
+        try_commit_line(
+            $breaker.layout,
+            &$breaker.cloned_edges,
+            &mut $breaker.lines,
+            &mut $breaker.state.line,
+            $advance,
+            $reason,
+            $indent,
+        )
+    };
 }
 
 impl<'a, B: Brush> BreakLines<'a, B> {
@@ -687,12 +707,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        let cloned_edges = ClonedInlineEdgeMap::new(&layout.data);
         Self {
             layout,
             lines,
             state: BreakerState::default(),
             prev_state: None,
             done: false,
+            cloned_edges,
         }
     }
 
@@ -709,8 +731,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         self.state.items = self.lines.line_items.len();
         self.state.lines = self.lines.lines.len();
-        self.state.line.x = 0.;
-        self.state.line.fit_x = 0.;
+        self.state.line.cloned_start_edges = self.state.line.cloned_owners.start_ids().collect();
+        self.state.line.x = self.state.line.cloned_owners.start_advance();
+        self.state.line.fit_x = self.state.line.x;
         self.state.line.running_line_height = 0.;
         self.state.line.discretionary_advance = 0.;
         self.state.line.discretionary_break = false;
@@ -757,10 +780,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             && edge_width != 0.0
             && !self.advance_fits(next_fit_x, max_advance)
         {
-            self.state.prev_boundary.take().map_or(
-                LogicalOwnerEdgePlacement::Append,
-                LogicalOwnerEdgePlacement::Rewind,
-            )
+            self.state
+                .prev_boundary
+                .take()
+                .map_or(LogicalOwnerEdgePlacement::Append, |candidate| {
+                    LogicalOwnerEdgePlacement::Rewind(Box::new(candidate))
+                })
         } else {
             LogicalOwnerEdgePlacement::Append
         }
@@ -860,27 +885,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         let max_advance = max_advance - line_indent;
 
-        // This macro simply calls the `commit_line` with the provided arguments and some parts of self.
-        // It exists solely to cut down on the boilerplate for accessing the self variables while
-        // keeping the borrow checker happy
-        macro_rules! try_commit_line {
-            ($break_reason:expr) => {
-                try_commit_line(
-                    self.layout,
-                    &mut self.lines,
-                    &mut self.state.line,
-                    max_advance,
-                    $break_reason,
-                    line_indent,
-                )
-            };
-        }
-
         macro_rules! try_commit_regular_candidate {
             ($candidate:expr) => {{
                 let (previous, projected_source_boundary) = $candidate.into_snapshot();
                 self.state.line = previous.state;
-                if try_commit_line!(BreakReason::Regular) {
+                if commit_current_line!(self, max_advance, line_indent, BreakReason::Regular) {
                     self.state.resume_after_regular_break(
                         previous.item_idx,
                         previous.run_idx,
@@ -912,7 +921,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
             match item.kind {
                 LayoutItemKind::InlineBox => {
-                    let inline_box = &self.layout.data.inline_boxes[item.index];
+                    let inline_box_index = item.index;
+                    let inline_box = &self.layout.data.inline_boxes[inline_box_index];
                     let shaping_participation = inline_box.shaping_participation();
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
@@ -927,7 +937,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     .mark_line_break_opportunity(RegularBreakKind::Ordinary);
                                 let next_fit_x = self.state.line.fit_x + width;
                                 if !self.advance_contribution_fits(width, next_fit_x, max_advance) {
-                                    if try_commit_line!(BreakReason::Regular) {
+                                    if commit_current_line!(
+                                        self,
+                                        max_advance,
+                                        line_indent,
+                                        BreakReason::Regular
+                                    ) {
                                         return self.start_new_line();
                                     }
                                 } else {
@@ -950,6 +965,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             continue;
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
+                            self.state.line.cloned_owners.before_edge(inline_box);
                             let edge_width = inline_box.width();
                             let edge_height = inline_box.height();
                             let source_projection = edge.source_projection(inline_box.width());
@@ -986,7 +1002,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             ) {
                                 LogicalOwnerEdgePlacement::Append => {}
                                 LogicalOwnerEdgePlacement::Rewind(candidate) => {
-                                    if try_commit_regular_candidate!(candidate) {
+                                    if try_commit_regular_candidate!(*candidate) {
                                         return self.start_new_line();
                                     }
                                 }
@@ -998,6 +1014,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 edge_height,
                                 shaping_participation,
                             );
+                            self.state
+                                .line
+                                .cloned_owners
+                                .after_edge(&self.layout.data.inline_boxes[inline_box_index]);
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
                             {
@@ -1124,7 +1144,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else {
                             // println!("BOX BREAK");
-                            if try_commit_line!(BreakReason::Regular) {
+                            if commit_current_line!(
+                                self,
+                                max_advance,
+                                line_indent,
+                                BreakReason::Regular
+                            ) {
                                 return self.start_new_line();
                             }
                         }
@@ -1292,7 +1317,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 run.metrics().line_height,
                                 cluster.info().authored_break_unit(),
                             );
-                            if try_commit_line!(BreakReason::Explicit) {
+                            if commit_current_line!(
+                                self,
+                                max_advance,
+                                line_indent,
+                                BreakReason::Explicit
+                            ) {
                                 // TODO: can this be hoisted out of the conditional?
                                 self.state.cluster_idx += 1;
                                 return self.start_new_line();
@@ -1408,16 +1438,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 ) {
                                     (
                                         NormalSoftWrapSelection::PriorityClasses,
-                                        Some(RegularBreakCandidate::AuthoredDashPunctuation(prev)),
+                                        Some(candidate @ RegularBreakCandidate::AuthoredDashPunctuation(_)),
                                     ) => {
-                                        self.state.line = prev.state;
-                                        if try_commit_line!(BreakReason::Regular) {
-                                            self.state.resume_after_regular_break(
-                                                prev.item_idx,
-                                                prev.run_idx,
-                                                prev.cluster_idx,
-                                                None,
-                                            );
+                                        if try_commit_regular_candidate!(candidate) {
                                             return self.start_new_line();
                                         }
                                     }
@@ -1426,16 +1449,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             cluster.text_range().start,
                                         ) =>
                                     {
-                                        let (prev, projected_source_boundary) =
-                                            candidate.into_snapshot();
-                                        self.state.line = prev.state;
-                                        if try_commit_line!(BreakReason::Regular) {
-                                            self.state.resume_after_regular_break(
-                                                prev.item_idx,
-                                                prev.run_idx,
-                                                prev.cluster_idx,
-                                                projected_source_boundary,
-                                            );
+                                        if try_commit_regular_candidate!(candidate) {
                                             return self.start_new_line();
                                         }
                                     }
@@ -1465,7 +1479,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 {
                                     let prev_emergency = prev_emergency.0;
                                     self.state.line = prev_emergency.state;
-                                    if try_commit_line!(BreakReason::Emergency) {
+                                    if commit_current_line!(
+                                        self,
+                                        max_advance,
+                                        line_indent,
+                                        BreakReason::Emergency
+                                    ) {
                                         self.state.item_idx = prev_emergency.item_idx;
                                         self.state.run_idx = prev_emergency.run_idx;
                                         self.state.cluster_idx = prev_emergency.cluster_idx;
@@ -1493,7 +1512,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if self.state.line.items.end == 0 {
             self.state.line.items.end = 1;
         }
-        if try_commit_line!(BreakReason::None) {
+        if commit_current_line!(self, max_advance, line_indent, BreakReason::None) {
             self.done = true;
             return self.start_new_line();
         }
@@ -1504,7 +1523,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Compare positive advances within their floating-point error bound.
     fn advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
         line_advance_fits(
-            candidate,
+            candidate + self.state.line.cloned_owners.end_advance(),
             max_advance,
             self.state.line.clusters.len() + self.state.line.items.len() + 1,
         )
@@ -1541,20 +1560,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Track cluster count for this line
         let mut char_count: u32 = 0;
 
-        // This macro simply calls the `commit_line` with the provided arguments and some parts of self.
-        macro_rules! try_commit_line {
-            ($break_reason:expr) => {
-                try_commit_line(
-                    self.layout,
-                    &mut self.lines,
-                    &mut self.state.line,
-                    f32::MAX, // No advance limit
-                    $break_reason,
-                    line_indent,
-                )
-            };
-        }
-
         let item_count = self.layout.data.items.len();
         while self.state.item_idx < item_count {
             let item = &self.layout.data.items[self.state.item_idx];
@@ -1565,6 +1570,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let shaping_participation = inline_box.shaping_participation();
 
                     if shaping_participation == InlineBoxShapingParticipation::TransparentBoundary {
+                        self.state.line.cloned_owners.before_edge(inline_box);
                         self.state.item_idx += 1;
                         self.state.append_inline_box_to_line(
                             self.state.line.x,
@@ -1572,19 +1578,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             0.0,
                             inline_box.shaping_participation(),
                         );
+                        self.state.line.cloned_owners.after_edge(inline_box);
                         continue;
                     }
 
                     // Check if adding this box would exceed the limit
                     if char_count >= max_chars && max_chars != 0 {
                         // Break before this box
-                        if try_commit_line!(BreakReason::Regular) {
+                        if commit_current_line!(self, f32::MAX, line_indent, BreakReason::Regular) {
                             self.start_new_line();
                             return Some(());
                         }
                     }
 
                     // Compute the x position for the line width tracking
+                    self.state.line.cloned_owners.before_edge(inline_box);
                     let next_x = self.state.line.x + inline_box.width();
                     let next_fit_x = self.state.line.fit_x + inline_box.width();
                     self.state.item_idx += 1;
@@ -1594,6 +1602,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         inline_box.height(),
                         inline_box.shaping_participation(),
                     );
+                    self.state.line.cloned_owners.after_edge(inline_box);
                     self.state
                         .line
                         .source_end_contribution
@@ -1613,7 +1622,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             },
                         );
 
-                        if try_commit_line!(break_reason) {
+                        if commit_current_line!(self, f32::MAX, line_indent, break_reason) {
                             if break_reason == BreakReason::None {
                                 self.done = true;
                             }
@@ -1638,7 +1647,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // Check if we should break before this cluster
                         if char_count >= max_chars
                             && max_chars != 0
-                            && try_commit_line!(BreakReason::Regular)
+                            && commit_current_line!(
+                                self,
+                                f32::MAX,
+                                line_indent,
+                                BreakReason::Regular
+                            )
                         {
                             self.start_new_line();
                             return Some(());
@@ -1709,7 +1723,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     },
                                 );
 
-                            if try_commit_line!(break_reason) {
+                            if commit_current_line!(self, f32::MAX, line_indent, break_reason) {
                                 if break_reason == BreakReason::None {
                                     self.done = true;
                                 }
@@ -1733,7 +1747,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             .line
             .source_end_contribution
             .break_reason(LengthBreakTrigger::ContentExhausted);
-        if try_commit_line!(break_reason) {
+        if commit_current_line!(self, f32::MAX, line_indent, break_reason) {
             self.done = break_reason == BreakReason::None;
             self.start_new_line();
             return Some(());
@@ -2230,6 +2244,7 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
 
 fn try_commit_line<B: Brush>(
     layout: &Layout<B>,
+    cloned_edges: &ClonedInlineEdgeMap,
     lines: &mut LineLayout,
     state: &mut LineState,
     max_advance: f32,
@@ -2241,6 +2256,10 @@ fn try_commit_line<B: Brush>(
     state.items.end = state.items.end.min(layout.data.items.len());
 
     let start_item_idx = lines.line_items.len();
+    cloned_edges.append(
+        state.cloned_start_edges.iter().copied(),
+        &mut lines.line_items,
+    );
     // let start_run_idx = lines.line_items.last().map(|item| item.index).unwrap_or(0);
 
     let items_to_commit = &layout.data.items[state.items.clone()];
@@ -2269,19 +2288,11 @@ fn try_commit_line<B: Brush>(
             LayoutItemKind::InlineBox => {
                 let inline_box = &layout.data.inline_boxes[item.index];
 
-                lines.line_items.push(LineItemData {
-                    kind: LayoutItemKind::InlineBox,
-                    index: item.index,
-                    bidi_level: item.bidi_level,
-                    layout_item_index: Some(state.items.start + i),
-                    advance: inline_box.width(),
-
-                    // These properties are ignored for inline boxes. So we just put a dummy value.
-                    is_whitespace: false,
-                    has_trailing_whitespace: false,
-                    cluster_range: 0..0,
-                    text_range: 0..0,
-                });
+                lines.line_items.push(LineItemData::inline_box(
+                    item,
+                    Some(state.items.start + i),
+                    inline_box.width(),
+                ));
             }
             LayoutItemKind::TextRun => {
                 let run_data = &layout.data.runs[item.index];
@@ -2355,6 +2366,7 @@ fn try_commit_line<B: Brush>(
         .last()
         .map_or(LayoutItemKind::TextRun, |item| item.kind);
     lines.line_items.extend(committed_items);
+    cloned_edges.append(state.cloned_owners.end_ids(), &mut lines.line_items);
     let end_item_idx = lines.line_items.len();
 
     // Return false and don't commit line if there were no items to process
@@ -2376,7 +2388,7 @@ fn try_commit_line<B: Brush>(
         removed_leading_source_ranges: state.removed_leading_source_ranges.clone(),
         ends_at_discretionary_break: state.discretionary_break,
         metrics: LineMetrics {
-            advance: state.x,
+            advance: state.x + state.cloned_owners.end_advance(),
             ..Default::default()
         },
         ..Default::default()
@@ -2412,9 +2424,7 @@ fn line_end_bidi_items<B: Brush>(
     'items: for (item_offset, line_item) in line_items.iter().enumerate().rev() {
         match line_item.kind {
             LayoutItemKind::InlineBox => {
-                if layout_data.inline_boxes[line_item.index].shaping_participation()
-                    != InlineBoxShapingParticipation::TransparentBoundary
-                {
+                if blocks_source_whitespace(line_item, layout_data) {
                     break;
                 }
             }
@@ -2495,9 +2505,7 @@ fn collect_terminal_whitespace<B: Brush>(
     'items: for line_item in line_items.iter().rev() {
         match line_item.kind {
             LayoutItemKind::InlineBox => {
-                if layout_data.inline_boxes[line_item.index].shaping_participation()
-                    != InlineBoxShapingParticipation::TransparentBoundary
-                {
+                if blocks_source_whitespace(line_item, layout_data) {
                     break;
                 }
             }

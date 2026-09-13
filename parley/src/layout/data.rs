@@ -919,6 +919,22 @@ pub(crate) struct LineItemData {
 }
 
 impl LineItemData {
+    pub(super) fn inline_box(item: &LayoutItem, source: Option<usize>, advance: f32) -> Self {
+        Self {
+            kind: LayoutItemKind::InlineBox,
+            index: item.index,
+            bidi_level: item.bidi_level,
+            layout_item_index: source,
+            advance,
+            is_whitespace: false,
+            has_trailing_whitespace: false,
+            cluster_range: 0..0,
+            text_range: 0..0,
+        }
+    }
+}
+
+impl LineItemData {
     pub(crate) fn is_text_run(&self) -> bool {
         self.kind == LayoutItemKind::TextRun
     }
@@ -1590,6 +1606,7 @@ impl<B: Brush> LayoutData<B> {
     pub(crate) fn calculate_content_widths(&self) -> ContentWidths {
         let mut min_width = 0.0_f32;
         let mut max_width = 0.0_f32;
+        let mut cloned_owners = super::inline_fragmentation::ClonedInlineFlow::default();
 
         let mut running_min_width = 0.0;
         let mut running_max_width = 0.0;
@@ -1645,13 +1662,18 @@ impl<B: Brush> LayoutData<B> {
                                     || (prev_text_wrap_mode == TextWrapMode::Wrap
                                         && style_resolved_opportunity)))
                         {
-                            min_width = min_width.max(running_min_width - trailing_min_width);
-                            running_min_width = 0.0;
+                            cloned_owners.finish_intrinsic_fragment(
+                                &mut min_width,
+                                &mut running_min_width,
+                                trailing_min_width,
+                            );
                             trailing_min_width = 0.0;
                             if boundary == Boundary::Mandatory {
-                                max_width = max_width
-                                    .max(running_max_width - trailing_unconditional_max_width);
-                                running_max_width = 0.0;
+                                cloned_owners.finish_intrinsic_fragment(
+                                    &mut max_width,
+                                    &mut running_max_width,
+                                    trailing_unconditional_max_width,
+                                );
                                 trailing_max_width = 0.0;
                                 trailing_unconditional_max_width = 0.0;
                             }
@@ -1682,41 +1704,47 @@ impl<B: Brush> LayoutData<B> {
                             TerminalWhitespaceDisposition::Measured => {}
                         }
                     }
-                    min_width = min_width.max(running_min_width - trailing_min_width);
+                    min_width = min_width
+                        .max(running_min_width - trailing_min_width + cloned_owners.end_advance());
                 }
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
+                    cloned_owners.before_edge(ibox);
                     let width = ibox.width();
                     running_max_width += width;
+                    let mut measure_atomic = |break_before, break_after| {
+                        let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
+                        if can_wrap && break_before {
+                            cloned_owners.finish_intrinsic_fragment(
+                                &mut min_width,
+                                &mut running_min_width,
+                                trailing_min_width,
+                            );
+                        }
+                        running_min_width += width;
+                        trailing_min_width = 0.0;
+                        trailing_max_width = 0.0;
+                        trailing_unconditional_max_width = 0.0;
+                        if can_wrap && break_after {
+                            cloned_owners.finish_intrinsic_fragment(
+                                &mut min_width,
+                                &mut running_min_width,
+                                0.0,
+                            );
+                        }
+                    };
                     match ibox.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
-                            let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
                             let source_break = break_affinity
                                 == crate::InlineBoxBreakAffinity::SourceText
                                 && self.source_soft_wrap_before_inline_box(item_index, ibox.index);
-                            if can_wrap && (break_affinity.allows_break_before() || source_break) {
-                                min_width = min_width.max(running_min_width - trailing_min_width);
-                                running_min_width = 0.0;
-                            }
-                            running_min_width += width;
-                            trailing_min_width = 0.0;
-                            trailing_max_width = 0.0;
-                            trailing_unconditional_max_width = 0.0;
-                            if can_wrap && break_affinity.allows_break_after() {
-                                min_width = min_width.max(running_min_width);
-                                running_min_width = 0.0;
-                            }
+                            measure_atomic(
+                                break_affinity.allows_break_before() || source_break,
+                                break_affinity.allows_break_after(),
+                            );
                         }
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
-                            let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
-                            if can_wrap {
-                                min_width = min_width.max(running_min_width - trailing_min_width);
-                                running_min_width = 0.0;
-                            }
-                            running_min_width += width;
-                            trailing_min_width = 0.0;
-                            trailing_max_width = 0.0;
-                            trailing_unconditional_max_width = 0.0;
+                            measure_atomic(true, false)
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             let source_projection = edge.source_projection(width);
@@ -1736,8 +1764,11 @@ impl<B: Brush> LayoutData<B> {
                                 == LogicalInlineEdgeSourceProjection::BeforeGeometry
                                 && project
                             {
-                                min_width = min_width.max(running_min_width - trailing_min_width);
-                                running_min_width = 0.0;
+                                cloned_owners.finish_intrinsic_fragment(
+                                    &mut min_width,
+                                    &mut running_min_width,
+                                    trailing_min_width,
+                                );
                                 trailing_min_width = 0.0;
                                 projected_source_boundary = projection;
                             }
@@ -1750,13 +1781,17 @@ impl<B: Brush> LayoutData<B> {
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
                             {
-                                min_width = min_width.max(running_min_width);
-                                running_min_width = 0.0;
+                                cloned_owners.finish_intrinsic_fragment(
+                                    &mut min_width,
+                                    &mut running_min_width,
+                                    0.0,
+                                );
                                 projected_source_boundary = projection;
                             }
                         }
                         InlineBoxLineBreakParticipation::TransparentAnchor => {}
                     }
+                    cloned_owners.after_edge(ibox);
                 }
             }
             max_width = max_width.max(running_max_width - trailing_max_width);

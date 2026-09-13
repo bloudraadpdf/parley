@@ -2005,3 +2005,106 @@ fn paired_edge_affinities_preserve_the_following_space_after_wrap() {
         ["xx ", "x", " xx"],
     );
 }
+
+#[test]
+fn cloned_owner_edges_participate_in_every_line_and_intrinsic_width() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let text = "x x x x x";
+    let mut probe = build_inline_box_layout(&mut lcx, &mut fcx, "x x x", 10.0, None, []);
+    probe.break_all_lines(None);
+    let three_words = probe.width();
+    let mut word = build_inline_box_layout(&mut lcx, &mut fcx, "x", 10.0, None, []);
+    word.break_all_lines(None);
+    let edges = InlineBox::cloned_inline_edges(
+        [701, 702],
+        0..text.len(),
+        [3.0, 40.0],
+        crate::FollowingSourceSpace::RetainedAdvance,
+    );
+    let mut layout = build_inline_box_layout(&mut lcx, &mut fcx, text, 10.0, None, edges);
+    let intrinsic = layout.calculate_content_widths();
+    assert!((intrinsic.min - word.width() - 43.0).abs() < 0.001);
+    layout.break_all_lines(Some(three_words + 43.0));
+    let lines = layout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(text[lines[0].text_range()].trim(), "x x x");
+    assert_eq!(text[lines[1].text_range()].trim(), "x x");
+    for line in lines {
+        let boxes = placed_inline_edges(&line);
+        assert_eq!(boxes.len(), 2);
+        assert_eq!(boxes[0], (701, 0.0));
+        assert_eq!(boxes[1].0, 702);
+        let mut content = build_inline_box_layout(
+            &mut lcx,
+            &mut fcx,
+            text[line.text_range()].trim(),
+            10.0,
+            None,
+            [],
+        );
+        content.break_all_lines(None);
+        assert!(
+            (boxes[1].1 - content.width() - 3.0).abs() < 0.001,
+            "edge x {}, content width {}",
+            boxes[1].1,
+            content.width()
+        );
+    }
+    layout.break_all_lines(None);
+    assert_eq!(layout.lines().count(), 1);
+    assert_eq!(
+        placed_inline_edges(&layout.lines().next().unwrap()).len(),
+        2
+    );
+}
+
+fn placed_inline_edges(line: &crate::layout::Line<'_, ColorBrush>) -> Vec<(u64, f32)> {
+    line.items()
+        .filter_map(|item| match item {
+            crate::layout::PositionedLayoutItem::InlineBox(box_) => Some((box_.id, box_.x)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn nested_cloned_edges_repeat_in_source_order_at_explicit_breaks() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let text = "A B\nC D E";
+    let [outer_start, outer_end] = InlineBox::cloned_inline_edges(
+        [801, 802],
+        0..7,
+        [3.0, 4.0],
+        crate::FollowingSourceSpace::RetainedAdvance,
+    );
+    let [inner_start, inner_end] = InlineBox::cloned_inline_edges(
+        [803, 804],
+        2..7,
+        [5.0, 6.0],
+        crate::FollowingSourceSpace::RetainedAdvance,
+    );
+    let mut layout = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        10.0,
+        None,
+        [outer_start, inner_start, inner_end, outer_end],
+    );
+    layout.break_all_lines(None);
+    let lines = layout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    for line in &lines {
+        let edges = placed_inline_edges(line);
+        assert_eq!(
+            edges.iter().map(|edge| edge.0).collect::<Vec<_>>(),
+            [801, 803, 804, 802]
+        );
+        assert_eq!(edges[0].1, 0.0);
+        assert_eq!(edges[3].1 - edges[2].1, 6.0);
+    }
+    assert_eq!(placed_inline_edges(&lines[1])[1].1, 3.0);
+    assert!(lines[1].metrics().advance > placed_inline_edges(&lines[1])[3].1 + 4.0);
+}

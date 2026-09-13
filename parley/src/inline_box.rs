@@ -68,6 +68,14 @@ enum InlineBoxParticipation {
     TransparentAnchor,
 }
 
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub(crate) struct ClonedInlineOwner {
+    pub start_id: u64,
+    pub end_id: u64,
+    pub start_width: f32,
+    pub end_width: f32,
+}
+
 /// Closed line-breaking participation for inline boxes.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub(crate) enum InlineBoxLineBreakParticipation {
@@ -211,6 +219,7 @@ pub struct InlineBox {
     /// The box's closed layout participation.
     participation: InlineBoxParticipation,
     bidi_attachment: InlineBoxBidiAttachment,
+    cloned_owner: Option<ClonedInlineOwner>,
 }
 
 impl InlineBox {
@@ -225,6 +234,7 @@ impl InlineBox {
                 break_affinity: InlineBoxBreakAffinity::Independent,
             },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
+            cloned_owner: None,
         }
     }
 
@@ -235,6 +245,7 @@ impl InlineBox {
             index,
             participation: InlineBoxParticipation::TransparentAnchor,
             bidi_attachment: InlineBoxBidiAttachment::Independent,
+            cloned_owner: None,
         }
     }
 
@@ -255,6 +266,7 @@ impl InlineBox {
                 break_affinity,
             },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
+            cloned_owner: None,
         }
     }
 
@@ -267,6 +279,7 @@ impl InlineBox {
             index,
             participation: InlineBoxParticipation::ContextualSpacing { width, height },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
+            cloned_owner: None,
         }
     }
 
@@ -283,6 +296,7 @@ impl InlineBox {
             index,
             participation: InlineBoxParticipation::LogicalOwnerStart { width, height },
             bidi_attachment: InlineBoxBidiAttachment::ToNext,
+            cloned_owner: None,
         }
     }
 
@@ -323,7 +337,54 @@ impl InlineBox {
                 following_source_space,
             },
             bidi_attachment: InlineBoxBidiAttachment::ToPrevious,
+            cloned_owner: None,
         }
+    }
+
+    /// Paired owner edges repeated wherever their contents wrap or break.
+    /// Insert both edges in source order alongside other inline boxes.
+    pub fn cloned_inline_edges(
+        ids: [u64; 2],
+        range: core::ops::Range<usize>,
+        widths: [f32; 2],
+        following_source_space: FollowingSourceSpace,
+    ) -> [Self; 2] {
+        assert_ne!(
+            ids[0], ids[1],
+            "paired inline edges have distinct identifiers"
+        );
+        assert!(
+            range.start <= range.end,
+            "paired inline edges follow source order"
+        );
+        let owner = ClonedInlineOwner {
+            start_id: ids[0],
+            end_id: ids[1],
+            start_width: widths[0],
+            end_width: widths[1],
+        };
+        let mut start = Self::inline_start_edge(
+            ids[0],
+            range.start,
+            widths[0],
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        );
+        let mut end = Self::inline_end_edge_with_following_source_space(
+            ids[1],
+            range.end,
+            widths[1],
+            0.0,
+            following_source_space,
+            InlineBoxBreakAffinity::ToPrevious,
+        );
+        start.cloned_owner = Some(owner);
+        end.cloned_owner = Some(owner);
+        [start, end]
+    }
+
+    pub(crate) const fn cloned_owner(&self) -> Option<ClonedInlineOwner> {
+        self.cloned_owner
     }
 
     /// Returns the inline advance in pixels.

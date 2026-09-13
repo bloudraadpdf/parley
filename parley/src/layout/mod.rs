@@ -9,6 +9,7 @@ mod alignment;
 mod bidi;
 mod cluster;
 mod glyph;
+mod inline_fragmentation;
 mod line;
 mod line_break;
 mod run;
