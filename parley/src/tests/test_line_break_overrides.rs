@@ -77,6 +77,44 @@ fn full_width(text: &str) -> f32 {
 }
 
 #[test]
+fn rtl_combining_clusters_preserve_the_preceding_word_break() {
+    for suffix in ["تَعرِض", "لا"] {
+        let text = alloc::format!("سلام التي {suffix}");
+        let mut layout = configured_layout(&text, |builder| {
+            builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+                "Noto Kufi Arabic",
+            )));
+        });
+        let prefix_end = "سلام التي ".len();
+        let width: f32 = layout
+            .runs()
+            .map(|run| {
+                run.clusters()
+                    .filter(|cluster| cluster.text_range().end <= prefix_end)
+                    .map(|cluster| cluster.advance())
+                    .sum::<f32>()
+            })
+            .sum();
+        layout.break_all_lines(Some(width));
+        assert_eq!(line_texts(&layout, &text), ["سلام التي ", suffix]);
+    }
+}
+
+#[test]
+fn emergency_wrap_keeps_rtl_shaping_clusters_whole() {
+    for text in ["تَ", "تَّ"] {
+        let mut layout = configured_layout(text, |builder| {
+            builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+                "Noto Kufi Arabic",
+            )));
+            builder.push_default(StyleProperty::OverflowWrap(crate::OverflowWrap::Anywhere));
+        });
+        layout.break_all_lines(Some(0.1));
+        assert_eq!(line_texts(&layout, text), [text]);
+    }
+}
+
+#[test]
 fn committed_line_metrics_follow_breaking_and_reversion() {
     let text = "Text flows around the float";
     let mut layout = roboto_layout(text, None);

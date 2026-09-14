@@ -1917,7 +1917,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
 
             push_cluster(
                 clusters,
-                char_info,
+                char_infos[direction.component_index(cluster_id, num_components, 0)],
                 cluster_start_char,
                 cluster_glyph_offset,
                 cluster_advance,
@@ -1935,10 +1935,8 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                     if to_whitespace(cluster_start_char.1) == Whitespace::Space {
                         break;
                     }
-                    let char_info_ = match direction {
-                        Direction::Ltr => char_infos[(cluster_id + i) as usize],
-                        Direction::Rtl => char_infos[(cluster_id + num_components - i) as usize],
-                    };
+                    let char_info_ =
+                        char_infos[direction.component_index(cluster_id, num_components, i)];
                     push_cluster(
                         clusters,
                         char_info_,
@@ -2019,7 +2017,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
             let ligature_line_break_advance = cluster_line_break_advance / num_components as f32;
             push_cluster(
                 clusters,
-                char_info,
+                char_infos[direction.component_index(cluster_id, num_components, 0)],
                 cluster_start_char,
                 cluster_glyph_offset,
                 ligature_advance,
@@ -2037,10 +2035,8 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                 if to_whitespace(char.1) == Whitespace::Space {
                     break;
                 }
-                let component_char_info = match direction {
-                    Direction::Ltr => char_infos[(cluster_id + i) as usize],
-                    Direction::Rtl => char_infos[(cluster_id + num_components - i) as usize],
-                };
+                let component_char_info =
+                    char_infos[direction.component_index(cluster_id, num_components, i)];
                 push_cluster(
                     clusters,
                     component_char_info,
@@ -2148,6 +2144,16 @@ impl<'a> FontMetricAdvanceProjection<'a> {
 enum Direction {
     Ltr,
     Rtl,
+}
+
+impl Direction {
+    fn component_index(&self, cluster_start: u32, count: u32, visual_index: u32) -> usize {
+        let logical_index = match self {
+            Self::Ltr => visual_index,
+            Self::Rtl => count - 1 - visual_index,
+        };
+        (cluster_start + logical_index) as usize
+    }
 }
 
 enum ClusterType {

@@ -1173,7 +1173,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             .unwrap();
 
                         // Retrieve metadata about the cluster
-                        let is_ligature_continuation = cluster.is_ligature_continuation();
+                        let (is_ligature_start, is_ligature_continuation) = if run.is_rtl() {
+                            (
+                                cluster.is_ligature_continuation(),
+                                cluster.is_ligature_start(),
+                            )
+                        } else {
+                            (
+                                cluster.is_ligature_start(),
+                                cluster.is_ligature_continuation(),
+                            )
+                        };
                         let whitespace = cluster.info().whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
                         let is_space = whitespace.is_space_or_nbsp();
@@ -1353,16 +1363,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             (advance, fit_advance),
                             self.layout.line_start_fit_advance(byte_index),
                         );
-                        if cluster.is_ligature_start() {
+                        if is_ligature_start {
                             while let Some(cluster) =
                                 run.get(self.state.cluster_idx + 1 - run_data.cluster_range.start)
                             {
-                                if !cluster.is_ligature_continuation() {
+                                let rtl_end = run.is_rtl() && cluster.is_ligature_start();
+                                if !cluster.is_ligature_continuation() && !rtl_end {
                                     break;
-                                } else {
-                                    advance += cluster.advance();
-                                    fit_advance += cluster.data.line_break_advance;
-                                    self.state.cluster_idx += 1;
+                                }
+                                advance += cluster.advance();
+                                fit_advance += cluster.data.line_break_advance;
+                                self.state.cluster_idx += 1;
+                                if rtl_end {
+                                    break;
                                 }
                             }
                         }
