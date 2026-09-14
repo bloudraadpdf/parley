@@ -77,6 +77,74 @@ fn full_width(text: &str) -> f32 {
 }
 
 #[test]
+fn rtl_ligatures_survive_transparent_inline_boundaries() {
+    let glyphs = |text: &str, max_advance: Option<f32>, with_boundaries: bool| {
+        let mut fcx = create_font_context();
+        fcx.collection.register_fonts(
+            fontique::Blob::new(alloc::sync::Arc::new(
+                include_bytes!(
+                    "../../../parley_dev/assets/fonts/noto_naskh_arabic/NotoNaskhArabic.ttf"
+                )
+                .to_vec(),
+            )),
+            None,
+        );
+        let mut lcx = LayoutContext::<ColorBrush>::new();
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+            "Noto Naskh Arabic",
+        )));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        builder.set_direction(BaseDirection::Rtl);
+        if with_boundaries {
+            let start = text.find('ل').expect("fixture contains a lam");
+            let end = start + 'ل'.len_utf8();
+            builder.push(
+                StyleProperty::Brush(ColorBrush::new(palette::css::RED)),
+                start..end,
+            );
+            builder.push_inline_box(InlineBox::inline_start_edge(
+                0,
+                start,
+                0.0,
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            ));
+            builder.push_inline_box(InlineBox::inline_end_edge(
+                1,
+                end,
+                0.0,
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ));
+        }
+        let mut layout = builder.build(text);
+        layout.break_all_lines(max_advance);
+        let mut glyphs = Vec::new();
+        for line in layout.lines() {
+            for item in line.items() {
+                if let crate::PositionedLayoutItem::GlyphRun(run) = item {
+                    glyphs.extend(
+                        run.positioned_glyphs()
+                            .map(|glyph| (glyph.id, glyph.x, glyph.y)),
+                    );
+                }
+            }
+        }
+        (line_texts(&layout, text), glyphs)
+    };
+    for text in ["علا", "علا علا", "لا لا"] {
+        for max_advance in [None, Some(8.0), Some(18.0), Some(30.0)] {
+            assert_eq!(
+                glyphs(text, max_advance, true),
+                glyphs(text, max_advance, false),
+                "{text}, {max_advance:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn rtl_combining_clusters_preserve_the_preceding_word_break() {
     for suffix in ["تَعرِض", "لا"] {
         let text = alloc::format!("سلام التي {suffix}");

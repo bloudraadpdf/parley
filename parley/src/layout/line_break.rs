@@ -1364,8 +1364,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.layout.line_start_fit_advance(byte_index),
                         );
                         if is_ligature_start {
-                            while let Some(cluster) =
-                                run.get(self.state.cluster_idx + 1 - run_data.cluster_range.start)
+                            while let Some(cluster) = run
+                                .get(self.state.cluster_idx + 1 - run_data.cluster_range.start)
+                                .filter(|_| self.state.cluster_idx + 1 < cluster_end)
                             {
                                 let rtl_end = run.is_rtl() && cluster.is_ligature_start();
                                 if !cluster.is_ligature_continuation() && !rtl_end {
