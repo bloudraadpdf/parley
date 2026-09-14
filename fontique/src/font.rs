@@ -104,7 +104,10 @@ impl FontInfo {
         if self.has_weight_axis() {
             synth.vars[len] = (Tag::new(b"wght"), weight.value());
             len += 1;
-        } else if weight.value() > self.weight.value() {
+        } else if weight.value() > self.weight.value()
+            && self.weight.value() < FontWeight::BOLD.value()
+        {
+            // A designed bold face already supplies the family's bold fallback.
             synth.embolden = true;
         }
         let style_axis = match style {
@@ -512,5 +515,42 @@ impl AxisRange {
     /// Returns a range when both bounds are finite and ordered.
     pub fn new(tag: Tag, min: f32, max: f32) -> Option<Self> {
         (min.is_finite() && max.is_finite() && min <= max).then_some(Self { tag, min, max })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::SourceId;
+    use alloc::sync::Arc;
+
+    #[test]
+    fn existing_bold_faces_do_not_receive_additional_faux_bold() {
+        let source = SourceInfo::new(
+            SourceId::new(),
+            SourceKind::Memory(Blob::new(Arc::new(
+                include_bytes!("../../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf")
+                    .to_vec(),
+            ))),
+        );
+        let mut font = FontInfo::from_source(source, 0).unwrap();
+        for (available, requested, expected) in [
+            (700.0, 900.0, false),
+            (800.0, 900.0, false),
+            (400.0, 700.0, true),
+            (400.0, 400.0, false),
+        ] {
+            font.apply_override(&FontInfoOverride {
+                weight: Some(FontWeight::new(available)),
+                ..FontInfoOverride::default()
+            });
+            let synthesis = font.synthesis(
+                FontWidth::NORMAL,
+                FontStyle::Normal,
+                FontWeight::new(requested),
+                FontStyleSynthesis::Allowed,
+            );
+            assert_eq!(synthesis.embolden(), expected, "{available} -> {requested}");
+        }
     }
 }
