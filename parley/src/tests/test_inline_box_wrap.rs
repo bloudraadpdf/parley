@@ -2007,6 +2007,41 @@ fn paired_edge_affinities_preserve_the_following_space_after_wrap() {
 }
 
 #[test]
+fn cloned_owner_edges_do_not_repeat_a_break_without_source_progress() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let text = "aaa aaa";
+    for width in [0.0, 43.0] {
+        let edges = InlineBox::cloned_inline_edges(
+            [701, 702],
+            0..text.len(),
+            [3.0, 40.0],
+            crate::FollowingSourceSpace::RetainedAdvance,
+        );
+        let mut layout = build_inline_box_layout(&mut lcx, &mut fcx, text, 10.0, None, edges);
+        let mut breaker = layout.break_lines();
+        for expected in [0..4, 4..7] {
+            assert!(
+                breaker
+                    .break_next(width, crate::LineTabOrigin::ZERO)
+                    .is_some()
+            );
+            let line = breaker.last_line().expect("a line was committed");
+            assert_eq!(line.text_range(), expected, "width {width}");
+        }
+        assert!(
+            breaker
+                .break_next(width, crate::LineTabOrigin::ZERO)
+                .is_none()
+        );
+        drop(breaker);
+        for line in layout.lines() {
+            assert_eq!(placed_inline_edges(&line).len(), 2);
+        }
+    }
+}
+
+#[test]
 fn cloned_owner_edges_participate_in_every_line_and_intrinsic_width() {
     let mut fcx = create_font_context();
     let mut lcx = LayoutContext::new();

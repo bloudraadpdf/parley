@@ -176,6 +176,10 @@ impl SourceStartWhitespace {
 }
 
 impl LineState {
+    fn has_content_advance(&self) -> bool {
+        self.start_position == LineStartPosition::Interior && self.fit_x != 0.0
+    }
+
     fn removes_leading_source_at(&self, byte_index: usize) -> bool {
         self.removed_leading_source_ranges
             .iter()
@@ -776,7 +780,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     ) -> LogicalOwnerEdgePlacement {
         if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
             && self.state.line.text_wrap_mode == TextWrapMode::Wrap
-            && self.state.line.fit_x != 0.0
+            && self.state.line.has_content_advance()
             && edge_width != 0.0
             && !self.advance_fits(next_fit_x, max_advance)
         {
@@ -930,7 +934,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             let width = inline_box.width();
                             let height = inline_box.height();
                             if self.state.line.text_wrap_mode == TextWrapMode::Wrap
-                                && self.state.line.fit_x != 0.0
+                                && self.state.line.has_content_advance()
                             {
                                 self.state.item_idx += 1;
                                 self.state
@@ -977,7 +981,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             let projection = boundary
                                 .projection_from(inline_box.index, edge.following_source_space());
                             let project = projection.is_some()
-                                && self.state.line.fit_x != 0.0
+                                && self.state.line.has_content_advance()
                                 && source_projection != LogicalInlineEdgeSourceProjection::Absent
                                 && (source_projection
                                     == LogicalInlineEdgeSourceProjection::AfterGeometry
@@ -1041,7 +1045,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let height = inline_box.height();
                     if break_affinity == InlineBoxBreakAffinity::SourceText
                         && self.state.line.text_wrap_mode == TextWrapMode::Wrap
-                        && self.state.line.fit_x != 0.0
+                        && self.state.line.has_content_advance()
                         && self.layout.data.source_soft_wrap_before_inline_box(
                             self.state.item_idx,
                             inline_box.index,
@@ -1085,7 +1089,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // Do not commit the line yet: following collapsible
                         // whitespace belongs to this line and must be allowed
                         // to hang before the next break opportunity is used.
-                        if self.state.line.fit_x == 0.0 {
+                        if !self.state.line.has_content_advance() {
                             self.state.item_idx += 1;
                             self.state.append_inline_box_to_line(
                                 next_x,
@@ -1259,7 +1263,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             //
                             // We also don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
                             // line breaks. We should accept the overflowing fragment in that scenario.
-                            if !is_ligature_continuation && self.state.line.fit_x != 0.0 {
+                            if !is_ligature_continuation && self.state.line.has_content_advance() {
                                 let discretionary = self
                                     .layout
                                     .data
@@ -1342,7 +1346,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         style.overflow_wrap != OverflowWrap::Normal && !is_ligature_continuation
                         && text_wrap_mode == TextWrapMode::Wrap
                         // If we're at the start of the line, this particular cluster will never fit, so it's not a valid emergency break opportunity.
-                        && self.state.line.fit_x != 0.0
+                        && self.state.line.has_content_advance()
                         {
                             self.state.mark_emergency_break_opportunity();
                         }
