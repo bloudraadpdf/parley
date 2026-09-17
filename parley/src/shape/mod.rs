@@ -498,6 +498,10 @@ fn shape_item<'a, B: Brush>(
             // index in `data.rs`.
             buffer.add(ch, i as u32);
         }
+        // Joining scripts shape each segment as if it were still connected
+        // to its neighbours, so the surrounding paragraph text is context.
+        buffer.set_pre_context(&text[..text_range.start + segment_start_offset]);
+        buffer.set_post_context(&text[text_range.start + segment_end_offset..]);
 
         buffer.set_direction(direction);
 
