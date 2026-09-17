@@ -1764,12 +1764,12 @@ fn discretionary_material_participates_in_line_fit_and_metrics_only_when_taken()
     too_narrow.break_all_lines(Some(prefix_advance + inserted_advance - 0.25));
     assert_eq!(
         too_narrow.len(),
-        1,
-        "a discretionary boundary whose inserted material does not fit is not a valid line ending"
+        2,
+        "the only opportunity is taken even though its inserted material overflows"
     );
-    assert_eq!(
-        too_narrow.lines().next().unwrap().discretionary_advance(),
-        0.0
+    assert!(
+        (too_narrow.lines().next().unwrap().discretionary_advance() - inserted_advance).abs()
+            < 0.001
     );
 }
 

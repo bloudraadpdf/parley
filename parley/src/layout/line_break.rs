@@ -1292,16 +1292,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             entry.max_consecutive_lines.is_none_or(|limit| {
                                                 self.state.consecutive_discretionary_lines < limit
                                             });
+                                        // An overflowing hyphen is still the least overflow
+                                        // available when the line has no other opportunity.
+                                        let hyphen_fits = self.advance_fits(
+                                            self.state.line.fit_x + entry.advance,
+                                            max_advance,
+                                        );
                                         (consecutive_limit_allows
-                                            && self.advance_fits(
-                                                self.state.line.fit_x + entry.advance,
-                                                max_advance,
-                                            ))
-                                        .then_some(
-                                            RegularBreakKind::ConditionalMaterial(
-                                                DiscretionaryAdvance(entry.advance),
-                                            ),
-                                        )
+                                            && (hyphen_fits || self.state.prev_boundary.is_none()))
+                                        .then_some(RegularBreakKind::ConditionalMaterial(
+                                            DiscretionaryAdvance(entry.advance),
+                                        ))
                                     }
                                     (SoftBreakPolicy::Unicode(WordBreak::BreakAll), _, None) => {
                                         Some(RegularBreakKind::Unprioritized)
