@@ -9,6 +9,7 @@ mod test_discretionary_breaks;
 mod test_font_metric_advance_quantization;
 mod test_font_synthesis;
 mod test_inline_box_wrap;
+mod test_justification;
 mod test_letter_spacing;
 mod test_line_break_overrides;
 mod test_line_metrics;

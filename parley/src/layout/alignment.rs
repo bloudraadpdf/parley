@@ -5,6 +5,7 @@ use super::{
     BreakReason,
     data::{ClusterData, LineItemData, PhysicalLineEdge},
 };
+use crate::analysis::cluster::Whitespace;
 use crate::data::LayoutData;
 use crate::style::Brush;
 
@@ -247,11 +248,13 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                 };
 
                 // Justified alignment doesn't apply to the last line of a paragraph
-                // (`BreakReason::None`), (`BreakReason::Explicit`) or if there are no whitespace
-                // gaps to adjust. In that case, start-align, i.e., left-align for LTR text and
-                // right-align for RTL text.
+                // (`BreakReason::None`), (`BreakReason::Explicit`), if there are no whitespace
+                // gaps to adjust, or if a preserved tab would move off its tab stop
+                // (CSS Text 3 §7.1). In that case, start-align, i.e., left-align for LTR text
+                // and right-align for RTL text.
                 if matches!(break_reason, BreakReason::None | BreakReason::Explicit)
                     || opportunities == 0
+                    || line_contains_tab(&layout.line_items[item_range.clone()], &layout.clusters)
                 {
                     if is_rtl {
                         layout.lines[line_index].metrics.offset += free_space;
@@ -289,6 +292,17 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
             }
         }
     }
+}
+
+fn line_contains_tab(line_items: &[LineItemData], clusters: &[ClusterData]) -> bool {
+    line_items
+        .iter()
+        .filter(|item| item.is_text_run())
+        .any(|item| {
+            clusters[item.cluster_range.clone()]
+                .iter()
+                .any(|cluster| cluster.info.whitespace() == Whitespace::Tab)
+        })
 }
 
 fn count_inter_character_opportunities(
