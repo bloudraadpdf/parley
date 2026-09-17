@@ -73,6 +73,14 @@ impl<B: Brush> Layout<B> {
         self.data.normal_soft_wrap_selection = selection;
     }
 
+    /// Whether the letter-spacing after the last character of each line is
+    /// removed (CSS Text 4 §8.2). Pass `false` for a paragraph that is only
+    /// a fragment of a line, such as a ruby base. On by default; set before
+    /// calling [`break_all_lines`](Self::break_all_lines).
+    pub fn set_line_end_letter_spacing_trim(&mut self, trim: bool) {
+        self.data.trim_line_end_letter_spacing = trim;
+    }
+
     /// Override soft line-break decisions at selected UTF-8 byte boundaries.
     ///
     /// Overrides are applied after Unicode boundary analysis and before greedy

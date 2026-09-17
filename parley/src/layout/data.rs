@@ -1028,6 +1028,10 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
     pub(crate) nominal_font_metric_line_breaks: bool,
     pub(crate) normal_soft_wrap_selection: NormalSoftWrapSelection,
+    /// CSS Text 4 §8.2: letter-spacing is not applied after the last
+    /// character of a line. `false` keeps it, for a paragraph that is only a
+    /// fragment of a line (a ruby base or annotation).
+    pub(crate) trim_line_end_letter_spacing: bool,
     /// When `true`, the line breaker reclaims the advance of collapsible
     /// trailing whitespace when doing so lets the following inline box fit
     /// on the current line (PDFreactor's model) instead of wrapping the
@@ -1095,6 +1099,7 @@ impl<B: Brush> Default for LayoutData<B> {
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
             normal_soft_wrap_selection: NormalSoftWrapSelection::default(),
+            trim_line_end_letter_spacing: true,
             reclaim_space_before_inline_box: false,
             line_break_overrides: Vec::new(),
             line_start_fit_advances: Vec::new(),
@@ -1255,6 +1260,7 @@ impl<B: Brush> LayoutData<B> {
         self.font_metric_advance_quantization = None;
         self.nominal_font_metric_line_breaks = false;
         self.normal_soft_wrap_selection = NormalSoftWrapSelection::default();
+        self.trim_line_end_letter_spacing = true;
         self.reclaim_space_before_inline_box = false;
         self.line_break_overrides.clear();
         self.line_start_fit_advances.clear();

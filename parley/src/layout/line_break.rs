@@ -1859,6 +1859,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// logical order gives its trailing tracking back.
     fn trim_line_end_letter_spacing(&mut self, line_idx: usize) {
         let data = &mut self.layout.data;
+        if !data.trim_line_end_letter_spacing {
+            return;
+        }
         let LineLayout { lines, line_items } = &mut self.lines;
         let line = &mut lines[line_idx];
         for line_item in line_items[line.item_range.clone()]

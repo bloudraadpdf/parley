@@ -117,3 +117,25 @@ fn trailing_letter_spacing_does_not_decide_the_line_fit() {
     let first = lines[0].metrics();
     assert!((first.advance - first.trailing_whitespace - (plain + 5.0)).abs() < 0.001);
 }
+
+#[test]
+fn a_line_fragment_keeps_its_trailing_letter_spacing_on_request() {
+    // A ruby base is only part of a line, so its last character keeps the
+    // tracking that the following fragment continues.
+    let plain = unwrapped_advance("ab", 0.0);
+    let mut font_context = create_font_context();
+    let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = layout_context.ranged_builder(&mut font_context, "ab", 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::LetterSpacing(5.0));
+    let mut layout = builder.build("ab");
+    layout.set_line_end_letter_spacing_trim(false);
+    layout.break_all_lines(None);
+
+    let advance = layout.lines().next().unwrap().metrics().advance;
+    assert!(
+        (advance - (plain + 10.0)).abs() < 0.001,
+        "plain={plain}, kept={advance}"
+    );
+}
