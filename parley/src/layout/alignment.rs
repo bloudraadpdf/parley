@@ -372,6 +372,7 @@ mod tests {
             text_offset: 0,
             advance,
             line_break_advance: advance,
+            trimmed_letter_spacing: 0.0,
         }
     }
 

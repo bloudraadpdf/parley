@@ -139,3 +139,21 @@ fn a_line_fragment_keeps_its_trailing_letter_spacing_on_request() {
         "plain={plain}, kept={advance}"
     );
 }
+
+#[test]
+fn breaking_the_layout_again_restores_the_trimmed_tracking_first() {
+    let plain = unwrapped_advance("ab", 0.0);
+    let mut layout = unwrapped_layout("Roboto", "ab", 5.0);
+    let first = layout.lines().next().unwrap().metrics().advance;
+    layout.break_all_lines(None);
+    let second = layout.lines().next().unwrap().metrics().advance;
+    assert!((first - (plain + 5.0)).abs() < 0.001 && (second - first).abs() < 0.001);
+
+    layout.set_line_end_letter_spacing_trim(false);
+    layout.break_all_lines(None);
+    let kept = layout.lines().next().unwrap().metrics().advance;
+    assert!(
+        (kept - (plain + 10.0)).abs() < 0.001,
+        "plain={plain}, kept={kept}"
+    );
+}

@@ -1886,6 +1886,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             let cluster = &mut data.clusters[cluster_index];
             cluster.advance -= tracking;
             cluster.line_break_advance -= tracking;
+            cluster.trimmed_letter_spacing = tracking;
             if cluster.glyph_len != 0xFF {
                 let start = glyph_start + cluster.glyph_offset as usize;
                 let end = start + cluster.glyph_len as usize;

@@ -692,6 +692,9 @@ pub(crate) struct ClusterData {
     /// `advance`; nominal-metric line breaking excludes shaping adjustments
     /// such as kerning while the rendered cluster retains them.
     pub(crate) line_break_advance: f32,
+    /// Letter spacing removed because the cluster ended a line; restored
+    /// before the layout is broken again.
+    pub(crate) trimmed_letter_spacing: f32,
 }
 
 impl ClusterData {
@@ -1556,6 +1559,29 @@ impl<B: Brush> LayoutData<B> {
         }
     }
 
+    /// Gives back the letter spacing that a previous line break removed from
+    /// line-ending clusters, so the layout can be broken again from scratch.
+    pub(crate) fn restore_line_end_letter_spacing(&mut self) {
+        for run in &self.runs {
+            for cluster in &mut self.clusters[run.cluster_range.clone()] {
+                let trimmed = cluster.trimmed_letter_spacing;
+                if nearly_zero(trimmed) {
+                    continue;
+                }
+                cluster.advance += trimmed;
+                cluster.line_break_advance += trimmed;
+                cluster.trimmed_letter_spacing = 0.0;
+                if cluster.glyph_len != 0xFF {
+                    let start = run.glyph_start + cluster.glyph_offset as usize;
+                    let end = start + cluster.glyph_len as usize;
+                    if let Some(last) = self.glyphs[start..end].last_mut() {
+                        last.advance += trimmed;
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn finish(&mut self) {
         for run in &self.runs {
             let word = run.word_spacing;
@@ -2262,5 +2288,6 @@ fn push_cluster(
         text_offset: cluster_start_char.0,
         advance: final_advance,
         line_break_advance: final_line_break_advance,
+        trimmed_letter_spacing: 0.0,
     });
 }

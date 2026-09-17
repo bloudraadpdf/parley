@@ -255,6 +255,7 @@ impl<B: Brush> Layout<B> {
     /// Returns line breaker to compute lines for the layout.
     pub fn break_lines(&mut self) -> BreakLines<'_, B> {
         unjustify(&mut self.data);
+        self.data.restore_line_end_letter_spacing();
         BreakLines::new(self)
     }
 
