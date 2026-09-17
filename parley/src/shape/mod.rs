@@ -16,7 +16,7 @@ use crate::analysis::{AnalysisDataSources, CharInfo};
 use crate::convert::script_to_harfrust;
 use crate::inline_box::{InlineBox, InlineBoxShapingParticipation};
 use crate::lru_cache::LruCache;
-use crate::util::nearly_eq;
+use crate::util::{nearly_eq, nearly_zero};
 use crate::{FontData, convert};
 use fontique::Language;
 use icu_properties::props::Script;
@@ -454,6 +454,16 @@ fn shape_item<'a, B: Brush>(
                 feature.value as u32,
                 ..,
             ));
+        }
+        if !nearly_zero(item.letter_spacing) {
+            // CSS Text 4 §8.2: tracking disables optional ligatures unless
+            // font-feature-settings names them.
+            for tag in [b"liga", b"clig", b"dlig", b"hlig"] {
+                let tag = harfrust::Tag::new(tag);
+                if !scx.features.iter().any(|feature| feature.tag == tag) {
+                    scx.features.push(harfrust::Feature::new(tag, 0, ..));
+                }
+            }
         }
         let harf_shaper = shaper_data
             .shaper(&font_ref)
