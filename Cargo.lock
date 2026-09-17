@@ -1184,6 +1184,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "font-types"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8eb065f3251655b3c90e22e5e363f310fc5332fb3402e37bbc94752283248f6"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "fontique"
 version = "0.8.0"
 dependencies = [
@@ -1195,7 +1204,7 @@ dependencies = [
  "objc2-core-text",
  "objc2-foundation 0.3.2",
  "parlance",
- "read-fonts 0.37.0",
+ "read-fonts 0.44.0",
  "roxmltree",
  "smallvec",
  "windows 0.62.2",
@@ -1490,14 +1499,14 @@ dependencies = [
 
 [[package]]
 name = "harfrust"
-version = "0.5.2"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9da2e5ae821f6e96664977bf974d6d6a2d6682f9ccee23e62ec1d134246845f9"
+checksum = "948d0741125ba89cd3e1c23e5642415b6ade7e1d29d67ba25fb925b533e989d6"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
- "core_maths",
- "read-fonts 0.37.0",
+ "once_cell",
+ "read-fonts 0.43.3",
  "smallvec",
 ]
 
@@ -2853,7 +2862,7 @@ dependencies = [
  "parley_data",
  "parley_dev",
  "peniko",
- "skrifa 0.40.0",
+ "skrifa 0.47.0",
  "tiny-skia",
 ]
 
@@ -2864,7 +2873,7 @@ dependencies = [
  "parley",
  "parley_dev",
  "parley_draw",
- "skrifa 0.40.0",
+ "skrifa 0.47.0",
  "tango-bench",
  "vello_cpu",
 ]
@@ -2904,7 +2913,7 @@ dependencies = [
  "log",
  "peniko",
  "png 0.17.16",
- "skrifa 0.40.0",
+ "skrifa 0.47.0",
  "smallvec",
  "vello_common",
  "vello_cpu",
@@ -3330,6 +3339,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "read-fonts"
+version = "0.43.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "005c8acf251756c478b0bf402885bfd88a1476020c4c7e6060edc1aa68da38ea"
+dependencies = [
+ "bytemuck",
+ "font-types 0.12.5",
+ "once_cell",
+]
+
+[[package]]
+name = "read-fonts"
+version = "0.44.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5a0cf4bb6cbce4c29756270d189a5e400ac05e91192161d83a0bcb6e68492e8"
+dependencies = [
+ "bytemuck",
+ "core_maths",
+ "font-types 0.12.5",
+ "once_cell",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3642,6 +3674,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "skrifa"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "526e654b303ff4ad73a5a40b25de2b3ce3d039c5e3b6da5f89ae6e57004cb40f"
+dependencies = [
+ "bytemuck",
+ "core_maths",
+ "read-fonts 0.44.0",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3771,7 +3814,7 @@ version = "0.1.0"
 dependencies = [
  "image",
  "parley",
- "skrifa 0.40.0",
+ "skrifa 0.47.0",
  "swash",
 ]
 
@@ -3937,7 +3980,7 @@ name = "tiny_skia_render"
 version = "0.1.0"
 dependencies = [
  "parley",
- "skrifa 0.40.0",
+ "skrifa 0.47.0",
  "tiny-skia",
 ]
 
@@ -4217,7 +4260,7 @@ dependencies = [
  "parley_draw",
  "parley_examples_common",
  "peniko",
- "skrifa 0.40.0",
+ "skrifa 0.47.0",
  "vello_cpu",
 ]
 
@@ -4278,7 +4321,7 @@ dependencies = [
  "peniko",
  "png 0.17.16",
  "pollster",
- "skrifa 0.40.0",
+ "skrifa 0.47.0",
  "vello_common",
  "vello_hybrid",
  "wgpu",
