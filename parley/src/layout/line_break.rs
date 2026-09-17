@@ -1874,12 +1874,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 continue;
             };
             let run = &data.runs[line_item.index];
-            let tracking = run.letter_spacing;
+            let cluster_index = line_item.cluster_range.start + offset;
+            let tracking = run.cluster_letter_spacing(&data.clusters[cluster_index]);
             if nearly_zero(tracking) {
                 return;
             }
             let glyph_start = run.glyph_start;
-            let cluster = &mut data.clusters[line_item.cluster_range.start + offset];
+            let cluster = &mut data.clusters[cluster_index];
             cluster.advance -= tracking;
             cluster.line_break_advance -= tracking;
             if cluster.glyph_len != 0xFF {

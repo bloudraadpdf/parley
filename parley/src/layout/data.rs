@@ -831,8 +831,24 @@ pub(crate) struct RunData {
     pub(crate) word_spacing: f32,
     /// Additional letter spacing.
     pub(crate) letter_spacing: f32,
+    /// CSS Text 4 §8.2.1: letters of a cursive script take no letter spacing.
+    pub(crate) cursive_script: bool,
     /// Total advance of the run.
     pub(crate) advance: f32,
+}
+
+impl RunData {
+    /// The letter spacing applied after `cluster`: none for default-ignorable
+    /// characters and for letters of a cursive script.
+    pub(crate) fn cluster_letter_spacing(&self, cluster: &ClusterData) -> f32 {
+        if cluster.info.is_default_ignorable()
+            || (self.cursive_script && !cluster.info.is_whitespace())
+        {
+            0.0
+        } else {
+            self.letter_spacing
+        }
+    }
 }
 
 #[derive(Copy, Clone, Default, PartialEq, Debug)]
@@ -1314,12 +1330,6 @@ impl<B: Brush> LayoutData<B> {
         coords: &[harfrust::NormalizedCoord],
         transparent_inline_boxes: &[(usize, u8, usize)],
     ) {
-        // CSS Text 4 §8.2.1: cursive scripts admit no tracking between letters.
-        let letter_spacing = if is_cursive_script(script) {
-            0.0
-        } else {
-            letter_spacing
-        };
         let coords_start = self.coords.len();
         self.coords.extend(coords.iter().map(|c| c.to_bits()));
         let coords_end = self.coords.len();
@@ -1444,6 +1454,7 @@ impl<B: Brush> LayoutData<B> {
             metrics,
             word_spacing,
             letter_spacing,
+            cursive_script: is_cursive_script(script),
             advance: 0.,
         };
 
@@ -1548,11 +1559,7 @@ impl<B: Brush> LayoutData<B> {
             }
             let clusters = &mut self.clusters[run.cluster_range.clone()];
             for cluster in clusters {
-                let mut spacing = if cluster.info.is_default_ignorable() {
-                    0.0
-                } else {
-                    letter
-                };
+                let mut spacing = run.cluster_letter_spacing(cluster);
                 if !nearly_zero(word) && cluster.info.whitespace().is_space_or_nbsp() {
                     spacing += word;
                 }

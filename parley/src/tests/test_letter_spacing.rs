@@ -67,6 +67,11 @@ fn cursive_scripts_receive_no_letter_spacing() {
 
     let advance = |layout: &Layout<ColorBrush>| layout.lines().next().unwrap().metrics().advance;
     assert!((advance(&tracked) - advance(&plain)).abs() < 0.001);
+
+    // The word separator between cursive words is still spaced.
+    let spaced_plain = unwrapped_layout("Noto Naskh Arabic", "ع ع", 0.0);
+    let spaced_tracked = unwrapped_layout("Noto Naskh Arabic", "ع ع", 5.0);
+    assert!((advance(&spaced_tracked) - (advance(&spaced_plain) + 5.0)).abs() < 0.001);
 }
 
 #[test]
