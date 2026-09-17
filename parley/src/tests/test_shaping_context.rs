@@ -4,10 +4,36 @@
 //! Joining context across shaping segment boundaries.
 
 use super::{test_builders::create_font_context, utils::ColorBrush};
-use crate::{FontFamily, LayoutContext, StyleProperty};
+use crate::{FontFamily, InlineBox, LayoutContext, StyleProperty};
 use alloc::{sync::Arc, vec::Vec};
 
 fn naskh_glyph_ids(text: &str, enlarged: Option<core::ops::Range<usize>>) -> Vec<u32> {
+    naskh_glyph_ids_with(text, enlarged, None)
+}
+
+#[test]
+fn an_inline_box_with_advance_stops_the_joining_context() {
+    // CSS Text 4 §8.3: padding, margin or border between letters breaks
+    // the cursive connection, exactly like a zero-width non-joiner.
+    let text = "ععع";
+    let mut expected = naskh_glyph_ids("ع", None);
+    expected.extend(naskh_glyph_ids("عع", None));
+    let mut boxed = naskh_glyph_ids_with(text, None, Some('ع'.len_utf8()));
+    expected.sort_unstable();
+    boxed.sort_unstable();
+
+    assert_eq!(boxed.len(), 3);
+    assert_eq!(
+        boxed, expected,
+        "the letters beside the box must take their unjoined forms"
+    );
+}
+
+fn naskh_glyph_ids_with(
+    text: &str,
+    enlarged: Option<core::ops::Range<usize>>,
+    inline_box_at: Option<usize>,
+) -> Vec<u32> {
     let mut font_context = create_font_context();
     font_context.collection.register_fonts(
         fontique::Blob::new(Arc::new(
@@ -26,6 +52,9 @@ fn naskh_glyph_ids(text: &str, enlarged: Option<core::ops::Range<usize>>) -> Vec
     builder.push_default(StyleProperty::FontSize(12.0));
     if let Some(range) = enlarged {
         builder.push(StyleProperty::FontSize(18.0), range);
+    }
+    if let Some(index) = inline_box_at {
+        builder.push_inline_box(InlineBox::new(1, index, 6.0, 0.0));
     }
     let mut layout = builder.build(text);
     layout.break_all_lines(None);

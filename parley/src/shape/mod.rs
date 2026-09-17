@@ -117,6 +117,9 @@ pub(crate) fn shape_text<'a, B: Brush>(
     let mut inline_box_iter = inline_boxes.iter().enumerate();
     let mut current_box = inline_box_iter.next();
     let mut transparent_boxes = Vec::new();
+    // Byte offsets where an inline box with advance separates the text;
+    // joining context never crosses them (CSS Text 4 §8.3).
+    let mut joining_barriers = Vec::new();
 
     // Iterate over characters in the text
     for ((char_index, (byte_index, ch)), (info, style_index)) in
@@ -191,6 +194,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             if boundary_has_inline_advance {
                 break_run = true;
                 deferred_boxes = Some(boundary_boxes);
+                joining_barriers.push(byte_index);
             } else {
                 transparent_boxes.extend(boundary_boxes.map(|box_idx| {
                     (
@@ -216,6 +220,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 layout,
                 analysis_data_sources,
                 &transparent_boxes,
+                &joining_barriers,
             );
             transparent_boxes.clear();
             item.size = style.font_size;
@@ -261,6 +266,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             layout,
             analysis_data_sources,
             &transparent_boxes,
+            &joining_barriers,
         );
     }
 
@@ -341,6 +347,7 @@ fn shape_item<'a, B: Brush>(
     layout: &mut Layout<B>,
     analysis_data_sources: &AnalysisDataSources,
     transparent_inline_boxes: &[(usize, u8, usize)],
+    joining_barriers: &[usize],
 ) {
     let item_text = &text[text_range.clone()];
     let item_infos = &infos[char_range.start..char_range.end]; // Only process current item
@@ -509,9 +516,23 @@ fn shape_item<'a, B: Brush>(
             buffer.add(ch, i as u32);
         }
         // Joining scripts shape each segment as if it were still connected
-        // to its neighbours, so the surrounding paragraph text is context.
-        buffer.set_pre_context(&text[..text_range.start + segment_start_offset]);
-        buffer.set_post_context(&text[text_range.start + segment_end_offset..]);
+        // to its neighbours, so the surrounding paragraph text is context up
+        // to the nearest inline box with advance.
+        let segment_start = text_range.start + segment_start_offset;
+        let segment_end = text_range.start + segment_end_offset;
+        let context_start = joining_barriers
+            .iter()
+            .rev()
+            .find(|&&barrier| barrier <= segment_start)
+            .copied()
+            .unwrap_or(0);
+        let context_end = joining_barriers
+            .iter()
+            .find(|&&barrier| barrier >= segment_end)
+            .copied()
+            .unwrap_or(text.len());
+        buffer.set_pre_context(&text[context_start..segment_start]);
+        buffer.set_post_context(&text[segment_end..context_end]);
 
         buffer.set_direction(direction);
 
