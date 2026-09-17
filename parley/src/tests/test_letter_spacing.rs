@@ -60,6 +60,16 @@ fn letter_spacing_disables_optional_ligatures() {
 }
 
 #[test]
+fn cursive_scripts_receive_no_letter_spacing() {
+    // CSS Text 4 §8.2.1: letter-spacing is not applied within cursive scripts.
+    let plain = unwrapped_layout("Noto Naskh Arabic", "ععع", 0.0);
+    let tracked = unwrapped_layout("Noto Naskh Arabic", "ععع", 5.0);
+
+    let advance = |layout: &Layout<ColorBrush>| layout.lines().next().unwrap().metrics().advance;
+    assert!((advance(&tracked) - advance(&plain)).abs() < 0.001);
+}
+
+#[test]
 fn default_ignorable_soft_hyphen_does_not_create_a_letter_spacing_interval() {
     // CSS Text defines letter-spacing over typographic character units.
     // U+00AD is default-ignorable in unbroken flow: it contributes only a

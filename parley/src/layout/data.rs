@@ -632,6 +632,20 @@ impl LineBreakOverride {
 /// unbroken text flow. This is the standard penalty-node model used for soft
 /// hyphens: the visible hyphen has a real width only on the line where the
 /// break is selected.
+fn is_cursive_script(script: icu_properties::props::Script) -> bool {
+    use icu_properties::props::Script;
+    [
+        Script::Arabic,
+        Script::HanifiRohingya,
+        Script::Mandaic,
+        Script::Mongolian,
+        Script::Nko,
+        Script::PhagsPa,
+        Script::Syriac,
+    ]
+    .contains(&script)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DiscretionaryBreak {
     /// UTF-8 byte index of the boundary after the discretionary character.
@@ -1300,6 +1314,12 @@ impl<B: Brush> LayoutData<B> {
         coords: &[harfrust::NormalizedCoord],
         transparent_inline_boxes: &[(usize, u8, usize)],
     ) {
+        // CSS Text 4 §8.2.1: cursive scripts admit no tracking between letters.
+        let letter_spacing = if is_cursive_script(script) {
+            0.0
+        } else {
+            letter_spacing
+        };
         let coords_start = self.coords.len();
         self.coords.extend(coords.iter().map(|c| c.to_bits()));
         let coords_end = self.coords.len();
