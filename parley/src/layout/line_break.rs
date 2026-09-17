@@ -32,6 +32,7 @@ use crate::layout::{
 };
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
+use crate::util::nearly_zero;
 use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WordBreak};
 
 use core::ops::Range;
@@ -1414,8 +1415,20 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // println!("Cluster {} next_x: {}", self.state.cluster_idx, next_x);
 
-                        let fits =
-                            self.advance_contribution_fits(fit_advance, next_fit_x, max_advance);
+                        // CSS Text 4 §8.2: tracking after the last character of a
+                        // line is not applied, so it never decides the fit.
+                        let hanging_tracking = if whitespace == Whitespace::None
+                            && !cluster.info().is_default_ignorable()
+                        {
+                            run_data.letter_spacing.max(0.0)
+                        } else {
+                            0.0
+                        };
+                        let fits = self.advance_contribution_fits(
+                            fit_advance,
+                            next_fit_x - hanging_tracking,
+                            max_advance,
+                        );
                         let line_fit = if fits {
                             LineFit::Fits
                         } else {
@@ -1841,6 +1854,46 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
+    /// CSS Text 4 §8.2: letter-spacing is not applied after the last
+    /// typographic character unit of a line. The last visible cluster in
+    /// logical order gives its trailing tracking back.
+    fn trim_line_end_letter_spacing(&mut self, line_idx: usize) {
+        let data = &mut self.layout.data;
+        let LineLayout { lines, line_items } = &mut self.lines;
+        let line = &mut lines[line_idx];
+        for line_item in line_items[line.item_range.clone()]
+            .iter()
+            .rev()
+            .filter(|item| item.kind == LayoutItemKind::TextRun)
+        {
+            let clusters = &data.clusters[line_item.cluster_range.clone()];
+            let Some(offset) = clusters.iter().rposition(|cluster| {
+                cluster.info.whitespace() == Whitespace::None
+                    && !cluster.info.is_default_ignorable()
+            }) else {
+                continue;
+            };
+            let run = &data.runs[line_item.index];
+            let tracking = run.letter_spacing;
+            if nearly_zero(tracking) {
+                return;
+            }
+            let glyph_start = run.glyph_start;
+            let cluster = &mut data.clusters[line_item.cluster_range.start + offset];
+            cluster.advance -= tracking;
+            cluster.line_break_advance -= tracking;
+            if cluster.glyph_len != 0xFF {
+                let start = glyph_start + cluster.glyph_offset as usize;
+                let end = start + cluster.glyph_len as usize;
+                if let Some(last) = data.glyphs[start..end].last_mut() {
+                    last.advance -= tracking;
+                }
+            }
+            line.metrics.advance -= tracking;
+            return;
+        }
+    }
+
     fn finish_line(&mut self, line_idx: usize, line_height: f32) {
         let prev_line_metrics = match line_idx {
             0 => None,
@@ -1856,6 +1909,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             self.lines.lines[line_idx].item_range.end = item_range.start + item_count;
             self.state.items = self.lines.line_items.len();
         }
+        self.trim_line_end_letter_spacing(line_idx);
         let item_range = self.lines.lines[line_idx].item_range.clone();
         let selected_source_cluster_advance = self.lines.lines[line_idx]
             .selected_source_cluster_advance

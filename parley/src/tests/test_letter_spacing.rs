@@ -84,3 +84,31 @@ fn default_ignorable_soft_hyphen_does_not_create_a_letter_spacing_interval() {
         "an unselected soft hyphen must not add tracking to unbroken flow: plain={plain}, discretionary={discretionary}"
     );
 }
+
+#[test]
+fn letter_spacing_is_not_applied_after_the_last_character_of_a_line() {
+    // CSS Text 4 §8.2: tracking is not applied at the end of a line.
+    let plain = unwrapped_advance("ab", 0.0);
+    let tracked = unwrapped_advance("ab", 5.0);
+
+    assert!(
+        (tracked - (plain + 5.0)).abs() < 0.001,
+        "plain={plain}, tracked={tracked}"
+    );
+}
+
+#[test]
+fn trailing_letter_spacing_does_not_decide_the_line_fit() {
+    let plain = unwrapped_advance("ab", 0.0);
+    let mut layout = unwrapped_layout("Roboto", "ab ab", 5.0);
+    layout.break_all_lines(Some(plain + 5.0 + 0.05));
+
+    let lines: Vec<_> = layout.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "the tracked word fits once its trailing spacing hangs"
+    );
+    let first = lines[0].metrics();
+    assert!((first.advance - first.trailing_whitespace - (plain + 5.0)).abs() < 0.001);
+}
