@@ -1735,6 +1735,56 @@ fn nested_writing_modes_cached_measure_breaks_after_authored_hyphen() {
 }
 
 #[test]
+fn projected_discretionary_break_retains_material_and_line_limits() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let text = "aa\u{ad}aa\u{ad}aa";
+    for advance in [0.0, 4.0] {
+        for limit in [None, Some(1)] {
+            let mut layout = build_inline_box_layout(
+                &mut lcx,
+                &mut fcx,
+                text,
+                10.0,
+                None,
+                [4, 8].into_iter().enumerate().map(|(id, index)| {
+                    InlineBox::inline_end_edge(
+                        id as u64,
+                        index,
+                        0.0,
+                        0.0,
+                        InlineBoxBreakAffinity::ToPrevious,
+                    )
+                }),
+            );
+            layout.set_discretionary_breaks(
+                [4, 8]
+                    .into_iter()
+                    .map(|byte_index| DiscretionaryBreak {
+                        byte_index,
+                        advance,
+                        max_consecutive_lines: limit,
+                    })
+                    .collect(),
+            );
+            layout.break_all_lines(Some(0.0));
+            let first = layout.lines().next().unwrap();
+            assert_eq!(first.text_range(), 0..4);
+            assert!(first.ends_at_discretionary_break());
+            assert_eq!(first.discretionary_advance(), advance);
+            assert_eq!(layout.len(), if limit.is_some() { 2 } else { 3 });
+            assert_eq!(
+                layout
+                    .lines()
+                    .filter(|line| line.ends_at_discretionary_break())
+                    .count(),
+                if limit.is_some() { 1 } else { 2 }
+            );
+        }
+    }
+}
+
+#[test]
 fn discretionary_material_participates_in_line_fit_and_metrics_only_when_taken() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

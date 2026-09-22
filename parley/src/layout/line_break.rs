@@ -27,8 +27,8 @@ use crate::layout::inline_fragmentation::{
     ClonedInlineEdgeMap, ClonedInlineFlow, blocks_source_whitespace,
 };
 use crate::layout::{
-    BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
-    LineMetrics, Run, RunMetrics,
+    BreakReason, DiscretionaryBreak, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData,
+    LineItemData, LineMetrics, Run, RunMetrics,
 };
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
@@ -338,7 +338,10 @@ impl RegularBreakCandidate {
 enum RegularBreakKind {
     AuthoredDashPunctuation,
     InlineBoxEdge,
-    ProjectedSource(ProjectedSourceBoundary),
+    ProjectedSource {
+        boundary: ProjectedSourceBoundary,
+        material: Option<DiscretionaryAdvance>,
+    },
     Ordinary,
     ConditionalMaterial(DiscretionaryAdvance),
     Unprioritized,
@@ -459,6 +462,7 @@ impl BreakerState {
         &mut self,
         projection: Option<ProjectedSourceBoundary>,
         max_advance: f32,
+        material: Option<DiscretionaryAdvance>,
     ) {
         let fill = if self.line.fit_x >= max_advance {
             ProjectedSourceLineFill::FilledMeasure
@@ -468,7 +472,10 @@ impl BreakerState {
         let projection = projection
             .expect("the projected source boundary must remain typed")
             .resolve_line_fill(fill);
-        self.mark_line_break_opportunity(RegularBreakKind::ProjectedSource(projection));
+        self.mark_line_break_opportunity(RegularBreakKind::ProjectedSource {
+            boundary: projection,
+            material,
+        });
         self.projected_source_boundary = Some(projection);
     }
 
@@ -544,7 +551,12 @@ impl BreakerState {
     /// the line breaking opportunity at this point.
     fn mark_line_break_opportunity(&mut self, kind: RegularBreakKind) {
         let mut state = self.line.clone();
-        if let RegularBreakKind::ConditionalMaterial(DiscretionaryAdvance(advance)) = kind {
+        if let RegularBreakKind::ConditionalMaterial(DiscretionaryAdvance(advance))
+        | RegularBreakKind::ProjectedSource {
+            material: Some(DiscretionaryAdvance(advance)),
+            ..
+        } = kind
+        {
             state.x += advance;
             state.fit_x += advance;
             state.discretionary_advance = advance;
@@ -561,7 +573,7 @@ impl BreakerState {
                 RegularBreakCandidate::AuthoredDashPunctuation(snapshot)
             }
             RegularBreakKind::InlineBoxEdge => RegularBreakCandidate::InlineBoxEdge(snapshot),
-            RegularBreakKind::ProjectedSource(boundary) => {
+            RegularBreakKind::ProjectedSource { boundary, .. } => {
                 RegularBreakCandidate::ProjectedSource { snapshot, boundary }
             }
             RegularBreakKind::Ordinary => RegularBreakCandidate::Ordinary(snapshot),
@@ -1001,8 +1013,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 == LogicalInlineEdgeSourceProjection::BeforeGeometry
                                 && project
                             {
-                                self.state
-                                    .mark_projected_source_boundary(projection, max_advance);
+                                self.mark_projected_source_boundary(projection, max_advance);
                             }
                             match self.logical_owner_edge_placement(
                                 source_projection,
@@ -1031,8 +1042,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
                             {
-                                self.state
-                                    .mark_projected_source_boundary(projection, max_advance);
+                                self.mark_projected_source_boundary(projection, max_advance);
                             }
                             continue;
                         }
@@ -1293,23 +1303,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                         _,
                                     ) => Some(RegularBreakKind::Unprioritized),
                                     (_, Some(LineBreakOverrideDisposition::Suppress), _) => None,
-                                    (_, _, Some(entry)) => {
-                                        let consecutive_limit_allows =
-                                            entry.max_consecutive_lines.is_none_or(|limit| {
-                                                self.state.consecutive_discretionary_lines < limit
-                                            });
-                                        // An overflowing hyphen is still the least overflow
-                                        // available when the line has no other opportunity.
-                                        let hyphen_fits = self.advance_fits(
-                                            self.state.line.fit_x + entry.advance,
-                                            max_advance,
-                                        );
-                                        (consecutive_limit_allows
-                                            && (hyphen_fits || self.state.prev_boundary.is_none()))
+                                    (_, _, Some(entry)) => self
+                                        .discretionary_break_allowed(entry, max_advance)
                                         .then_some(RegularBreakKind::ConditionalMaterial(
                                             DiscretionaryAdvance(entry.advance),
-                                        ))
-                                    }
+                                        )),
                                     (SoftBreakPolicy::Unicode(WordBreak::BreakAll), _, None) => {
                                         Some(RegularBreakKind::Unprioritized)
                                     }
@@ -1555,6 +1553,37 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
 
         None
+    }
+
+    fn discretionary_break_allowed(&self, entry: DiscretionaryBreak, max_advance: f32) -> bool {
+        entry
+            .max_consecutive_lines
+            .is_none_or(|limit| self.state.consecutive_discretionary_lines < limit)
+            && (self.advance_fits(self.state.line.fit_x + entry.advance, max_advance)
+                || self.state.prev_boundary.is_none())
+    }
+
+    fn mark_projected_source_boundary(
+        &mut self,
+        projection: Option<ProjectedSourceBoundary>,
+        max_advance: f32,
+    ) {
+        let boundary = projection.expect("the projected source boundary must remain typed");
+        let entry = self
+            .layout
+            .data
+            .discretionary_breaks
+            .binary_search_by_key(&boundary.target(), |entry| entry.byte_index)
+            .ok()
+            .map(|index| self.layout.data.discretionary_breaks[index]);
+        if entry.is_some_and(|entry| !self.discretionary_break_allowed(entry, max_advance)) {
+            return;
+        }
+        self.state.mark_projected_source_boundary(
+            projection,
+            max_advance,
+            entry.map(|entry| DiscretionaryAdvance(entry.advance)),
+        );
     }
 
     /// Compare positive advances within their floating-point error bound.
