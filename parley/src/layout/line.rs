@@ -27,6 +27,16 @@ impl<'a, B: Brush> Line<'a, B> {
         self.layout.data.line_paragraph_level(self.data) & 1 != 0
     }
 
+    /// Whether this line's paragraph contains a strong directional character
+    /// outside isolates, as determined by Unicode bidi rule P2.
+    pub fn paragraph_has_strong_direction(&self) -> bool {
+        self.layout.data.line_items[self.data.item_range.clone()]
+            .iter()
+            .find(|item| item.is_text_run())
+            .and_then(|item| self.layout.data.runs.get(item.index))
+            .is_some_and(|run| run.paragraph_has_strong_direction)
+    }
+
     /// Returns the metrics for the line.
     pub fn metrics(&self) -> &LineMetrics {
         &self.data.metrics

@@ -15,6 +15,8 @@ pub(crate) struct BidiResolver {
     base_level: BidiLevel,
     levels: Vec<BidiLevel>,
     paragraph_base_levels: Vec<BidiLevel>,
+    paragraph_has_strong_direction: Vec<bool>,
+    has_strong_direction: bool,
     initial_types: Vec<BidiClass>,
     types: Vec<BidiClass>,
     brackets: Vec<(usize, char, BidiMirroringGlyph)>,
@@ -31,6 +33,8 @@ impl BidiResolver {
             base_level: 0,
             levels: Vec::new(),
             paragraph_base_levels: Vec::new(),
+            paragraph_has_strong_direction: Vec::new(),
+            has_strong_direction: false,
             initial_types: Vec::new(),
             types: Vec::new(),
             brackets: Vec::new(),
@@ -52,8 +56,20 @@ impl BidiResolver {
         &self.levels
     }
 
+    pub(crate) fn use_implicit_ltr_levels(&mut self) {
+        debug_assert!(self.levels.iter().all(|level| *level == 0));
+        self.levels.clear();
+    }
+
     pub(crate) fn paragraph_base_levels(&self) -> &[BidiLevel] {
         &self.paragraph_base_levels
+    }
+
+    pub(crate) fn paragraph_has_strong_direction(&self, character_index: usize) -> bool {
+        self.paragraph_has_strong_direction
+            .get(character_index)
+            .copied()
+            .unwrap_or(false)
     }
 
     pub(crate) fn level_at_byte_boundary(&self, text: &str, boundary: usize) -> BidiLevel {
@@ -97,6 +113,8 @@ impl BidiResolver {
         self.initial_types.clear();
         self.levels.clear();
         self.paragraph_base_levels.clear();
+        self.paragraph_has_strong_direction.clear();
+        self.has_strong_direction = false;
         self.types.clear();
         self.brackets.clear();
         self.bracket_pairs.clear();
@@ -142,6 +160,11 @@ impl BidiResolver {
             paragraph.base_level,
             paragraph.levels.len(),
         ));
+        self.paragraph_has_strong_direction
+            .extend(core::iter::repeat_n(
+                paragraph.has_strong_direction,
+                paragraph.levels.len(),
+            ));
         self.initial_types.extend(paragraph.initial_types);
         self.levels.extend(paragraph.levels);
     }
@@ -164,9 +187,11 @@ impl BidiResolver {
             needs_bidi = needs_bidi || mask(t) & BIDI_MASK != 0;
             len += 1;
         }
+        let strong_level = Self::first_strong_level(&self.initial_types);
+        self.has_strong_direction = strong_level.is_some();
         self.base_level = match base_level {
             Some(level) => level & 1,
-            _ => Self::default_level(&self.initial_types),
+            _ => strong_level.unwrap_or_default(),
         };
         if !needs_bidi && self.base_level == 0 {
             self.flags |= 1;
@@ -245,7 +270,7 @@ impl BidiResolver {
         }
     }
 
-    fn default_level(types: &[BidiClass]) -> u8 {
+    fn first_strong_level(types: &[BidiClass]) -> Option<u8> {
         let mut isolates = 0;
         for ty in types {
             let ty = *ty;
@@ -260,13 +285,13 @@ impl BidiResolver {
                 }
                 BidiClass::LeftToRight | BidiClass::RightToLeft | BidiClass::ArabicLetter => {
                     if isolates == 0 {
-                        return if ty == BidiClass::LeftToRight { 0 } else { 1 };
+                        return Some(if ty == BidiClass::LeftToRight { 0 } else { 1 });
                     }
                 }
                 _ => {}
             }
         }
-        0
+        None
     }
 
     fn default_level_until_pdi(types: &[BidiClass]) -> u8 {
@@ -803,8 +828,7 @@ where
     }
 }
 
-/// Returns whether the character needs bidirectional resolution.
-#[inline(always)]
+#[inline]
 pub(crate) fn needs_bidi_resolution(bidi_class: BidiClass) -> bool {
     mask(bidi_class) & BIDI_MASK != 0
 }

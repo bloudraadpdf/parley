@@ -123,3 +123,26 @@ fn alignment_uses_each_lines_paragraph_direction() {
         }
     }
 }
+
+#[test]
+fn paragraph_strongness_distinguishes_neutrals_and_excludes_isolates() {
+    for (text, expected) in [
+        ("!\nABC\n!", alloc::vec![false, true, false]),
+        ("!\n\u{200f}ABC\n!", alloc::vec![false, true, false]),
+        ("\u{2067}ABC\u{2069}!", alloc::vec![false]),
+        ("!\u{2028}ABC", alloc::vec![true, true]),
+        ("\nABC\n\n!", alloc::vec![false, true, false, false]),
+    ] {
+        for direction in [BaseDirection::Auto, BaseDirection::Ltr, BaseDirection::Rtl] {
+            let layout = build_layout_with_direction(text, direction);
+            assert_eq!(
+                layout
+                    .lines()
+                    .map(|line| line.paragraph_has_strong_direction())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{text:?} / {direction:?}"
+            );
+        }
+    }
+}

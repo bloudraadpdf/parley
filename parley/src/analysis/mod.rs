@@ -466,8 +466,7 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
     });
 
     let properties = |c| lcx.analysis_data_sources.properties(c);
-
-    let mut needs_bidi_resolution = false;
+    let mut needs_explicit_bidi_levels = false;
 
     lcx.info.reserve(text.len());
     boundary_iter
@@ -480,6 +479,7 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
             let script = properties.script();
             let grapheme_cluster_break = properties.grapheme_cluster_break();
             let bidi_class = properties.bidi_class();
+            needs_explicit_bidi_levels |= crate::bidi::needs_bidi_resolution(bidi_class);
             let general_category = properties.general_category();
             let is_emoji_or_pictograph = properties.is_emoji_or_pictograph();
             let is_variation_selector = properties.is_variation_selector();
@@ -505,7 +505,6 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
                 }
             };
 
-            needs_bidi_resolution |= crate::bidi::needs_bidi_resolution(bidi_class);
             // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
             let bracket = lcx.analysis_data_sources.brackets().get(ch);
 
@@ -536,17 +535,16 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
         BaseDirection::Ltr => Some(0),
         BaseDirection::Rtl => Some(1),
     };
-    // Resolve bidi when text contains bidi characters OR when an explicit
-    // direction override forces a non-default base level.
-    if needs_bidi_resolution || base_level.is_some() {
-        lcx.bidi.resolve(
-            text.chars().zip(
-                lcx.info
-                    .iter()
-                    .map(|info| (info.0.bidi_class, info.0.bracket)),
-            ),
-            base_level,
-        );
+    lcx.bidi.resolve(
+        text.chars().zip(
+            lcx.info
+                .iter()
+                .map(|info| (info.0.bidi_class, info.0.bracket)),
+        ),
+        base_level,
+    );
+    if !needs_explicit_bidi_levels && base_level.is_none() {
+        lcx.bidi.use_implicit_ltr_levels();
     }
 }
 

@@ -832,6 +832,7 @@ pub(crate) struct RunData {
     pub(crate) bidi_level: u8,
     /// Paragraph embedding level used for line-end L1 resolution.
     pub(crate) paragraph_level: u8,
+    pub(crate) paragraph_has_strong_direction: bool,
     /// Range of clusters.
     pub(crate) cluster_range: Range<usize>,
     /// Base for glyph indices.
@@ -1401,6 +1402,7 @@ impl<B: Brush> LayoutData<B> {
         script: icu_properties::props::Script,
         bidi_level: u8,
         paragraph_level: u8,
+        paragraph_has_strong_direction: bool,
         style_index: u16,
         word_spacing: f32,
         letter_spacing: f32,
@@ -1529,6 +1531,7 @@ impl<B: Brush> LayoutData<B> {
             text_range,
             bidi_level,
             paragraph_level,
+            paragraph_has_strong_direction,
             cluster_range,
             glyph_start: self.glyphs.len(),
             metrics,
