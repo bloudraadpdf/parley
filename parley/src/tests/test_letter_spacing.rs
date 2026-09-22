@@ -4,7 +4,7 @@
 //! CSS letter-spacing invariants around invisible formatting characters.
 
 use super::{test_builders::create_font_context, utils::ColorBrush};
-use crate::{FontFamily, Layout, LayoutContext, StyleProperty};
+use crate::{FontFamily, Layout, LayoutContext, StyleProperty, TextWrapMode, WhiteSpaceCollapse};
 use alloc::{sync::Arc, vec::Vec};
 
 fn unwrapped_layout(family: &str, text: &str, letter_spacing: f32) -> Layout<ColorBrush> {
@@ -163,6 +163,48 @@ fn trailing_letter_spacing_does_not_decide_the_line_fit() {
     );
     let first = lines[0].metrics();
     assert!((first.advance - first.trailing_whitespace - (plain + 5.0)).abs() < 0.001);
+}
+
+#[test]
+fn preserved_terminal_space_owns_the_last_tracking_interval() {
+    let shape = |tracking| {
+        let mut font_context = create_font_context();
+        let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+        let mut builder = layout_context.ranged_builder(&mut font_context, "x ", 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push_default(StyleProperty::LetterSpacing(tracking));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+        let mut layout = builder.build("x ");
+        layout.break_all_lines(None);
+        let advances = layout
+            .lines()
+            .next()
+            .unwrap()
+            .runs()
+            .flat_map(|run| {
+                run.clusters()
+                    .map(|cluster| cluster.advance())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        advances
+    };
+    let plain = shape(0.0);
+    let tracked = shape(5.0);
+    assert_eq!(plain.len(), 2);
+    assert_eq!(tracked.len(), 2);
+    assert!(
+        (tracked[0] - plain[0] - 5.0).abs() < 0.001,
+        "{plain:?} {tracked:?}"
+    );
+    assert!(
+        (tracked[1] - plain[1]).abs() < 0.001,
+        "{plain:?} {tracked:?}"
+    );
 }
 
 #[test]

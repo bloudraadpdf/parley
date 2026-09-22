@@ -1905,8 +1905,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         {
             let clusters = &data.clusters[line_item.cluster_range.clone()];
             let Some(offset) = clusters.iter().rposition(|cluster| {
-                cluster.info.whitespace() == Whitespace::None
-                    && !cluster.info.is_default_ignorable()
+                matches!(
+                    TerminalSourceUnit::classify(
+                        cluster,
+                        &data.styles[cluster.style_index as usize]
+                    ),
+                    TerminalSourceUnit::Barrier
+                        | TerminalSourceUnit::Candidate(
+                            TerminalWhitespaceDisposition::Hanging
+                                | TerminalWhitespaceDisposition::ConditionallyHanging
+                        )
+                )
             }) else {
                 continue;
             };
