@@ -5,7 +5,9 @@ use alloc::{format, string::String, vec::Vec};
 
 use super::test_builders::create_font_context;
 use super::utils::ColorBrush;
-use crate::{BaseDirection, FontFamily, Layout, LayoutContext, StyleProperty};
+use crate::{
+    Alignment, AlignmentOptions, BaseDirection, FontFamily, Layout, LayoutContext, StyleProperty,
+};
 
 fn build_layout_with_direction(text: &str, direction: BaseDirection) -> Layout<ColorBrush> {
     let mut font_context = create_font_context();
@@ -74,4 +76,49 @@ fn automatic_base_direction_is_resolved_per_paragraph() {
     let layout = build_layout_with_direction(text, BaseDirection::Auto);
 
     assert_eq!(visible_lines(&layout, text), ["abc", "גבא"]);
+}
+
+#[test]
+fn alignment_uses_each_lines_paragraph_direction() {
+    let width = 300.0;
+    for (text, automatic_directions) in [
+        ("ABC\n\u{200f}DEF", [false, true]),
+        ("\u{200f}ABC\nDEF", [true, false]),
+        ("ABC\u{2029}\u{200f}DEF", [false, true]),
+        ("\u{200f}ABC\u{2028}DEF", [true, true]),
+    ] {
+        for direction in [BaseDirection::Auto, BaseDirection::Ltr, BaseDirection::Rtl] {
+            let mut layout = build_layout_with_direction(text, direction);
+            for alignment in [
+                Alignment::Start,
+                Alignment::End,
+                Alignment::Left,
+                Alignment::Right,
+                Alignment::Center,
+                Alignment::Justify,
+            ] {
+                layout.align(Some(width), alignment, AlignmentOptions::default());
+                for (line, automatic_rtl) in layout.lines().zip(automatic_directions) {
+                    let is_rtl = match direction {
+                        BaseDirection::Auto => automatic_rtl,
+                        BaseDirection::Ltr => false,
+                        BaseDirection::Rtl => true,
+                    };
+                    let free = width - line.metrics().advance;
+                    let expected = match (alignment, is_rtl) {
+                        (Alignment::Right, _)
+                        | (Alignment::Start | Alignment::Justify, true)
+                        | (Alignment::End, false) => free,
+                        (Alignment::Center, _) => free * 0.5,
+                        _ => 0.0,
+                    };
+                    assert!(
+                        (line.metrics().offset - expected).abs() < 0.001,
+                        "{text:?}, {direction:?}, {alignment:?}: offset={}, expected={expected}",
+                        line.metrics().offset
+                    );
+                }
+            }
+        }
+    }
 }
