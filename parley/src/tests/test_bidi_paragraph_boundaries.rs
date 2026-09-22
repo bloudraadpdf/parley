@@ -105,6 +105,7 @@ fn alignment_uses_each_lines_paragraph_direction() {
                         BaseDirection::Rtl => true,
                     };
                     let free = width - line.metrics().advance;
+                    assert_eq!(line.is_rtl(), is_rtl, "{text:?}, {direction:?}");
                     let expected = match (alignment, is_rtl) {
                         (Alignment::Right, _)
                         | (Alignment::Start | Alignment::Justify, true)

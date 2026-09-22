@@ -20,6 +20,13 @@ pub struct Line<'a, B: Brush> {
 }
 
 impl<'a, B: Brush> Line<'a, B> {
+    /// Returns whether this line's resolved paragraph base direction is
+    /// right-to-left. Individual runs can have the opposite direction.
+    /// Automatic base direction is resolved independently for each paragraph.
+    pub fn is_rtl(&self) -> bool {
+        self.layout.data.line_paragraph_level(self.data) & 1 != 0
+    }
+
     /// Returns the metrics for the line.
     pub fn metrics(&self) -> &LineMetrics {
         &self.data.metrics

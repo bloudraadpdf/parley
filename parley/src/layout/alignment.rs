@@ -194,11 +194,7 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
         // Automatic direction is resolved independently for each paragraph.
         // Use the paragraph level retained by the line's text, not a run's
         // embedding level or the first paragraph's layout-wide base level.
-        let paragraph_level = layout.line_items[item_range.clone()]
-            .iter()
-            .find(|item| item.is_text_run())
-            .and_then(|item| layout.runs.get(item.index))
-            .map_or(layout.base_level, |run| run.paragraph_level);
+        let paragraph_level = layout.line_paragraph_level(&layout.lines[line_index]);
         let is_rtl = paragraph_level & 1 == 1;
         let trailing_whitespace_advance = trailing_whitespace.advance();
         let left_occupied_advance = trailing_whitespace.occupied_advance(PhysicalLineEdge::Left);

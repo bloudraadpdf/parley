@@ -1167,6 +1167,14 @@ impl<B: Brush> Default for LayoutData<B> {
 }
 
 impl<B: Brush> LayoutData<B> {
+    pub(crate) fn line_paragraph_level(&self, line: &LineData) -> u8 {
+        self.line_items[line.item_range.clone()]
+            .iter()
+            .find(|item| item.is_text_run())
+            .and_then(|item| self.runs.get(item.index))
+            .map_or(self.base_level, |run| run.paragraph_level)
+    }
+
     pub(crate) fn source_soft_wrap_before_inline_box(
         &self,
         item_index: usize,
