@@ -8,6 +8,15 @@ use crate::{FontFamily, Layout, LayoutContext, StyleProperty};
 use alloc::{sync::Arc, vec::Vec};
 
 fn unwrapped_layout(family: &str, text: &str, letter_spacing: f32) -> Layout<ColorBrush> {
+    unwrapped_layout_with_style_range(family, text, letter_spacing, None)
+}
+
+fn unwrapped_layout_with_style_range(
+    family: &str,
+    text: &str,
+    letter_spacing: f32,
+    enlarged: Option<core::ops::Range<usize>>,
+) -> Layout<ColorBrush> {
     let mut font_context = create_font_context();
     font_context.collection.register_fonts(
         fontique::Blob::new(Arc::new(
@@ -23,6 +32,9 @@ fn unwrapped_layout(family: &str, text: &str, letter_spacing: f32) -> Layout<Col
     builder.push_default(StyleProperty::FontFamily(FontFamily::named(family)));
     builder.push_default(StyleProperty::FontSize(10.0));
     builder.push_default(StyleProperty::LetterSpacing(letter_spacing));
+    if let Some(range) = enlarged {
+        builder.push(StyleProperty::FontSize(12.0), range);
+    }
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
     layout
@@ -100,6 +112,41 @@ fn letter_spacing_is_not_applied_after_the_last_character_of_a_line() {
         (tracked - (plain + 5.0)).abs() < 0.001,
         "plain={plain}, tracked={tracked}"
     );
+}
+
+#[test]
+fn letter_spacing_counts_graphemes_instead_of_combining_components() {
+    for (family, text, enlarged) in [
+        ("Roboto", "A\u{301}A\u{301}", None),
+        ("Roboto", "A\u{301}\u{302}B", None),
+        ("Roboto", "A\u{fe0f}B", None),
+        ("Roboto", "\u{301}A", None),
+        ("Roboto", "A\u{301}B", Some(1..3)),
+        ("Arimo", "\u{5d0}\u{301}\u{5d0}\u{301}", None),
+    ] {
+        let plain_layout = unwrapped_layout_with_style_range(family, text, 0.0, enlarged.clone());
+        let plain = plain_layout.lines().next().unwrap().metrics().advance;
+        let mut layout = unwrapped_layout_with_style_range(family, text, 5.0, enlarged);
+        let tracked = layout.lines().next().unwrap().metrics().advance;
+        assert!(
+            (tracked - (plain + 5.0)).abs() < 0.001,
+            "{text:?}: plain={plain}, tracked={tracked}"
+        );
+        let glyph_advance: f32 = layout
+            .lines()
+            .flat_map(|line| line.items())
+            .map(|item| match item {
+                crate::PositionedLayoutItem::GlyphRun(run) => run.advance(),
+                crate::PositionedLayoutItem::InlineBox(_) => 0.0,
+            })
+            .sum();
+        assert!(
+            (glyph_advance - tracked).abs() < 0.001,
+            "{text:?}: glyphs={glyph_advance}, line={tracked}"
+        );
+        layout.break_all_lines(None);
+        assert!((layout.lines().next().unwrap().metrics().advance - tracked).abs() < 0.001);
+    }
 }
 
 #[test]

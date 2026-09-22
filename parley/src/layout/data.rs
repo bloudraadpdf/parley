@@ -707,6 +707,7 @@ pub(crate) struct ClusterData {
 impl ClusterData {
     pub(crate) const LIGATURE_START: u16 = 1;
     pub(crate) const LIGATURE_COMPONENT: u16 = 2;
+    pub(crate) const LETTER_SPACING_BOUNDARY: u16 = 4;
 
     #[inline(always)]
     pub(crate) fn is_ligature_start(self) -> bool {
@@ -848,10 +849,33 @@ pub(crate) struct RunData {
 }
 
 impl RunData {
+    /// Glyph receiving a component's spacing. Synthetic ligature components
+    /// keep separate layout advances but share the start cluster's glyphs.
+    pub(crate) fn spacing_glyph(&self, clusters: &[ClusterData], index: usize) -> Option<usize> {
+        let mut cluster = &clusters[index];
+        if cluster.is_ligature_component() {
+            cluster = if self.bidi_level & 1 == 0 {
+                clusters[self.cluster_range.start..index]
+                    .iter()
+                    .rev()
+                    .find(|cluster| cluster.is_ligature_start())?
+            } else {
+                clusters[index + 1..self.cluster_range.end]
+                    .iter()
+                    .find(|cluster| cluster.is_ligature_start())?
+            };
+        }
+        if cluster.glyph_len == 0 || cluster.glyph_len == 0xFF {
+            return None;
+        }
+        Some(self.glyph_start + cluster.glyph_offset as usize + cluster.glyph_len as usize - 1)
+    }
+
     /// The letter spacing applied after `cluster`: none for default-ignorable
-    /// characters and for letters of a cursive script.
+    /// characters, within a grapheme, and for letters of a cursive script.
     pub(crate) fn cluster_letter_spacing(&self, cluster: &ClusterData) -> f32 {
-        if cluster.info.is_default_ignorable()
+        if cluster.flags & ClusterData::LETTER_SPACING_BOUNDARY == 0
+            || cluster.info.is_default_ignorable()
             || (self.cursive_script && !cluster.info.is_whitespace())
         {
             0.0
@@ -1602,48 +1626,73 @@ impl<B: Brush> LayoutData<B> {
     /// line-ending clusters, so the layout can be broken again from scratch.
     pub(crate) fn restore_line_end_letter_spacing(&mut self) {
         for run in &self.runs {
-            for cluster in &mut self.clusters[run.cluster_range.clone()] {
-                let trimmed = cluster.trimmed_letter_spacing;
+            for index in run.cluster_range.clone() {
+                let trimmed = self.clusters[index].trimmed_letter_spacing;
                 if nearly_zero(trimmed) {
                     continue;
                 }
+                let glyph_index = run.spacing_glyph(&self.clusters, index);
+                let cluster = &mut self.clusters[index];
                 cluster.advance += trimmed;
                 cluster.line_break_advance += trimmed;
                 cluster.trimmed_letter_spacing = 0.0;
-                if cluster.glyph_len != 0xFF {
-                    let start = run.glyph_start + cluster.glyph_offset as usize;
-                    let end = start + cluster.glyph_len as usize;
-                    if let Some(last) = self.glyphs[start..end].last_mut() {
-                        last.advance += trimmed;
-                    }
+                if let Some(index) = glyph_index {
+                    self.glyphs[index].advance += trimmed;
                 }
             }
         }
     }
 
-    pub(crate) fn finish(&mut self) {
+    fn mark_letter_spacing_boundaries(&mut self, grapheme_boundaries: impl Iterator<Item = usize>) {
+        // Shaping can split a grapheme into scalar components (and split it
+        // across style runs). Only its last visible component owns tracking.
+        // Keep the marker on that component so line-end trimming uses the
+        // same spacing unit, including when a grapheme ends in a variation selector.
+        let mut boundaries = grapheme_boundaries.skip(1).peekable();
+        let mut last_visible: Option<usize> = None;
+        for run in &self.runs {
+            for index in run.cluster_range.clone() {
+                let cluster = &self.clusters[index];
+                let source_start = cluster.text_range(run).start;
+                while boundaries.peek().is_some_and(|end| *end <= source_start) {
+                    if let Some(last) = last_visible.take() {
+                        self.clusters[last].flags |= ClusterData::LETTER_SPACING_BOUNDARY;
+                    }
+                    boundaries.next();
+                }
+                if !self.clusters[index].info.is_default_ignorable() {
+                    last_visible = Some(index);
+                }
+            }
+        }
+        if let Some(last) = last_visible {
+            self.clusters[last].flags |= ClusterData::LETTER_SPACING_BOUNDARY;
+        }
+    }
+
+    pub(crate) fn finish(&mut self, grapheme_boundaries: impl Iterator<Item = usize>) {
+        if self.runs.iter().any(|run| !nearly_zero(run.letter_spacing)) {
+            self.mark_letter_spacing_boundaries(grapheme_boundaries);
+        }
         for run in &self.runs {
             let word = run.word_spacing;
             let letter = run.letter_spacing;
             if nearly_zero(word) && nearly_zero(letter) {
                 continue;
             }
-            let clusters = &mut self.clusters[run.cluster_range.clone()];
-            for cluster in clusters {
+            for index in run.cluster_range.clone() {
+                let cluster = &self.clusters[index];
                 let mut spacing = run.cluster_letter_spacing(cluster);
                 if !nearly_zero(word) && cluster.info.whitespace().is_space_or_nbsp() {
                     spacing += word;
                 }
                 if !nearly_zero(spacing) {
+                    let glyph_index = run.spacing_glyph(&self.clusters, index);
+                    let cluster = &mut self.clusters[index];
                     cluster.advance += spacing;
                     cluster.line_break_advance += spacing;
-                    if cluster.glyph_len != 0xFF {
-                        let start = run.glyph_start + cluster.glyph_offset as usize;
-                        let end = start + cluster.glyph_len as usize;
-                        let glyphs = &mut self.glyphs[start..end];
-                        if let Some(last) = glyphs.last_mut() {
-                            last.advance += spacing;
-                        }
+                    if let Some(index) = glyph_index {
+                        self.glyphs[index].advance += spacing;
                     }
                 }
             }

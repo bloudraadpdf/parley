@@ -1887,17 +1887,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             if nearly_zero(tracking) {
                 return;
             }
-            let glyph_start = run.glyph_start;
+            let glyph_index = run.spacing_glyph(&data.clusters, cluster_index);
             let cluster = &mut data.clusters[cluster_index];
             cluster.advance -= tracking;
             cluster.line_break_advance -= tracking;
             cluster.trimmed_letter_spacing = tracking;
-            if cluster.glyph_len != 0xFF {
-                let start = glyph_start + cluster.glyph_offset as usize;
-                let end = start + cluster.glyph_len as usize;
-                if let Some(last) = data.glyphs[start..end].last_mut() {
-                    last.advance -= tracking;
-                }
+            if let Some(index) = glyph_index {
+                data.glyphs[index].advance -= tracking;
             }
             line.metrics.advance -= tracking;
             return;

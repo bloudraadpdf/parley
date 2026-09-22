@@ -326,7 +326,11 @@ fn build_into_layout<B: Brush>(
     layout.data.inline_boxes.clear();
     core::mem::swap(&mut layout.data.inline_boxes, &mut lcx.inline_boxes);
 
-    layout.data.finish();
+    layout.data.finish(
+        lcx.analysis_data_sources
+            .grapheme_segmenter()
+            .segment_str(text),
+    );
 }
 
 fn resolve_range(range: impl RangeBounds<usize>, len: usize) -> Range<usize> {
