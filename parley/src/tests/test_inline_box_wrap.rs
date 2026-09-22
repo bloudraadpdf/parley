@@ -166,6 +166,7 @@ fn contextual_spacing_disappears_when_its_boundary_wraps() {
         None,
         [InlineBox::contextual_spacing(79, 1, spacing, 0.0)],
     );
+    wrapped.set_line_break_overrides(vec![LineBreakOverride::opportunity(1)]);
     wrapped.break_all_lines(Some((unwrapped_advance - spacing) * 0.6));
 
     assert_eq!(wrapped.len(), 2);
@@ -176,6 +177,35 @@ fn contextual_spacing_disappears_when_its_boundary_wraps() {
     assert!((wrapped_advance + spacing - unwrapped_advance).abs() < 0.01);
     let positioned = positioned_inline_box_ids(&wrapped);
     assert!(positioned.is_empty(), "{positioned:?}");
+}
+
+#[test]
+fn contextual_spacing_preserves_source_break_prohibitions() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    for (text, boundary, override_) in [
+        ("AB", 1, None),
+        ("A\u{2060}B", 1, None),
+        ("\u{6587}\u{ff67}", 3, None),
+        ("A-B", 2, Some(LineBreakOverride::suppress(2))),
+    ] {
+        let mut layout = build_inline_box_layout(
+            &mut lcx,
+            &mut fcx,
+            text,
+            10.0,
+            None,
+            [InlineBox::contextual_spacing(0, boundary, 5.0, 0.0)],
+        );
+        layout.set_line_break_overrides(override_.into_iter().collect());
+        let widths = layout.calculate_content_widths();
+        layout.break_all_lines(Some(1.0));
+        assert_eq!(layout.len(), 1, "{text:?}");
+        assert!(
+            (widths.min - widths.max).abs() < 0.01,
+            "{text:?}: {widths:?}"
+        );
+    }
 }
 
 #[test]

@@ -370,6 +370,13 @@ pub(crate) enum SourceSoftWrapBoundary {
     },
 }
 
+#[derive(Clone, Copy)]
+enum SourceBoundarySearch {
+    Exact,
+    Following,
+    AfterSpaces,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SourceSoftWrapAuthority {
     AdjoiningStyles { following_wrap_mode: TextWrapMode },
@@ -1186,6 +1193,31 @@ impl<B: Brush> LayoutData<B> {
         byte_index: usize,
         edge: LogicalInlineEdge,
     ) -> SourceSoftWrapBoundary {
+        self.find_source_soft_wrap_boundary(
+            item_index,
+            byte_index,
+            if edge.is_end() {
+                SourceBoundarySearch::AfterSpaces
+            } else {
+                SourceBoundarySearch::Following
+            },
+        )
+    }
+
+    pub(crate) fn contextual_spacing_soft_wrap_boundary(
+        &self,
+        item_index: usize,
+        byte_index: usize,
+    ) -> SourceSoftWrapBoundary {
+        self.find_source_soft_wrap_boundary(item_index, byte_index, SourceBoundarySearch::Exact)
+    }
+
+    fn find_source_soft_wrap_boundary(
+        &self,
+        item_index: usize,
+        byte_index: usize,
+        search: SourceBoundarySearch,
+    ) -> SourceSoftWrapBoundary {
         let boundary_override = |index| {
             self.line_break_overrides
                 .binary_search_by_key(&index, |entry| entry.byte_index())
@@ -1214,8 +1246,15 @@ impl<B: Brush> LayoutData<B> {
                         if cluster_index < byte_index {
                             continue;
                         }
+                        if matches!(search, SourceBoundarySearch::Exact)
+                            && cluster_index != byte_index
+                        {
+                            return SourceSoftWrapBoundary::Absent;
+                        }
                         let disposition = boundary_override(cluster_index);
-                        if edge.is_end() && cluster.info.whitespace() == Whitespace::Space {
+                        if matches!(search, SourceBoundarySearch::AfterSpaces)
+                            && cluster.info.whitespace() == Whitespace::Space
+                        {
                             continue;
                         }
                         let authority = match disposition {
@@ -1803,7 +1842,9 @@ impl<B: Brush> LayoutData<B> {
                             );
                         }
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
-                            measure_atomic(true, false)
+                            let boundary =
+                                self.contextual_spacing_soft_wrap_boundary(item_index, ibox.index);
+                            measure_atomic(boundary.is_available_from(text_wrap_mode), false);
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             let source_projection = edge.source_projection(width);

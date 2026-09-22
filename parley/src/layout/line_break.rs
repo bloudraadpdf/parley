@@ -934,7 +934,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
                             let width = inline_box.width();
                             let height = inline_box.height();
+                            let boundary = self.layout.data.contextual_spacing_soft_wrap_boundary(
+                                self.state.item_idx,
+                                inline_box.index,
+                            );
                             if self.state.line.text_wrap_mode == TextWrapMode::Wrap
+                                && boundary.is_available_from(self.state.line.text_wrap_mode)
                                 && self.state.line.has_content_advance()
                             {
                                 self.state.item_idx += 1;
