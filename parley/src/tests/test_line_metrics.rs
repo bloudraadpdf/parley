@@ -49,6 +49,36 @@ fn run_extents(metrics: &crate::RunMetrics) -> (f32, f32) {
 }
 
 #[test]
+fn selected_discretionary_material_contributes_its_owners_line_metrics() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let build = |lcx: &mut LayoutContext<ColorBrush>,
+                 fcx: &mut crate::FontContext,
+                 text: &str,
+                 owner: core::ops::Range<usize>| {
+        let mut builder = lcx.ranged_builder(fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push(StyleProperty::FontSize(30.0), owner);
+        builder.build(text)
+    };
+    let mut target = build(&mut lcx, &mut fcx, "aa\u{ad}bb", 2..4);
+    target.set_discretionary_breaks(alloc::vec![crate::layout::DiscretionaryBreak {
+        byte_index: 4,
+        advance: 10.0,
+        max_consecutive_lines: None
+    }]);
+    target.break_all_lines(Some(0.0));
+    let mut reference = build(&mut lcx, &mut fcx, "aa=", 2..3);
+    reference.break_all_lines(None);
+    let actual = target.lines().next().unwrap();
+    let expected = reference.lines().next().unwrap();
+    assert_eq!(actual.metrics().ascent, expected.metrics().ascent);
+    assert_eq!(actual.metrics().descent, expected.metrics().descent);
+    assert_eq!(actual.metrics().line_height, expected.metrics().line_height);
+}
+
+#[test]
 fn unquantized_line_box_spans_per_run_half_leading_extents() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

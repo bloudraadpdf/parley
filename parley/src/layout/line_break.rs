@@ -2041,6 +2041,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let mut line_extents = None;
         let mut have_metrics = false;
         let mut needs_reorder = false;
+        let discretionary_owner = line
+            .ends_at_discretionary_break
+            .then(|| {
+                self.lines.line_items[line.item_range.clone()]
+                    .iter()
+                    .rev()
+                    .find(|item| item.kind == LayoutItemKind::TextRun)
+                    .map(|item| item.text_range.clone())
+            })
+            .flatten();
         for line_item in self.lines.line_items[line.item_range.clone()]
             .iter_mut()
             .rev()
@@ -2078,9 +2088,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         needs_reorder = true;
                     }
 
-                    let metric_participation = LineMetricParticipation::from_clusters(
-                        &self.layout.data.clusters[line_item.cluster_range.clone()],
-                    );
+                    let is_discretionary_owner =
+                        discretionary_owner.as_ref() == Some(&line_item.text_range);
+                    let metric_participation = if is_discretionary_owner {
+                        LineMetricParticipation::Contributes
+                    } else {
+                        LineMetricParticipation::from_clusters(
+                            &self.layout.data.clusters[line_item.cluster_range.clone()],
+                        )
+                    };
 
                     let run = &self.layout.data.runs[line_item.index];
                     // Compute the run's advance by summing the advances of its constituent clusters
@@ -2096,7 +2112,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Ignore trailing whitespace for metrics computation
                     // (we are iterating backwards so trailing whitespace comes first)
-                    if !have_metrics && line_item.is_whitespace {
+                    if !have_metrics && line_item.is_whitespace && !is_discretionary_owner {
                         continue;
                     }
 
