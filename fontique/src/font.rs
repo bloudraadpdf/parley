@@ -111,6 +111,11 @@ impl FontInfo {
             synth.embolden = true;
         }
         let style_axis = match style {
+            FontStyle::Normal
+                if matches!(self.style, FontStyle::Oblique(_)) && self.has_slant_axis() =>
+            {
+                Some((Tag::new(b"slnt"), 0.0))
+            }
             FontStyle::Normal if self.has_italic_axis() => Some((Tag::new(b"ital"), 0.0)),
             FontStyle::Normal if self.has_slant_axis() => Some((Tag::new(b"slnt"), 0.0)),
             FontStyle::Italic if self.has_italic_axis() => Some((Tag::new(b"ital"), 1.0)),
@@ -552,5 +557,45 @@ mod tests {
             );
             assert_eq!(synthesis.embolden(), expected, "{available} -> {requested}");
         }
+    }
+
+    #[test]
+    fn normal_request_uses_slant_axis_for_an_oblique_selected_face() {
+        let source = SourceInfo::new(
+            SourceId::new(),
+            SourceKind::Memory(Blob::new(Arc::new(
+                include_bytes!(
+                    "../../parley_dev/assets/fonts/roboto_fonts/RobotoFlex-VariableFont.ttf"
+                )
+                .to_vec(),
+            ))),
+        );
+        let mut font = FontInfo::from_source(source, 0).unwrap();
+        font.attr_axes |= ITALIC_AXIS;
+        let slant_range = AxisRange::new(Tag::new(b"slnt"), -67.5, -45.0).unwrap();
+        font.apply_override(&FontInfoOverride {
+            style: Some(FontStyle::Oblique(Some(45.0))),
+            axis_ranges: Some(&[slant_range]),
+            ..FontInfoOverride::default()
+        });
+
+        let synthesis = font.synthesis(
+            FontWidth::NORMAL,
+            FontStyle::Normal,
+            FontWeight::NORMAL,
+            FontStyleSynthesis::Allowed,
+        );
+        assert!(
+            synthesis
+                .variation_settings()
+                .iter()
+                .any(|(tag, value)| *tag == Tag::new(b"slnt") && *value == -45.0)
+        );
+        assert!(
+            !synthesis
+                .variation_settings()
+                .iter()
+                .any(|(tag, _)| *tag == Tag::new(b"ital"))
+        );
     }
 }
