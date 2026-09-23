@@ -466,6 +466,10 @@ fn shape_item<'a, B: Brush>(
         let language = item
             .font_language_override
             .and_then(|tag| {
+                // Harfrust uppercases private-use tags; a lowercase OpenType tag must not match its uppercase peer.
+                if tag.iter().any(u8::is_ascii_lowercase) {
+                    return None;
+                }
                 let tag = std::str::from_utf8(&tag).ok()?.trim_end();
                 format!("und-x-hbot{tag}").parse::<harfrust::Language>().ok()
             })
