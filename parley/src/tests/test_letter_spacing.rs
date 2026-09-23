@@ -103,6 +103,28 @@ fn default_ignorable_soft_hyphen_does_not_create_a_letter_spacing_interval() {
 }
 
 #[test]
+fn preserved_space_after_zero_width_space_starts_the_next_line() {
+    let text = "xx \u{200B} x \u{200B} xx";
+    let mut font_context = create_font_context();
+    let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::LetterSpacing(10.0));
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(50.0));
+    let ranges = layout
+        .lines()
+        .map(|line| line.text_range())
+        .collect::<Vec<_>>();
+    assert_eq!(ranges, [0..6, 6..12, 12..15]);
+}
+
+#[test]
 fn letter_spacing_is_not_applied_after_the_last_character_of_a_line() {
     // CSS Text 4 §8.2: tracking is not applied at the end of a line.
     let plain = unwrapped_advance("ab", 0.0);

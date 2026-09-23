@@ -1220,6 +1220,29 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             });
                         let style = &self.layout.data.styles[cluster.data.style_index as usize];
 
+                        // A preserved space following U+200B belongs to the next
+                        // line when the author breaks at that zero-width space.
+                        // Unicode's break opportunity after the space would move
+                        // it back to the preceding line instead.
+                        let preceding_clusters =
+                            &self.layout.data.clusters[cluster_start..self.state.cluster_idx];
+                        let preserved_space_after_zwsp = style.white_space_collapse
+                            == crate::WhiteSpaceCollapse::Preserve
+                            && whitespace == Whitespace::Space
+                            && preceding_clusters
+                                .last()
+                                .is_some_and(|previous| previous.info.source_char() == '\u{200B}');
+                        let break_after_preserved_space_after_zwsp = style.white_space_collapse
+                            == crate::WhiteSpaceCollapse::Preserve
+                            && preceding_clusters.last().is_some_and(|previous| {
+                                previous.info.whitespace() == Whitespace::Space
+                            })
+                            && preceding_clusters
+                                .iter()
+                                .rev()
+                                .find(|previous| previous.info.whitespace() != Whitespace::Space)
+                                .is_some_and(|previous| previous.info.source_char() == '\u{200B}');
+
                         // Lag text_wrap_mode style by one cluster
                         let text_wrap_mode = self.state.line.text_wrap_mode;
                         self.state.line.text_wrap_mode = style.text_wrap_mode;
@@ -1235,8 +1258,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity,
                             ) => true,
                             None => {
-                                soft_break_policy == SoftBreakPolicy::Anywhere
+                                (soft_break_policy == SoftBreakPolicy::Anywhere
                                     || boundary == Boundary::Line
+                                    || preserved_space_after_zwsp)
+                                    && !break_after_preserved_space_after_zwsp
                             }
                         };
                         let projected_source_cluster =
