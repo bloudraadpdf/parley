@@ -1225,7 +1225,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // Unicode's break opportunity after the space would move
                         // it back to the preceding line instead.
                         let preceding_clusters =
-                            &self.layout.data.clusters[cluster_start..self.state.cluster_idx];
+                            &self.layout.data.clusters[..self.state.cluster_idx];
                         let preserved_space_after_zwsp = style.white_space_collapse
                             == crate::WhiteSpaceCollapse::Preserve
                             && whitespace == Whitespace::Space

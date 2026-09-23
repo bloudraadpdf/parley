@@ -105,23 +105,32 @@ fn default_ignorable_soft_hyphen_does_not_create_a_letter_spacing_interval() {
 #[test]
 fn preserved_space_after_zero_width_space_starts_the_next_line() {
     let text = "xx \u{200B} x \u{200B} xx";
-    let mut font_context = create_font_context();
-    let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
-    let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
-    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
-    builder.push_default(StyleProperty::FontSize(10.0));
-    builder.push_default(StyleProperty::LetterSpacing(10.0));
-    builder.push_default(StyleProperty::WhiteSpaceCollapse(
-        WhiteSpaceCollapse::Preserve,
-    ));
-    builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
-    let mut layout = builder.build(text);
-    layout.break_all_lines(Some(50.0));
-    let ranges = layout
-        .lines()
-        .map(|line| line.text_range())
-        .collect::<Vec<_>>();
-    assert_eq!(ranges, [0..6, 6..12, 12..15]);
+    for styled_range in [None, Some(6..9), Some(3..12)] {
+        let mut font_context = create_font_context();
+        let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+        let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push_default(StyleProperty::LetterSpacing(10.0));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+        if let Some(range) = styled_range.clone() {
+            builder.push(StyleProperty::LetterSpacing(9.0), range);
+        }
+        let mut layout = builder.build(text);
+        layout.break_all_lines(Some(50.0));
+        let ranges = layout
+            .lines()
+            .map(|line| line.text_range())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ranges,
+            [0..6, 6..12, 12..15],
+            "styled_range={styled_range:?}"
+        );
+    }
 }
 
 #[test]
