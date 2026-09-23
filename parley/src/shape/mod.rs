@@ -4,6 +4,7 @@
 //! Text shaping implementation using `harfrust`for shaping
 //! and `icu` for text analysis.
 
+use alloc::format;
 use alloc::vec::Vec;
 use core::mem;
 use core::ops::RangeInclusive;
@@ -56,6 +57,7 @@ struct Item {
     paragraph_level: u8,
     paragraph_has_strong_direction: bool,
     locale: Option<Language>,
+    font_language_override: Option<[u8; 4]>,
     variations: Resolved<FontVariation>,
     features: Resolved<FontFeature>,
     word_spacing: f32,
@@ -107,6 +109,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             .find(|&script| real_script(script))
             .unwrap_or(Script::Latin),
         locale: style.locale,
+        font_language_override: style.font_language_override,
         variations: style.font_variations,
         features: style.font_features,
         word_spacing: style.word_spacing,
@@ -148,6 +151,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             let next_style = &styles[*style_index as usize];
             if !nearly_eq(next_style.font_size, item.size)
                 || next_style.locale != item.locale
+                || next_style.font_language_override != item.font_language_override
                 || next_style.font_variations != item.variations
                 || next_style.font_features != item.features
                 || !nearly_eq(next_style.letter_spacing, item.letter_spacing)
@@ -236,6 +240,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             item.paragraph_has_strong_direction = paragraph_has_strong_direction;
             item.script = script;
             item.locale = style.locale;
+            item.font_language_override = style.font_language_override;
             item.variations = style.font_variations;
             item.features = style.font_features;
             item.word_spacing = style.word_spacing;
@@ -459,9 +464,16 @@ fn shape_item<'a, B: Brush>(
         };
         let hb_script = script_to_harfrust(fb_script);
         let language = item
-            .locale
-            .as_ref()
-            .and_then(|lang| lang.language().parse::<harfrust::Language>().ok());
+            .font_language_override
+            .and_then(|tag| {
+                let tag = std::str::from_utf8(&tag).ok()?.trim_end();
+                format!("und-x-hbot{tag}").parse::<harfrust::Language>().ok()
+            })
+            .or_else(|| {
+                item.locale
+                    .as_ref()
+                    .and_then(|lang| lang.language().parse::<harfrust::Language>().ok())
+            });
         scx.features.clear();
         for feature in rcx.features(item.features).unwrap_or(&[]) {
             scx.features.push(harfrust::Feature::new(

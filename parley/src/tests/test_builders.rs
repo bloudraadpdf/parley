@@ -244,6 +244,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         font_features: FontFeatures::empty(),     // TODO: Set a non-default value
         font_metric_advance_quantization: true,
         locale: Some("en-US".parse().unwrap()),
+        font_language_override: None,
         brush: ColorBrush::new(palette::css::GREEN),
         has_underline: true,
         underline_offset: Some(2.),

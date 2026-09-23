@@ -179,6 +179,8 @@ pub enum StyleProperty<'a, B: Brush> {
     FontMetricAdvanceQuantization(bool),
     /// Locale.
     Locale(Option<Language>),
+    /// OpenType language system tag selected independently of locale.
+    FontLanguageOverride(Option<[u8; 4]>),
     /// Brush for rendering text.
     Brush(B),
     /// Underline decoration.
@@ -253,6 +255,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub font_metric_advance_quantization: bool,
     /// Locale.
     pub locale: Option<Language>,
+    /// OpenType language system tag selected independently of locale.
+    pub font_language_override: Option<[u8; 4]>,
     /// Brush for rendering text.
     pub brush: B,
     /// Underline decoration.
@@ -315,6 +319,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             font_features: FontFeatures::empty(),
             font_metric_advance_quantization: true,
             locale: None,
+            font_language_override: None,
             brush: B::default(),
             has_underline: false,
             underline_offset: None,

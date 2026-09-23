@@ -154,6 +154,7 @@ impl ResolveContext {
                 FontMetricAdvanceQuantization(*value)
             }
             StyleProperty::Locale(value) => Locale(*value),
+            StyleProperty::FontLanguageOverride(value) => FontLanguageOverride(*value),
             StyleProperty::Brush(value) => Brush(value.clone()),
             StyleProperty::Underline(value) => Underline(*value),
             StyleProperty::UnderlineOffset(value) => UnderlineOffset(value.map(|x| x * scale)),
@@ -202,6 +203,7 @@ impl ResolveContext {
                 raw_style.font_metric_advance_quantization,
             ),
             locale: raw_style.locale,
+            font_language_override: raw_style.font_language_override,
             brush: raw_style.brush.clone(),
             underline: ResolvedDecoration {
                 enabled: raw_style.has_underline,
@@ -392,6 +394,8 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     FontMetricAdvanceQuantization(bool),
     /// Locale.
     Locale(Option<Language>),
+    /// OpenType language system tag.
+    FontLanguageOverride(Option<[u8; 4]>),
     /// Brush for rendering text.
     Brush(B),
     /// Underline decoration.
@@ -476,6 +480,8 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     font_metric_advance_quantization: FontMetricAdvanceProjection,
     /// Locale.
     pub(crate) locale: Option<Language>,
+    /// OpenType language system tag.
+    pub(crate) font_language_override: Option<[u8; 4]>,
     /// Brush for rendering text.
     pub(crate) brush: B,
     /// Underline decoration.
@@ -524,6 +530,7 @@ impl<B: Brush> ResolvedStyle<B> {
                 self.font_metric_advance_quantization = FontMetricAdvanceProjection(value);
             }
             Locale(value) => self.locale = value,
+            FontLanguageOverride(value) => self.font_language_override = value,
             Brush(value) => self.brush = value,
             Underline(value) => self.underline.enabled = value,
             UnderlineOffset(value) => self.underline.offset = value,
@@ -566,6 +573,7 @@ impl<B: Brush> ResolvedStyle<B> {
                 self.font_metric_advance_quantization.0 == *value
             }
             Locale(value) => self.locale == *value,
+            FontLanguageOverride(value) => self.font_language_override == *value,
             Brush(value) => self.brush == *value,
             Underline(value) => self.underline.enabled == *value,
             UnderlineOffset(value) => self.underline.offset == *value,
