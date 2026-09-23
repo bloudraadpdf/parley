@@ -1101,6 +1101,26 @@ fn test_two_chars_keep_all() {
 }
 
 #[test]
+fn keep_all_preserves_hyphen_breaks_between_latin_letters() {
+    let letters = verify_analysis("AB-CD-EF", |builder| {
+        builder.push(StyleProperty::WordBreak(WordBreak::KeepAll), 0..8);
+    });
+    assert_eq!(letters.layout_context.info[3].0.boundary, Boundary::Line);
+    assert_eq!(letters.layout_context.info[6].0.boundary, Boundary::Line);
+
+    let numbers = verify_analysis("12-34-56", |builder| {
+        builder.push(StyleProperty::WordBreak(WordBreak::KeepAll), 0..8);
+    });
+    assert_ne!(numbers.layout_context.info[3].0.boundary, Boundary::Line);
+    assert_ne!(numbers.layout_context.info[6].0.boundary, Boundary::Line);
+
+    let ideographs = verify_analysis("漢字", |builder| {
+        builder.push(StyleProperty::WordBreak(WordBreak::KeepAll), 0..6);
+    });
+    assert_ne!(ideographs.layout_context.info[1].0.boundary, Boundary::Line);
+}
+
+#[test]
 fn test_whitespace_contiguous_interspersed_in_latin() {
     verify_analysis("A  B  C D", |_| {})
         .expect_boundary_list(vec![

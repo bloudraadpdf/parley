@@ -15,7 +15,8 @@ use icu_normalizer::properties::{
     CanonicalDecompositionBorrowed,
 };
 use icu_properties::props::{
-    BidiMirroringGlyph, GeneralCategory, GeneralCategoryGroup, GraphemeClusterBreak, Script,
+    BidiMirroringGlyph, GeneralCategory, GeneralCategoryGroup, GraphemeClusterBreak,
+    LineBreak as UnicodeLineBreak, Script,
 };
 use icu_properties::{
     CodePointMapData, CodePointMapDataBorrowed, PropertyNamesShort, PropertyNamesShortBorrowed,
@@ -54,7 +55,7 @@ impl AnalysisDataSources {
     #[inline(always)]
     fn line_segmenter(&self, policy: SoftBreakPolicy) -> LineSegmenterBorrowed<'static> {
         match policy.segmentation_word_break() {
-            WordBreak::Normal => {
+            WordBreak::Normal | WordBreak::KeepAll => {
                 const {
                     let mut opt = LineBreakOptions::default();
                     opt.word_option = Some(LineBreakWordOption::Normal);
@@ -65,13 +66,6 @@ impl AnalysisDataSources {
                 const {
                     let mut opt = LineBreakOptions::default();
                     opt.word_option = Some(LineBreakWordOption::BreakAll);
-                    LineSegmenter::new_for_non_complex_scripts(opt)
-                }
-            }
-            WordBreak::KeepAll => {
-                const {
-                    let mut opt = LineBreakOptions::default();
-                    opt.word_option = Some(LineBreakWordOption::KeepAll);
                     LineSegmenter::new_for_non_complex_scripts(opt)
                 }
             }
@@ -97,6 +91,33 @@ impl AnalysisDataSources {
     fn brackets(&self) -> CodePointMapDataBorrowed<'_, BidiMirroringGlyph> {
         const { CodePointMapData::new() }
     }
+}
+
+fn keep_all_suppresses_boundary(text: &str, boundary: usize) -> bool {
+    let Some((before, after)) = text[..boundary]
+        .chars()
+        .next_back()
+        .zip(text[boundary..].chars().next())
+    else {
+        return false;
+    };
+    let classes = CodePointMapData::<UnicodeLineBreak>::new();
+    let is_letter_unit = |character| {
+        matches!(
+            classes.get(character),
+            UnicodeLineBreak::Ambiguous
+                | UnicodeLineBreak::Alphabetic
+                | UnicodeLineBreak::Ideographic
+                | UnicodeLineBreak::Numeric
+                | UnicodeLineBreak::H2
+                | UnicodeLineBreak::H3
+                | UnicodeLineBreak::JL
+                | UnicodeLineBreak::JV
+                | UnicodeLineBreak::JT
+                | UnicodeLineBreak::ConditionalJapaneseStarter
+        )
+    };
+    is_letter_unit(before) && is_letter_unit(after)
 }
 
 /// Semantic class of an authored typographic unit immediately before a soft
@@ -381,7 +402,10 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
 
             let iter = [second.unwrap(), third.unwrap()].into_iter().chain(lb_iter);
 
-            line_boundary_positions.extend(iter);
+            line_boundary_positions.extend(iter.filter(|&boundary| {
+                soft_break_policy.segmentation_word_break() != WordBreak::KeepAll
+                    || !keep_all_suppresses_boundary(substring, boundary)
+            }));
             // Remove the unnecessary boundary at the end added by ICU4X.
             line_boundary_positions.pop();
             break;
@@ -411,6 +435,11 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
             // character, as this character is carried back from the next substring, and will be
             // accounted for there.
             if !last && pos == substring.len() - last_len {
+                continue;
+            }
+            if soft_break_policy.segmentation_word_break() == WordBreak::KeepAll
+                && keep_all_suppresses_boundary(substring, pos)
+            {
                 continue;
             }
             line_boundary_positions.push(pos + global_offset);
