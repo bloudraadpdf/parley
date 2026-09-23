@@ -146,6 +146,24 @@ fn letter_spacing_is_not_applied_after_the_last_character_of_a_line() {
 }
 
 #[test]
+fn cluster_reports_only_letter_spacing_that_survives_line_end_trimming() {
+    let layout = unwrapped_layout("Roboto", "ABC", 10.0);
+    let spacing = layout
+        .lines()
+        .flat_map(|line| {
+            line.runs()
+                .flat_map(|run| {
+                    run.clusters()
+                        .map(|cluster| cluster.applied_letter_spacing())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(spacing, [10.0, 10.0, 0.0]);
+}
+
+#[test]
 fn letter_spacing_counts_graphemes_instead_of_combining_components() {
     for (family, text, enlarged) in [
         ("Roboto", "A\u{301}A\u{301}", None),

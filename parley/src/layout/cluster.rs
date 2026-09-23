@@ -163,6 +163,11 @@ impl<'a, B: Brush> Cluster<'a, B> {
         })
     }
 
+    /// Letter spacing included in this cluster's advance after line-end trimming.
+    pub fn applied_letter_spacing(&self) -> f32 {
+        self.run.data.cluster_letter_spacing(self.data) - self.data.trimmed_letter_spacing
+    }
+
     /// Returns `true` if this is a right-to-left cluster.
     pub fn is_rtl(&self) -> bool {
         self.run.is_rtl()
