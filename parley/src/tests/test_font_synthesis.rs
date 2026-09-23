@@ -12,7 +12,7 @@ use crate::{
 
 const TEST_FAMILY: &str = "Parley style synthesis test";
 
-fn test_font_context() -> (FontContext, u64, u64) {
+fn test_font_context_with_style(second_style: FontStyle) -> (FontContext, u64, u64) {
     let regular = Blob::new(Arc::new(
         include_bytes!("../../../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf").to_vec(),
     ));
@@ -36,7 +36,7 @@ fn test_font_context() -> (FontContext, u64, u64) {
         italic.clone(),
         Some(FontInfoOverride {
             family_name: Some(TEST_FAMILY),
-            style: Some(FontStyle::Italic),
+            style: Some(second_style),
             ..FontInfoOverride::default()
         }),
     );
@@ -52,7 +52,7 @@ fn test_font_context() -> (FontContext, u64, u64) {
 
 #[test]
 fn style_synthesis_policy_changes_face_selection_within_one_query() {
-    let (mut font_context, regular_id, italic_id) = test_font_context();
+    let (mut font_context, regular_id, italic_id) = test_font_context_with_style(FontStyle::Italic);
     let mut layout_context = LayoutContext::<ColorBrush>::new();
     let text = "AB";
     let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
@@ -73,4 +73,26 @@ fn style_synthesis_policy_changes_face_selection_within_one_query() {
 
     assert_eq!(runs[1].font().data.id(), italic_id);
     assert_eq!(runs[1].synthesis().skew(), None);
+}
+
+#[test]
+fn oblique_only_does_not_use_an_oblique_face_for_italic() {
+    let (mut font_context, regular_id, oblique_id) =
+        test_font_context_with_style(FontStyle::Oblique(Some(14.0)));
+    let mut layout_context = LayoutContext::<ColorBrush>::new();
+    let text = "AB";
+    let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named(TEST_FAMILY)));
+    builder.push_default(StyleProperty::FontStyle(FontStyle::Italic));
+    builder.push_default(StyleProperty::FontSynthesisStyle(FontSynthesisStyle::Auto));
+    builder.push(
+        StyleProperty::FontSynthesisStyle(FontSynthesisStyle::ObliqueOnly),
+        1..2,
+    );
+
+    let layout = builder.build(text);
+    let runs: Vec<_> = layout.runs().collect();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0].font().data.id(), oblique_id);
+    assert_eq!(runs[1].font().data.id(), regular_id);
 }

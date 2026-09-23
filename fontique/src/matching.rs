@@ -103,9 +103,14 @@ pub fn match_font(
     if !set.iter().any(|f| f.style == use_style) {
         // If the value of font-style is italic:
         if style == FontStyle::Italic {
+            if style_synthesis == FontStyleSynthesis::NoObliqueFallback
+                && set.iter().any(|f| f.style == FontStyle::Normal)
+            {
+                use_style = FontStyle::Normal;
+            }
             // oblique values greater than or equal to 14deg are checked in
             // ascending order
-            if let Some(found) = oblique_fonts
+            else if let Some(found) = oblique_fonts
                 .clone()
                 .filter(|(_, a)| *a >= OBLIQUE_THRESHOLD)
                 .min_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(Less))

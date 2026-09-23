@@ -19,6 +19,8 @@ pub enum FontStyleSynthesis {
     Allowed,
     /// Face matching must select a concrete face without synthetic style.
     Forbidden,
+    /// An italic request prefers a normal face over an oblique fallback.
+    NoObliqueFallback,
 }
 
 /// Primary attributes for font matching: [`FontWidth`], [`FontStyle`] and [`FontWeight`].

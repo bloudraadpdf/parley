@@ -103,6 +103,9 @@ impl FontSynthesisStyle {
             (Self::Auto, _) | (Self::ObliqueOnly, FontStyle::Oblique(_)) => {
                 fontique::FontStyleSynthesis::Allowed
             }
+            (Self::ObliqueOnly, FontStyle::Italic) => {
+                fontique::FontStyleSynthesis::NoObliqueFallback
+            }
             (Self::None | Self::ObliqueOnly, _) => fontique::FontStyleSynthesis::Forbidden,
         }
     }
