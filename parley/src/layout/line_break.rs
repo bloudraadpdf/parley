@@ -990,6 +990,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.line.cloned_owners.before_edge(inline_box);
                             let edge_width = inline_box.width();
                             let edge_height = inline_box.height();
+                            let edge_source_index = inline_box.index;
                             let source_projection = edge.source_projection(inline_box.width());
                             let boundary = self.layout.data.source_soft_wrap_boundary_after(
                                 self.state.item_idx,
@@ -1014,6 +1015,51 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 && project
                             {
                                 self.mark_projected_source_boundary(projection, max_advance);
+                            }
+                            // A start edge and an atomic box at the same source
+                            // boundary form one leading unit. Check their combined
+                            // advance before placing the edge, so a wrap cannot
+                            // leave the edge on the preceding line.
+                            let following_atomic_width = self
+                                .layout
+                                .data
+                                .items
+                                .get(self.state.item_idx + 1)
+                                .filter(|item| item.kind == LayoutItemKind::InlineBox)
+                                .map(|item| &self.layout.data.inline_boxes[item.index])
+                                .filter(|next| next.index == edge_source_index)
+                                .filter(|next| {
+                                    matches!(
+                                        next.line_break_participation(),
+                                        InlineBoxLineBreakParticipation::Atomic(_)
+                                    )
+                                })
+                                .map(|next| next.width());
+                            if source_projection
+                                == LogicalInlineEdgeSourceProjection::BeforeGeometry
+                                && self.layout.data.source_soft_wrap_before_inline_box(
+                                    self.state.item_idx,
+                                    edge_source_index,
+                                )
+                            {
+                                if let Some(width) = following_atomic_width {
+                                    let contribution = edge_width + width;
+                                    if self.state.line.has_content_advance()
+                                        && !self.advance_contribution_fits(
+                                            contribution,
+                                            self.state.line.fit_x + contribution,
+                                            max_advance,
+                                        )
+                                        && commit_current_line!(
+                                            self,
+                                            max_advance,
+                                            line_indent,
+                                            BreakReason::Regular
+                                        )
+                                    {
+                                        return self.start_new_line();
+                                    }
+                                }
                             }
                             match self.logical_owner_edge_placement(
                                 source_projection,

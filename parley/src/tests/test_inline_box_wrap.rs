@@ -2122,6 +2122,59 @@ fn cloned_owner_edges_do_not_repeat_a_break_without_source_progress() {
 }
 
 #[test]
+fn inline_start_edge_stays_with_no_wrap_atomic_content() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let text = "A A B";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push(
+        StyleProperty::TextWrapMode(TextWrapMode::NoWrap),
+        4..text.len(),
+    );
+    for inline_box in [
+        InlineBox::inline_start_edge(711, 4, 1.0, 0.0, InlineBoxBreakAffinity::ToNext),
+        InlineBox::atomic_with_break_affinity(
+            713,
+            4,
+            12.0,
+            0.0,
+            InlineBoxBreakAffinity::Independent,
+        ),
+        InlineBox::inline_end_edge(
+            712,
+            text.len(),
+            1.0,
+            0.0,
+            InlineBoxBreakAffinity::ToPrevious,
+        ),
+    ] {
+        builder.push_inline_box(inline_box);
+    }
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(21.0));
+    let lines = layout.lines().collect::<Vec<_>>();
+    assert_eq!(
+        lines.len(),
+        2,
+        "{:?}",
+        lines
+            .iter()
+            .map(|line| (line.text_range(), placed_inline_edges(line)))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(placed_inline_edges(&lines[0]), []);
+    assert_eq!(
+        placed_inline_edges(&lines[1])
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+        [711, 713, 712]
+    );
+}
+
+#[test]
 fn cloned_owner_edges_participate_in_every_line_and_intrinsic_width() {
     let mut fcx = create_font_context();
     let mut lcx = LayoutContext::new();
