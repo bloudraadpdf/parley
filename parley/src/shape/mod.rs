@@ -15,7 +15,9 @@ use super::style::{Brush, FontFeature, FontSynthesis, FontVariation};
 use crate::analysis::cluster::{Char, CharCluster, Status};
 use crate::analysis::{AnalysisDataSources, CharInfo};
 use crate::convert::script_to_harfrust;
-use crate::inline_box::{InlineBox, InlineBoxShapingParticipation};
+use crate::inline_box::{
+    InlineBox, InlineBoxLineBreakParticipation, InlineBoxShapingParticipation,
+};
 use crate::lru_cache::LruCache;
 use crate::util::{nearly_eq, nearly_zero};
 use crate::{FontData, convert};
@@ -64,6 +66,18 @@ struct Item {
     letter_spacing: f32,
 }
 
+fn inline_box_bidi_level(
+    bidi: &crate::bidi::BidiResolver,
+    text: &str,
+    inline_box: &InlineBox,
+) -> u8 {
+    if inline_box.line_break_participation() == InlineBoxLineBreakParticipation::ContextualSpacing {
+        bidi.level_at_contextual_spacing_boundary(text, inline_box.index)
+    } else {
+        bidi.level_at_byte_boundary(text, inline_box.index)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn shape_text<'a, B: Brush>(
     rcx: &'a ResolveContext,
@@ -90,7 +104,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             // Push the box to the list of items
             layout
                 .data
-                .push_inline_box(box_idx, bidi.level_at_byte_boundary(text, inline_box.index));
+                .push_inline_box(box_idx, inline_box_bidi_level(bidi, text, inline_box));
         }
         return;
     }
@@ -210,7 +224,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 transparent_boxes.extend(boundary_boxes.map(|box_idx| {
                     (
                         box_idx,
-                        bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+                        inline_box_bidi_level(bidi, text, &inline_boxes[box_idx]),
                         inline_boxes[box_idx].index,
                     )
                 }));
@@ -256,7 +270,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             for box_idx in deferred_boxes {
                 layout.data.push_inline_box(
                     box_idx,
-                    bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+                    inline_box_bidi_level(bidi, text, &inline_boxes[box_idx]),
                 );
             }
         }
@@ -287,13 +301,13 @@ pub(crate) fn shape_text<'a, B: Brush>(
     if let Some((box_idx, _inline_box)) = current_box {
         layout.data.push_inline_box(
             box_idx,
-            bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+            inline_box_bidi_level(bidi, text, &inline_boxes[box_idx]),
         );
     }
     for (box_idx, _inline_box) in inline_box_iter {
         layout.data.push_inline_box(
             box_idx,
-            bidi.level_at_byte_boundary(text, inline_boxes[box_idx].index),
+            inline_box_bidi_level(bidi, text, &inline_boxes[box_idx]),
         );
     }
 }

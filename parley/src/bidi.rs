@@ -108,6 +108,31 @@ impl BidiResolver {
         }
     }
 
+    /// Place contextual spacing on the outer side of a bidi run transition.
+    /// Unlike an atomic box, spacing does not acquire the following character's
+    /// bidi level: doing so moves a gap at the start of an RTL run to its far
+    /// side when the run is reversed.
+    pub(crate) fn level_at_contextual_spacing_boundary(
+        &self,
+        text: &str,
+        boundary: usize,
+    ) -> BidiLevel {
+        let following = self.level_at_byte_boundary(text, boundary);
+        let char_boundary = text
+            .get(..boundary)
+            .expect("inline boxes must address UTF-8 source boundaries")
+            .chars()
+            .count();
+        if char_boundary == 0
+            || char_boundary >= self.levels.len()
+            || self.initial_types[char_boundary - 1] == BidiClass::ParagraphSeparator
+            || self.initial_types[char_boundary] == BidiClass::ParagraphSeparator
+        {
+            return following;
+        }
+        following.min(self.levels[char_boundary - 1])
+    }
+
     /// Clears the resolver state.
     pub(crate) fn clear(&mut self) {
         self.initial_types.clear();

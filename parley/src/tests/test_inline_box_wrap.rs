@@ -209,6 +209,49 @@ fn contextual_spacing_preserves_source_break_prohibitions() {
 }
 
 #[test]
+fn contextual_spacing_straddles_reordered_rtl_text() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let text = "AאבB";
+    let layout = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        20.0,
+        None,
+        [
+            InlineBox::contextual_spacing(1, 1, 5.0, 0.0),
+            InlineBox::contextual_spacing(2, 5, 5.0, 0.0),
+        ],
+    );
+    let atoms = layout.bidi_topology();
+    let visual = atoms.atoms();
+    let left_gap = visual
+        .iter()
+        .position(|atom| {
+            matches!(
+                atom.kind(),
+                crate::BidiVisualAtomKind::InlineBox { id: 1, .. }
+            )
+        })
+        .expect("left contextual gap");
+    let rtl_text = visual
+        .iter()
+        .position(|atom| matches!(atom.kind(), crate::BidiVisualAtomKind::Text(range) if range.start == 1))
+        .expect("right-to-left text");
+    let right_gap = visual
+        .iter()
+        .position(|atom| {
+            matches!(
+                atom.kind(),
+                crate::BidiVisualAtomKind::InlineBox { id: 2, .. }
+            )
+        })
+        .expect("right contextual gap");
+    assert!(left_gap < rtl_text && rtl_text < right_gap, "{visual:?}");
+}
+
+#[test]
 fn empty_text_retains_every_transparent_anchor_on_its_line() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
