@@ -322,6 +322,16 @@ pub enum NormalSoftWrapSelection {
     GreedyLatest,
 }
 
+/// Whether overflow-only opportunities participate in line selection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LineBreakPurpose {
+    /// Lay out lines, restoring conditional opportunities when needed.
+    #[default]
+    LineLayout,
+    /// Measure intrinsic widths without restoring suppressed opportunities.
+    IntrinsicSizing,
+}
+
 /// A caller-supplied soft line-break decision at one UTF-8 byte boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LineBreakOverride {
@@ -390,6 +400,7 @@ impl LineStartFitAdvance {
 pub(crate) enum LineBreakOverrideDisposition {
     Suppress,
     NormalOpportunity,
+    OverflowOpportunity,
     UnprioritizedOpportunity,
     ResolvedCollapsedSourceOpportunity,
     ResolvedRetainedSourceOpportunity,
@@ -620,6 +631,16 @@ impl LineBreakOverride {
         Self {
             byte_index,
             disposition: LineBreakOverrideDisposition::NormalOpportunity,
+        }
+    }
+
+    /// Restore a normal opportunity only when ordinary breaks cannot avoid
+    /// overflow. It is excluded from intrinsic sizing and precedes deferred
+    /// discretionary and emergency breaks.
+    pub const fn overflow_opportunity(byte_index: usize) -> Self {
+        Self {
+            byte_index,
+            disposition: LineBreakOverrideDisposition::OverflowOpportunity,
         }
     }
 
@@ -1128,6 +1149,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) discretionary_fit_advances: Vec<DiscretionaryFitAdvance>,
     /// Sorted discretionary break material, keyed by UTF-8 boundary.
     pub(crate) discretionary_breaks: Vec<DiscretionaryBreak>,
+    pub(crate) line_break_purpose: LineBreakPurpose,
     pub(crate) base_level: u8,
     pub(crate) text_len: usize,
     pub(crate) width: f32,
@@ -1190,6 +1212,7 @@ impl<B: Brush> Default for LayoutData<B> {
             source_cluster_fit_baseline: Vec::new(),
             discretionary_fit_advances: Vec::new(),
             discretionary_breaks: Vec::new(),
+            line_break_purpose: LineBreakPurpose::LineLayout,
             base_level: 0,
             text_len: 0,
             width: 0.,
@@ -1219,13 +1242,22 @@ impl<B: Brush> Default for LayoutData<B> {
 }
 
 impl<B: Brush> LayoutData<B> {
-    fn is_overflow_discretionary(&self, byte_index: usize) -> bool {
-        self.discretionary_breaks
-            .binary_search_by_key(&byte_index, |entry| entry.byte_index)
+    pub(crate) fn is_overflow_opportunity(&self, byte_index: usize) -> bool {
+        self.line_break_overrides
+            .binary_search_by_key(&byte_index, |entry| entry.byte_index())
             .ok()
             .is_some_and(|index| {
-                self.discretionary_breaks[index].condition == DiscretionaryBreakCondition::Overflow
+                self.line_break_overrides[index].disposition()
+                    == LineBreakOverrideDisposition::OverflowOpportunity
             })
+            || self
+                .discretionary_breaks
+                .binary_search_by_key(&byte_index, |entry| entry.byte_index)
+                .ok()
+                .is_some_and(|index| {
+                    self.discretionary_breaks[index].condition
+                        == DiscretionaryBreakCondition::Overflow
+                })
     }
 
     pub(crate) fn line_paragraph_level(&self, line: &LineData) -> u8 {
@@ -1362,6 +1394,7 @@ impl<B: Brush> LayoutData<B> {
                             ) => Some(SourceSoftWrapAuthority::CallerResolvedRetainedSpace),
                             Some(
                                 LineBreakOverrideDisposition::NormalOpportunity
+                                | LineBreakOverrideDisposition::OverflowOpportunity
                                 | LineBreakOverrideDisposition::UnprioritizedOpportunity,
                             ) => Some(SourceSoftWrapAuthority::AdjoiningStyles {
                                 following_wrap_mode: self.styles[cluster.style_index as usize]
@@ -1401,6 +1434,7 @@ impl<B: Brush> LayoutData<B> {
         self.line_start_fit_advances.clear();
         self.source_cluster_fit_baseline.clear();
         self.discretionary_breaks.clear();
+        self.line_break_purpose = LineBreakPurpose::LineLayout;
         self.discretionary_fit_advances.clear();
         self.base_level = 0;
         self.text_len = 0;
@@ -1869,7 +1903,7 @@ impl<B: Brush> LayoutData<B> {
                                     | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity
                             )
                         );
-                        let discretionary_suppressed = self.is_overflow_discretionary(byte_index);
+                        let discretionary_suppressed = self.is_overflow_opportunity(byte_index);
                         let style_resolved_opportunity = !matches!(
                             boundary_override,
                             Some(LineBreakOverrideDisposition::Suppress)
@@ -1965,7 +1999,7 @@ impl<B: Brush> LayoutData<B> {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
                             let source_break = break_affinity
                                 == crate::InlineBoxBreakAffinity::SourceText
-                                && !self.is_overflow_discretionary(ibox.index)
+                                && !self.is_overflow_opportunity(ibox.index)
                                 && self.source_soft_wrap_before_inline_box(item_index, ibox.index);
                             measure_atomic(
                                 break_affinity.allows_break_before() || source_break,
@@ -1975,7 +2009,11 @@ impl<B: Brush> LayoutData<B> {
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
                             let boundary =
                                 self.contextual_spacing_soft_wrap_boundary(item_index, ibox.index);
-                            measure_atomic(boundary.is_available_from(text_wrap_mode), false);
+                            measure_atomic(
+                                boundary.is_available_from(text_wrap_mode)
+                                    && !self.is_overflow_opportunity(ibox.index),
+                                false,
+                            );
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             let source_projection = edge.source_projection(width);
@@ -1985,7 +2023,7 @@ impl<B: Brush> LayoutData<B> {
                                 boundary.projection_from(ibox.index, edge.following_source_space());
                             let project = projection.is_some()
                                 && !projection.is_some_and(|boundary| {
-                                    self.is_overflow_discretionary(boundary.target())
+                                    self.is_overflow_opportunity(boundary.target())
                                 })
                                 && source_projection != LogicalInlineEdgeSourceProjection::Absent
                                 && (source_projection

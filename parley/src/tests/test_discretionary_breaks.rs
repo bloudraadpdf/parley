@@ -24,6 +24,83 @@ fn unwrapped_advance(text: &str) -> f32 {
 }
 
 #[test]
+fn restored_normal_breaks_follow_phrases_and_precede_deferred_hyphens() {
+    use crate::layout::{DiscretionaryBreakCondition, LineBreakOverride, LineBreakPurpose};
+
+    let text = "ab\u{00ad}cd efgh";
+    let mut layout = roboto_layout(text);
+    let source_advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    let range = cluster.text_range();
+                    SourceClusterFitAdvance::new(
+                        range.start,
+                        if &text[range.clone()] == "\u{00ad}" {
+                            0.0
+                        } else {
+                            10.0
+                        },
+                    )
+                    .unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(source_advances);
+    let restored = "ab\u{00ad}c".len();
+    layout.set_line_break_overrides(vec![LineBreakOverride::overflow_opportunity(restored)]);
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: "ab\u{00ad}".len(),
+        advance: 0.0,
+        max_consecutive_lines: None,
+        condition: DiscretionaryBreakCondition::Overflow,
+    }]);
+
+    layout.break_all_lines(Some(70.0));
+    assert_eq!(
+        layout.lines().next().unwrap().text_range(),
+        0.."ab\u{00ad}cd ".len()
+    );
+    layout.break_all_lines(Some(30.0));
+    let first = layout.lines().next().unwrap();
+    assert_eq!(first.text_range(), 0..restored);
+    assert!(!first.ends_at_discretionary_break());
+    layout.break_all_lines(Some(20.0));
+    assert!(layout.lines().next().unwrap().ends_at_discretionary_break());
+
+    layout.set_line_break_purpose(LineBreakPurpose::IntrinsicSizing);
+    layout.break_all_lines(Some(0.0));
+    assert_eq!(
+        layout.lines().next().unwrap().text_range(),
+        0.."ab\u{00ad}cd ".len()
+    );
+    assert!(
+        layout
+            .lines()
+            .all(|line| !line.ends_at_discretionary_break())
+    );
+    layout.set_line_break_purpose(LineBreakPurpose::LineLayout);
+    layout.break_all_lines(Some(30.0));
+    assert_eq!(layout.lines().next().unwrap().text_range(), 0..restored);
+}
+
+#[test]
+fn restored_normal_opportunities_do_not_reduce_direct_intrinsic_width() {
+    use crate::layout::LineBreakOverride;
+    let text = "abcd";
+    let mut layout = roboto_layout(text);
+    let natural = layout.calculate_content_widths();
+    layout.set_line_break_overrides(vec![LineBreakOverride::overflow_opportunity(2)]);
+    let widths = layout.calculate_content_widths();
+    assert!((widths.min - natural.min).abs() < 0.001);
+    assert!((widths.max - natural.max).abs() < 0.001);
+    layout.break_all_lines(Some(unwrapped_advance("ab") + 0.001));
+    assert_eq!(layout.lines().next().unwrap().text_range(), 0..2);
+}
+
+#[test]
 fn the_only_opportunity_is_taken_when_its_hyphen_overflows() {
     // CSS Text 4 §5.4: a word that fits no other way breaks at its
     // hyphenation opportunity even when the hyphen itself overflows the
