@@ -1159,6 +1159,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) discretionary_fit_advances: Vec<DiscretionaryFitAdvance>,
     /// Sorted discretionary break material, keyed by UTF-8 boundary.
     pub(crate) discretionary_breaks: Vec<DiscretionaryBreak>,
+    pub(crate) discretionary_break_shapes: Vec<super::DiscretionaryBreakShape<B>>,
     pub(crate) base_level: u8,
     pub(crate) text_len: usize,
     pub(crate) width: f32,
@@ -1221,6 +1222,7 @@ impl<B: Brush> Default for LayoutData<B> {
             source_cluster_fit_baseline: Vec::new(),
             discretionary_fit_advances: Vec::new(),
             discretionary_breaks: Vec::new(),
+            discretionary_break_shapes: Vec::new(),
             base_level: 0,
             text_len: 0,
             width: 0.,
@@ -1423,6 +1425,7 @@ impl<B: Brush> LayoutData<B> {
         self.line_start_fit_advances.clear();
         self.source_cluster_fit_baseline.clear();
         self.discretionary_breaks.clear();
+        self.discretionary_break_shapes.clear();
         self.discretionary_fit_advances.clear();
         self.base_level = 0;
         self.text_len = 0;

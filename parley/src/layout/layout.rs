@@ -11,7 +11,7 @@ use crate::layout::{
     SourceClusterFitAdvance,
 };
 use crate::style::Brush;
-use alloc::vec::Vec;
+use alloc::{string::String, sync::Arc, vec::Vec};
 use core::cmp::Ordering;
 
 use crate::layout::{
@@ -20,8 +20,54 @@ use crate::layout::{
 };
 use crate::{IndentOptions, IndentStart};
 
+/// A shaped string inserted only at a selected discretionary boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DiscretionaryBreakShape<B: Brush> {
+    pub(crate) byte_index: usize,
+    pub(crate) max_consecutive_lines: Option<u32>,
+    text: String,
+    layout: Arc<Layout<B>>,
+}
+
+impl<B: Brush> DiscretionaryBreakShape<B> {
+    /// Retain a single-line shape with its source text and break limit.
+    pub fn new(
+        byte_index: usize,
+        max_consecutive_lines: Option<u32>,
+        text: String,
+        layout: Layout<B>,
+    ) -> Option<Self> {
+        if byte_index == 0
+            || layout.len() > 1
+            || (layout.len() == 0 && !text.is_empty())
+            || layout.data.text_len != text.len()
+            || !layout.inline_boxes().is_empty()
+            || !layout.full_width().is_finite()
+            || layout.full_width() < 0.0
+        {
+            return None;
+        }
+        Some(Self {
+            byte_index,
+            max_consecutive_lines,
+            text,
+            layout: Arc::new(layout),
+        })
+    }
+
+    /// Text used to shape this replacement.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Immutable glyph shape used for both fitting and drawing.
+    pub fn layout(&self) -> &Layout<B> {
+        &self.layout
+    }
+}
+
 /// Text layout.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Layout<B: Brush> {
     pub(crate) data: LayoutData<B>,
 }
@@ -191,6 +237,41 @@ impl<B: Brush> Layout<B> {
             canonical.push(entry);
         }
         self.data.discretionary_breaks = canonical;
+        self.data.discretionary_break_shapes.clear();
+    }
+
+    /// Set shaped replacements for discretionary boundaries.
+    /// Their widths and metrics contribute only when the boundary is selected.
+    pub fn set_discretionary_break_shapes(
+        &mut self,
+        mut shapes: Vec<DiscretionaryBreakShape<B>>,
+    ) {
+        shapes.sort_by_key(|shape| shape.byte_index);
+        shapes.dedup_by_key(|shape| shape.byte_index);
+        shapes.retain(|shape| shape.byte_index <= self.data.text_len);
+        self.set_discretionary_breaks(
+            shapes
+                .iter()
+                .map(|shape| DiscretionaryBreak {
+                    byte_index: shape.byte_index,
+                    advance: shape.layout().full_width(),
+                    max_consecutive_lines: shape.max_consecutive_lines,
+                })
+                .collect(),
+        );
+        self.data.discretionary_break_shapes = shapes;
+    }
+
+    /// Shaped replacement retained at a discretionary boundary.
+    pub fn discretionary_break_shape(
+        &self,
+        byte_index: usize,
+    ) -> Option<&DiscretionaryBreakShape<B>> {
+        self.data
+            .discretionary_break_shapes
+            .binary_search_by_key(&byte_index, |shape| shape.byte_index)
+            .ok()
+            .map(|index| &self.data.discretionary_break_shapes[index])
     }
 
     /// Returns the style collection for the layout.

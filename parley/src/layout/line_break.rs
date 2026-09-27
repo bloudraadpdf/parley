@@ -2350,6 +2350,25 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }
         }
 
+        if line.ends_at_discretionary_break {
+            if let Some(shape) =
+                self.layout.discretionary_break_shape(line.text_range.end)
+            {
+                for run in shape.layout().runs() {
+                    let metrics = *run.metrics();
+                    line.metrics.ascent = line.metrics.ascent.max(metrics.ascent);
+                    line.metrics.descent = line.metrics.descent.max(metrics.descent);
+                    line.metrics.line_height =
+                        line.metrics.line_height.max(metrics.line_height);
+                    include_line_metric_extents(
+                        &mut line_extents,
+                        LineMetricExtents::from_run(metrics),
+                    );
+                    have_metrics = true;
+                }
+            }
+        }
+
         // Resolve the source-terminal sequence while line items are still in
         // logical source order. The immutable summary retains physical
         // placement for later bidi reordering and re-alignment.

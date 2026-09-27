@@ -220,3 +220,66 @@ fn replacing_source_fit_projection_restores_the_original_cluster_advances() {
     assert_eq!(layout.lines().count(), 1);
     assert!((layout.lines().next().unwrap().metrics().advance - natural).abs() < 0.001);
 }
+
+fn fallback_hyphen_layout(text: &str, fallback_start: usize) -> Layout<ColorBrush> {
+    let mut font_context = create_font_context();
+    let mut layout_context = LayoutContext::new();
+    let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    builder.push(
+        StyleProperty::FontFamily(FontFamily::named("Noto Kufi Arabic")),
+        fallback_start..text.len(),
+    );
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    layout
+}
+
+#[test]
+fn selected_discretionary_fallback_contributes_its_own_line_metrics() {
+    let text = "aa\u{00ad}bbbb";
+    let hyphen = fallback_hyphen_layout("-", 0);
+    let reference = fallback_hyphen_layout("aa-", 2);
+    let mut layout = roboto_layout(text);
+    layout.set_discretionary_break_shapes(vec![
+        crate::layout::DiscretionaryBreakShape::new(
+            "aa\u{00ad}".len(),
+            None,
+            "-".into(),
+            hyphen,
+        )
+        .unwrap(),
+    ]);
+    layout.break_all_lines(Some(reference.width()));
+    let actual = layout.get(0).unwrap();
+    let expected = reference.get(0).unwrap();
+    assert!(actual.ends_at_discretionary_break());
+    assert_eq!(actual.metrics().ascent, expected.metrics().ascent);
+    assert_eq!(actual.metrics().descent, expected.metrics().descent);
+    assert_eq!(actual.metrics().line_height, expected.metrics().line_height);
+}
+
+#[test]
+fn unused_discretionary_fallback_does_not_change_line_metrics() {
+    let text = "aa\u{00ad}bbbb";
+    let mut reference = roboto_layout(text);
+    reference.break_all_lines(None);
+    let mut layout = roboto_layout(text);
+    layout.set_discretionary_break_shapes(vec![
+        crate::layout::DiscretionaryBreakShape::new(
+            "aa\u{00ad}".len(),
+            None,
+            "-".into(),
+            fallback_hyphen_layout("-", 0),
+        )
+        .unwrap(),
+    ]);
+    layout.break_all_lines(None);
+    let actual = *layout.get(0).unwrap().metrics();
+    let expected = *reference.get(0).unwrap().metrics();
+    assert_eq!(actual.ascent, expected.ascent);
+    assert_eq!(actual.descent, expected.descent);
+    assert_eq!(actual.line_height, expected.line_height);
+    assert_eq!(actual.advance, expected.advance);
+}
