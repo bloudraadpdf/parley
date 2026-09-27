@@ -290,6 +290,43 @@ pub(crate) enum Boundary {
     Mandatory = 3,
 }
 
+fn retain_break_all_grapheme_boundaries<B: Brush>(
+    lcx: &LayoutContext<B>,
+    text: &str,
+    boundaries: &mut Vec<usize>,
+) {
+    if !lcx
+        .style_table
+        .iter()
+        .any(|style| style.soft_break_policy().segmentation_word_break() == WordBreak::BreakAll)
+    {
+        return;
+    }
+    let mut graphemes = lcx
+        .analysis_data_sources
+        .grapheme_boundaries(text)
+        .peekable();
+    let mut style_runs = lcx.style_runs.iter().peekable();
+    boundaries.retain(|boundary| {
+        while graphemes.peek().is_some_and(|position| position < boundary) {
+            graphemes.next();
+        }
+        while style_runs
+            .peek()
+            .is_some_and(|run| run.range.end <= *boundary)
+        {
+            style_runs.next();
+        }
+        let breaks_letters = style_runs.peek().is_some_and(|run| {
+            lcx.style_table[run.style_index as usize]
+                .soft_break_policy()
+                .segmentation_word_break()
+                == WordBreak::BreakAll
+        });
+        !breaks_letters || graphemes.peek() == Some(boundary)
+    });
+}
+
 pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str) {
     struct SoftBreakSegmentIter<'a, I: Iterator, B: Brush> {
         text: &'a str,
@@ -467,6 +504,8 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
             global_offset += substring.len() - last_len;
         }
     }
+
+    retain_break_all_grapheme_boundaries(lcx, text, &mut line_boundary_positions);
 
     // Collect boundary byte positions compactly
     let mut wb_iter = lcx
