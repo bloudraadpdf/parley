@@ -66,7 +66,8 @@ fn selected_discretionary_material_contributes_its_owners_line_metrics() {
     target.set_discretionary_breaks(alloc::vec![crate::layout::DiscretionaryBreak {
         byte_index: 4,
         advance: 10.0,
-        max_consecutive_lines: None
+        max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     target.break_all_lines(Some(0.0));
     let mut reference = build(&mut lcx, &mut fcx, "aa=", 2..3);

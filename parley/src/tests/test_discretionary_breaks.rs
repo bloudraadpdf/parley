@@ -38,6 +38,7 @@ fn the_only_opportunity_is_taken_when_its_hyphen_overflows() {
         byte_index: "im\u{00AD}".len(),
         advance: hyphen,
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     layout.break_all_lines(Some(max_advance));
 
@@ -59,12 +60,105 @@ fn an_earlier_fitting_opportunity_beats_an_overflowing_hyphen() {
         byte_index: "a im\u{00AD}".len(),
         advance: hyphen,
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     layout.break_all_lines(Some(max_advance));
 
     let first = layout.lines().next().expect("the text produces a line");
     assert!(!first.ends_at_discretionary_break());
     assert_eq!(first.text_range(), 0.."a ".len());
+}
+
+#[test]
+fn overflow_discretionaries_follow_ordinary_breaks_and_do_not_reduce_intrinsic_width() {
+    use crate::layout::DiscretionaryBreakCondition;
+
+    let word = "ab\u{00ad}cd";
+    let hyphen = unwrapped_advance("-");
+    let word_width = unwrapped_advance(word);
+    for prefix in ["", "X "] {
+        let text = alloc::format!("{prefix}{word}");
+        let mut layout = roboto_layout(&text);
+        layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+            byte_index: prefix.len() + "ab\u{00ad}".len(),
+            advance: hyphen,
+            max_consecutive_lines: None,
+            condition: DiscretionaryBreakCondition::Overflow,
+        }]);
+        assert!((layout.calculate_content_widths().min - word_width).abs() < 0.001);
+        layout.break_all_lines(Some(word_width + 0.1));
+        assert!(
+            layout
+                .lines()
+                .all(|line| !line.ends_at_discretionary_break())
+        );
+        assert_eq!(
+            layout.lines().count(),
+            if prefix.is_empty() { 1 } else { 2 }
+        );
+
+        layout.break_all_lines(Some(unwrapped_advance("ab") + hyphen));
+        let lines = layout.lines().collect::<Vec<_>>();
+        let hyphenated = usize::from(!prefix.is_empty());
+        assert!(lines[hyphenated].ends_at_discretionary_break());
+        assert_eq!(
+            lines[hyphenated].text_range(),
+            prefix.len()..prefix.len() + "ab\u{00ad}".len()
+        );
+
+        layout.break_all_lines(None);
+        assert_eq!(layout.lines().count(), 1);
+        assert!(!layout.lines().next().unwrap().ends_at_discretionary_break());
+        assert!((layout.calculate_content_widths().min - word_width).abs() < 0.001);
+    }
+}
+
+#[test]
+fn a_later_overflowing_discretionary_does_not_replace_a_fitting_fallback() {
+    let text = "ab\u{00ad}c\u{00ad}de";
+    let mut layout = roboto_layout(text);
+    let advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    let range = cluster.text_range();
+                    SourceClusterFitAdvance::new(
+                        range.start,
+                        if &text[range.clone()] == "\u{00ad}" {
+                            0.0
+                        } else {
+                            10.0
+                        },
+                    )
+                    .unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(advances);
+    let breaks: Vec<_> = text
+        .match_indices('\u{00ad}')
+        .map(|(index, _)| DiscretionaryBreak {
+            byte_index: index + '\u{00ad}'.len_utf8(),
+            advance: unwrapped_advance("-"),
+            max_consecutive_lines: None,
+            condition: crate::layout::DiscretionaryBreakCondition::Overflow,
+        })
+        .collect();
+    layout.set_discretionary_fit_advances(
+        breaks
+            .iter()
+            .map(|entry| DiscretionaryFitAdvance::new(entry.byte_index, 10.0).unwrap())
+            .collect(),
+    );
+    layout.set_discretionary_breaks(breaks);
+    layout.break_all_lines(Some(35.0));
+    assert_eq!(
+        layout.lines().next().unwrap().text_range(),
+        0.."ab\u{00ad}".len()
+    );
+    assert!(layout.lines().next().unwrap().ends_at_discretionary_break());
 }
 
 #[test]
@@ -93,6 +187,7 @@ fn projected_upright_advances_select_the_soft_hyphen_without_changing_rendered_w
         byte_index: break_at,
         advance: unwrapped_advance("-"),
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     layout.set_discretionary_fit_advances(vec![
         DiscretionaryFitAdvance::new(break_at, 12.0).unwrap(),
@@ -155,6 +250,7 @@ fn projected_discretionary_material_must_fit_before_preempting_an_earlier_space(
         byte_index: break_at,
         advance: unwrapped_advance("-"),
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     layout.set_discretionary_fit_advances(vec![
         DiscretionaryFitAdvance::new(break_at, 50.0).unwrap(),

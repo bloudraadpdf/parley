@@ -687,6 +687,16 @@ fn is_cursive_script(script: icu_properties::props::Script) -> bool {
     .contains(&script)
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DiscretionaryBreakCondition {
+    /// Participate with ordinary soft wrap opportunities.
+    #[default]
+    Normal,
+    /// Participate only when no ordinary opportunity prevents overflow.
+    /// These opportunities do not contribute to min-content sizing.
+    Overflow,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DiscretionaryBreak {
     /// UTF-8 byte index of the boundary after the discretionary character.
@@ -696,6 +706,7 @@ pub struct DiscretionaryBreak {
     /// Maximum number of consecutive lines that may end at this class of
     /// discretionary break. `None` imposes no limit.
     pub max_consecutive_lines: Option<u32>,
+    pub condition: DiscretionaryBreakCondition,
 }
 use crate::util::nearly_zero;
 use crate::{
@@ -1208,6 +1219,15 @@ impl<B: Brush> Default for LayoutData<B> {
 }
 
 impl<B: Brush> LayoutData<B> {
+    fn is_overflow_discretionary(&self, byte_index: usize) -> bool {
+        self.discretionary_breaks
+            .binary_search_by_key(&byte_index, |entry| entry.byte_index)
+            .ok()
+            .is_some_and(|index| {
+                self.discretionary_breaks[index].condition == DiscretionaryBreakCondition::Overflow
+            })
+    }
+
     pub(crate) fn line_paragraph_level(&self, line: &LineData) -> u8 {
         self.line_items[line.item_range.clone()]
             .iter()
@@ -1849,21 +1869,24 @@ impl<B: Brush> LayoutData<B> {
                                     | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity
                             )
                         );
+                        let discretionary_suppressed = self.is_overflow_discretionary(byte_index);
                         let style_resolved_opportunity = !matches!(
                             boundary_override,
                             Some(LineBreakOverrideDisposition::Suppress)
-                        ) && (matches!(
+                        ) && ((matches!(
                             boundary_override,
-                            Some(
-                                LineBreakOverrideDisposition::NormalOpportunity
-                                    | LineBreakOverrideDisposition::UnprioritizedOpportunity
+                            Some(LineBreakOverrideDisposition::NormalOpportunity)
+                        ) || boundary == Boundary::Line)
+                            && !discretionary_suppressed
+                            || matches!(
+                                boundary_override,
+                                Some(LineBreakOverrideDisposition::UnprioritizedOpportunity)
                             )
-                        ) || boundary == Boundary::Line
                             || (style.overflow_wrap == OverflowWrap::Anywhere
                                 && cluster.flags & ClusterData::GRAPHEME_START != 0));
                         if boundary == Boundary::Mandatory
                             || (!source_boundary_was_projected
-                                && (resolved_source_opportunity
+                                && ((resolved_source_opportunity && !discretionary_suppressed)
                                     || (prev_text_wrap_mode == TextWrapMode::Wrap
                                         && style_resolved_opportunity)))
                         {
@@ -1942,6 +1965,7 @@ impl<B: Brush> LayoutData<B> {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
                             let source_break = break_affinity
                                 == crate::InlineBoxBreakAffinity::SourceText
+                                && !self.is_overflow_discretionary(ibox.index)
                                 && self.source_soft_wrap_before_inline_box(item_index, ibox.index);
                             measure_atomic(
                                 break_affinity.allows_break_before() || source_break,
@@ -1960,6 +1984,9 @@ impl<B: Brush> LayoutData<B> {
                             let projection =
                                 boundary.projection_from(ibox.index, edge.following_source_space());
                             let project = projection.is_some()
+                                && !projection.is_some_and(|boundary| {
+                                    self.is_overflow_discretionary(boundary.target())
+                                })
                                 && source_projection != LogicalInlineEdgeSourceProjection::Absent
                                 && (source_projection
                                     == LogicalInlineEdgeSourceProjection::AfterGeometry

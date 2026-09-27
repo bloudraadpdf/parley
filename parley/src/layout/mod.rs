@@ -29,8 +29,8 @@ pub use alignment::{Alignment, AlignmentOptions, JustificationMode};
 pub use bidi::{BidiAtomId, BidiLevel, BidiTopology, BidiVisualAtom, BidiVisualAtomKind};
 pub use cluster::{Affinity, Cluster, ClusterPath, ClusterSide};
 pub use data::{
-    BreakReason, DiscretionaryBreak, DiscretionaryFitAdvance, LineBreakOverride,
-    LineStartFitAdvance, NormalSoftWrapSelection, SourceClusterFitAdvance,
+    BreakReason, DiscretionaryBreak, DiscretionaryBreakCondition, DiscretionaryFitAdvance,
+    LineBreakOverride, LineStartFitAdvance, NormalSoftWrapSelection, SourceClusterFitAdvance,
 };
 pub use glyph::Glyph;
 pub use layout::Layout;

@@ -1657,6 +1657,7 @@ fn inserted_discretionary_hyphen_does_not_displace_a_fitting_word() {
         byte_index: "alpha\u{00AD}".len(),
         advance: 4.0,
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     layout.break_all_lines(Some(max_advance));
 
@@ -1831,6 +1832,7 @@ fn projected_discretionary_break_retains_material_and_line_limits() {
                         byte_index,
                         advance,
                         max_consecutive_lines: limit,
+                        condition: crate::layout::DiscretionaryBreakCondition::Normal,
                     })
                     .collect(),
             );
@@ -1877,6 +1879,7 @@ fn discretionary_material_participates_in_line_fit_and_metrics_only_when_taken()
         byte_index: "alpha\u{00AD}".len(),
         advance: inserted_advance,
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     layout.break_all_lines(Some(prefix_advance + inserted_advance + 0.25));
 
@@ -1894,6 +1897,7 @@ fn discretionary_material_participates_in_line_fit_and_metrics_only_when_taken()
         byte_index: "alpha\u{00AD}".len(),
         advance: inserted_advance,
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     unbroken.break_all_lines(None);
     assert_eq!(unbroken.len(), 1);
@@ -1907,6 +1911,7 @@ fn discretionary_material_participates_in_line_fit_and_metrics_only_when_taken()
         byte_index: "alpha\u{00AD}".len(),
         advance: inserted_advance,
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     too_narrow.break_all_lines(Some(prefix_advance + inserted_advance - 0.25));
     assert_eq!(
@@ -1943,6 +1948,7 @@ fn discretionary_break_respects_consecutive_line_limit() {
                 byte_index: index + '\u{00AD}'.len_utf8(),
                 advance: 2.0,
                 max_consecutive_lines: Some(1),
+                condition: crate::layout::DiscretionaryBreakCondition::Normal,
             })
             .collect(),
     );
@@ -1979,6 +1985,7 @@ fn zero_advance_discretionary_break_reports_selected_boundary() {
         byte_index: "aa\u{00AD}".len(),
         advance: 0.0,
         max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
     }]);
     layout.break_all_lines(Some(measure));
 
