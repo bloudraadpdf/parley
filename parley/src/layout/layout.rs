@@ -32,6 +32,8 @@ impl<B: Brush> Layout<B> {
     /// list restores original fit advances before applying new entries; an
     /// empty list removes the projection.
     pub fn set_source_cluster_fit_advances(&mut self, mut advances: Vec<SourceClusterFitAdvance>) {
+        unjustify(&mut self.data);
+        self.data.restore_line_end_letter_spacing();
         if self.data.source_cluster_fit_baseline.len() == self.data.clusters.len() {
             for (cluster, original) in self
                 .data

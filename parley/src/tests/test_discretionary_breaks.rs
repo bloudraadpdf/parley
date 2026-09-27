@@ -193,7 +193,15 @@ fn projected_upright_advances_preserve_unicode_cjk_breaks() {
 #[test]
 fn replacing_source_fit_projection_restores_the_original_cluster_advances() {
     let text = "a b";
-    let mut layout = roboto_layout(text);
+    let mut font_context = create_font_context();
+    let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    builder.push_default(StyleProperty::LetterSpacing(5.0));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    let natural = layout.lines().next().unwrap().metrics().advance;
     let projected = layout
         .runs()
         .flat_map(|run| {
@@ -205,7 +213,10 @@ fn replacing_source_fit_projection_restores_the_original_cluster_advances() {
         })
         .collect();
     layout.set_source_cluster_fit_advances(projected);
+    layout.break_all_lines(Some(natural + 1.0));
+    assert!(layout.lines().count() > 1);
     layout.set_source_cluster_fit_advances(Vec::new());
-    layout.break_all_lines(Some(unwrapped_advance(text) + 1.0));
+    layout.break_all_lines(None);
     assert_eq!(layout.lines().count(), 1);
+    assert!((layout.lines().next().unwrap().metrics().advance - natural).abs() < 0.001);
 }
