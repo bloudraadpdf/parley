@@ -1608,6 +1608,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 }
                             }
                         }
+                        if style.overflow_wrap != OverflowWrap::Normal
+                            && text_wrap_mode == TextWrapMode::Wrap
+                            && matches!(line_fit, LineFit::Fits)
+                            && self
+                                .layout
+                                .data
+                                .clusters
+                                .get(self.state.cluster_idx)
+                                .is_some_and(|next| {
+                                    self.layout.data.styles[next.style_index as usize].overflow_wrap
+                                        == OverflowWrap::Normal
+                                })
+                        {
+                            self.state.mark_emergency_break_opportunity();
+                        }
                     }
                     self.state.run_idx += 1;
                     self.state.item_idx += 1;

@@ -1576,6 +1576,30 @@ fn overflow_wrap_anywhere_remains_an_emergency_policy() {
     );
 }
 
+#[test]
+fn overflow_wrap_at_inline_end_allows_a_break_after_the_inline() {
+    let text = "XXXXX";
+    for value in [OverflowWrap::Anywhere, OverflowWrap::BreakWord] {
+        let mut fcx = create_font_context();
+        let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push(StyleProperty::OverflowWrap(value), 1..3);
+        let mut layout = builder.build(text);
+        let unit = layout.calculate_content_widths().max / 5.0;
+        layout.break_all_lines(Some(unit * 2.1));
+        assert_eq!(
+            layout
+                .lines()
+                .map(|line| line.text_range())
+                .collect::<Vec<_>>(),
+            [0..2, 2..3, 3..5],
+            "{value:?}"
+        );
+    }
+}
+
 /// An ordinary earlier inter-word boundary is not eligible for punctuation
 /// preference when a later collapsible space overflows.
 #[test]
