@@ -2275,6 +2275,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         );
         let line = &mut self.lines.lines[line_idx];
         line.terminal_whitespace = terminal.whitespace;
+        line.terminal_justification_start = terminal.justification_start;
         line.removed_terminal_source_ranges = terminal.removed_source_ranges;
         if line.break_reason == BreakReason::Regular {
             line.num_spaces = line
@@ -3363,6 +3364,7 @@ struct CollectedTerminalWhitespace {
     whitespace: TerminalWhitespace,
     removed_source_ranges: Vec<Range<usize>>,
     justification_spaces: usize,
+    justification_start: Option<usize>,
 }
 
 fn collect_terminal_whitespace<B: Brush>(
@@ -3373,6 +3375,7 @@ fn collect_terminal_whitespace<B: Brush>(
     let mut terminal = TerminalWhitespace::Absent;
     let mut removed_source_ranges: Vec<Range<usize>> = Vec::new();
     let mut justification_spaces = 0;
+    let mut justification_start = None;
     'items: for line_item in line_items.iter().rev() {
         match line_item.kind {
             LayoutItemKind::InlineBox => {
@@ -3392,6 +3395,7 @@ fn collect_terminal_whitespace<B: Brush>(
                             justification_spaces +=
                                 usize::from(cluster.info.whitespace().is_space_or_nbsp());
                             let range = cluster.text_range(run);
+                            justification_start = Some(range.start);
                             let advance = selected_source_cluster_advance
                                 .resolve(range.start, cluster.advance);
                             let removes_source = terminal.removes_source(disposition);
@@ -3418,6 +3422,7 @@ fn collect_terminal_whitespace<B: Brush>(
         whitespace: terminal,
         removed_source_ranges,
         justification_spaces,
+        justification_start,
     }
 }
 

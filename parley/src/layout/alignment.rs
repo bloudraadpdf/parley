@@ -266,6 +266,7 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
 
                 let adjustment =
                     free_space / opportunities as f32 * if UNDO_JUSTIFICATION { -1. } else { 1. };
+                let terminal_start = layout.lines[line_index].terminal_justification_start;
                 let mut applied = 0;
                 let line_items = &layout.line_items[item_range];
                 let line_items: &mut dyn Iterator<Item = &LineItemData> = if is_rtl {
@@ -285,7 +286,13 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                         if applied == opportunities {
                             break;
                         }
-                        if cluster_is_justification_opportunity(cluster, justification_mode) {
+                        let is_terminal = terminal_start.is_some_and(|start| {
+                            layout.runs[line_item.index].text_range.start + cluster.text_offset
+                                >= start
+                        });
+                        if !is_terminal
+                            && cluster_is_justification_opportunity(cluster, justification_mode)
+                        {
                             cluster.advance += adjustment;
                             applied += 1;
                         }

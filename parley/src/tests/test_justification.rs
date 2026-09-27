@@ -64,3 +64,57 @@ fn a_line_with_a_preserved_tab_is_not_justified() {
         first_line_cluster_advances(&plain)
     );
 }
+
+#[test]
+fn rtl_justification_expands_the_interior_space_not_the_terminal_space() {
+    let text = "\u{05d4}\u{05dd} \u{05d3}\u{05d4} XXX";
+    let mut font_context = create_font_context();
+    let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Arimo")));
+    builder.push_default(StyleProperty::FontSize(15.0));
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    builder.set_direction(crate::BaseDirection::Rtl);
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(70.0));
+    assert_eq!(layout.len(), 2);
+    let advances = |layout: &Layout<ColorBrush>| {
+        let mut spaces = layout
+            .lines()
+            .next()
+            .unwrap()
+            .runs()
+            .flat_map(|run| {
+                run.clusters()
+                    .filter_map(|cluster| {
+                        let range = cluster.text_range();
+                        (text.get(range.clone()) == Some(" "))
+                            .then_some((range.start, cluster.advance()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        spaces.sort_by_key(|space| space.0);
+        spaces
+    };
+    let plain = advances(&layout);
+    assert_eq!(plain.len(), 2);
+    layout.align(Some(70.0), Alignment::Justify, AlignmentOptions::default());
+    let justified = advances(&layout);
+    assert_eq!(
+        justified[1], plain[1],
+        "the terminal space must retain its natural advance"
+    );
+    assert!(
+        justified[0].1 > plain[0].1,
+        "the interior space receives the line's free space"
+    );
+    layout.align(Some(70.0), Alignment::Start, AlignmentOptions::default());
+    assert_eq!(
+        advances(&layout),
+        plain,
+        "undo uses the same source opportunities"
+    );
+}

@@ -1020,6 +1020,7 @@ pub(crate) struct LineData {
     pub(crate) terminal_whitespace: TerminalWhitespace,
     /// Number of justified clusters on the line.
     pub(crate) num_spaces: usize,
+    pub(crate) terminal_justification_start: Option<usize>,
     /// Source-cluster advance selected for this materialised line.
     pub(crate) selected_source_cluster_advance: SelectedSourceClusterAdvance,
     /// Collapsible terminal source clusters removed on this materialised line.
