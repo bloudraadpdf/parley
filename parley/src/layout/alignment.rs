@@ -266,7 +266,9 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
 
                 let adjustment =
                     free_space / opportunities as f32 * if UNDO_JUSTIFICATION { -1. } else { 1. };
-                let terminal_start = layout.lines[line_index].terminal_justification_start;
+                let terminal_start = (justification_mode == JustificationMode::InterWord)
+                    .then_some(layout.lines[line_index].terminal_justification_start)
+                    .flatten();
                 let mut applied = 0;
                 let line_items = &layout.line_items[item_range];
                 let line_items: &mut dyn Iterator<Item = &LineItemData> = if is_rtl {

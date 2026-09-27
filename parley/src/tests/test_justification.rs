@@ -67,7 +67,16 @@ fn a_line_with_a_preserved_tab_is_not_justified() {
 
 #[test]
 fn rtl_justification_expands_the_interior_space_not_the_terminal_space() {
-    let text = "\u{05d4}\u{05dd} \u{05d3}\u{05d4} XXX";
+    for text in [
+        "\u{05d4}\u{05dd} \u{05d3}\u{05d4} XXX",
+        "\u{05d4}\u{05dd} \u{05d3}\u{05d4} \u{200e}XXX",
+        "\u{05d4}\u{05dd} \u{05d3}\u{05d4}\u{200e} XXX",
+    ] {
+        assert_rtl_interior_expansion(text);
+    }
+}
+
+fn assert_rtl_interior_expansion(text: &str) {
     let mut font_context = create_font_context();
     let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
     let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
