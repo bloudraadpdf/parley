@@ -81,6 +81,29 @@ pub struct Layout<B: Brush> {
 }
 
 impl<B: Brush> Layout<B> {
+    /// Retain caller-resolved source opportunities for expansion and shaping.
+    pub fn set_justification_opportunities(
+        &mut self,
+        opportunities: Vec<super::JustificationOpportunity>,
+    ) {
+        self.data.justification_opportunities.set(opportunities);
+    }
+
+    /// The caller-resolved source opportunities.
+    pub fn justification_opportunities(&self) -> &[super::JustificationOpportunity] {
+        self.data.justification_opportunities.entries()
+    }
+
+    /// Eligible text boundaries whose two source units are within `source`.
+    pub fn justification_text_boundaries(
+        &self,
+        source: core::ops::Range<usize>,
+    ) -> impl Iterator<Item = (&core::ops::Range<usize>, &core::ops::Range<usize>)> {
+        self.data
+            .justification_opportunities
+            .text_boundaries(source)
+    }
+
     /// Set physical fitting advances for shaped source clusters. Rendering
     /// advances and Unicode break opportunities are unchanged. Replacing the
     /// list restores original fit advances before applying new entries; an

@@ -1193,6 +1193,7 @@ pub(crate) struct LayoutData<B: Brush> {
     /// are sorted by `byte_index`; `opportunity = true` adds a soft break and
     /// `false` suppresses the Unicode soft break at that boundary.
     pub(crate) line_break_overrides: Vec<LineBreakOverride>,
+    pub(crate) justification_opportunities: super::justification::JustificationOpportunities,
     pub(crate) line_start_fit_advances: Vec<LineStartFitAdvance>,
     /// Original cluster fit values retained while a caller projection is active.
     pub(crate) source_cluster_fit_baseline: Vec<f32>,
@@ -1259,6 +1260,7 @@ impl<B: Brush> Default for LayoutData<B> {
             trim_line_end_letter_spacing: true,
             reclaim_space_before_inline_box: false,
             line_break_overrides: Vec::new(),
+            justification_opportunities: Default::default(),
             line_start_fit_advances: Vec::new(),
             source_cluster_fit_baseline: Vec::new(),
             discretionary_fit_advances: Vec::new(),
@@ -1483,6 +1485,7 @@ impl<B: Brush> LayoutData<B> {
         self.trim_line_end_letter_spacing = true;
         self.reclaim_space_before_inline_box = false;
         self.line_break_overrides.clear();
+        self.justification_opportunities.clear();
         self.line_start_fit_advances.clear();
         self.source_cluster_fit_baseline.clear();
         self.discretionary_breaks.clear();

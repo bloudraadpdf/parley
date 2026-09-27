@@ -10,6 +10,7 @@ mod bidi;
 mod cluster;
 mod glyph;
 mod inline_fragmentation;
+mod justification;
 mod letter_spacing;
 mod line;
 mod line_break;
@@ -35,6 +36,7 @@ pub use data::{
     SourceClusterFitAdvance,
 };
 pub use glyph::Glyph;
+pub use justification::{JustificationOpportunity, JustificationUnit};
 pub use layout::{DiscretionaryBreakShape, Layout};
 pub use letter_spacing::{LetterSpacingUnit, LetterSpacingUnitRecord};
 pub use line::{

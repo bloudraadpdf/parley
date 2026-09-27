@@ -305,7 +305,7 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
     }
 }
 
-fn line_contains_tab(line_items: &[LineItemData], clusters: &[ClusterData]) -> bool {
+pub(super) fn line_contains_tab(line_items: &[LineItemData], clusters: &[ClusterData]) -> bool {
     line_items
         .iter()
         .filter(|item| item.is_text_run())
