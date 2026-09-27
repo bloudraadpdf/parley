@@ -708,6 +708,7 @@ impl ClusterData {
     pub(crate) const LIGATURE_START: u16 = 1;
     pub(crate) const LIGATURE_COMPONENT: u16 = 2;
     pub(crate) const LETTER_SPACING_BOUNDARY: u16 = 4;
+    pub(crate) const GRAPHEME_START: u16 = 8;
 
     #[inline(always)]
     pub(crate) fn is_ligature_start(self) -> bool {
@@ -1654,22 +1655,27 @@ impl<B: Brush> LayoutData<B> {
         }
     }
 
-    fn mark_letter_spacing_boundaries(&mut self, grapheme_boundaries: impl Iterator<Item = usize>) {
+    fn mark_grapheme_boundaries(&mut self, grapheme_boundaries: impl Iterator<Item = usize>) {
         // Shaping can split a grapheme into scalar components (and split it
         // across style runs). Only its last visible component owns tracking.
         // Keep the marker on that component so line-end trimming uses the
         // same spacing unit, including when a grapheme ends in a variation selector.
-        let mut boundaries = grapheme_boundaries.skip(1).peekable();
+        let mut boundaries = grapheme_boundaries.peekable();
         let mut last_visible: Option<usize> = None;
         for run in &self.runs {
             for index in run.cluster_range.clone() {
                 let cluster = &self.clusters[index];
                 let source_start = cluster.text_range(run).start;
+                let mut starts_grapheme = false;
                 while boundaries.peek().is_some_and(|end| *end <= source_start) {
                     if let Some(last) = last_visible.take() {
                         self.clusters[last].flags |= ClusterData::LETTER_SPACING_BOUNDARY;
                     }
+                    starts_grapheme |= boundaries.peek().is_some_and(|end| *end == source_start);
                     boundaries.next();
+                }
+                if starts_grapheme {
+                    self.clusters[index].flags |= ClusterData::GRAPHEME_START;
                 }
                 if !self.clusters[index].info.is_default_ignorable() {
                     last_visible = Some(index);
@@ -1682,9 +1688,7 @@ impl<B: Brush> LayoutData<B> {
     }
 
     pub(crate) fn finish(&mut self, grapheme_boundaries: impl Iterator<Item = usize>) {
-        if self.runs.iter().any(|run| !nearly_zero(run.letter_spacing)) {
-            self.mark_letter_spacing_boundaries(grapheme_boundaries);
-        }
+        self.mark_grapheme_boundaries(grapheme_boundaries);
         for run in &self.runs {
             let word = run.word_spacing;
             let letter = run.letter_spacing;
@@ -1813,7 +1817,8 @@ impl<B: Brush> LayoutData<B> {
                                     | LineBreakOverrideDisposition::UnprioritizedOpportunity
                             )
                         ) || boundary == Boundary::Line
-                            || style.overflow_wrap == OverflowWrap::Anywhere);
+                            || (style.overflow_wrap == OverflowWrap::Anywhere
+                                && cluster.flags & ClusterData::GRAPHEME_START != 0));
                         if boundary == Boundary::Mandatory
                             || (!source_boundary_was_projected
                                 && (resolved_source_opportunity

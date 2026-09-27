@@ -115,6 +115,19 @@ fn join_controls_after_spaces_preserve_soft_wraps() {
 }
 
 #[test]
+fn emergency_min_content_keeps_combining_marks_with_base() {
+    let text = "a\u{0301}\u{0301}\u{0301}a\u{0301}\u{0301}\u{0301}";
+    let mut layout = configured_layout(text, |builder| {
+        builder.push_default(StyleProperty::OverflowWrap(crate::OverflowWrap::Anywhere));
+    });
+    let min = layout.calculate_content_widths().min;
+    let cluster = configured_layout("a\u{0301}\u{0301}\u{0301}", |_| {}).calculate_content_widths().max;
+    assert!((min - cluster).abs() < 0.001, "{min} != {cluster}");
+    layout.break_all_lines(Some(min));
+    assert_eq!(layout.lines().count(), 2);
+}
+
+#[test]
 fn rtl_ligatures_survive_transparent_inline_boundaries() {
     let glyphs = |text: &str, max_advance: Option<f32>, with_boundaries: bool| {
         let mut fcx = create_font_context();

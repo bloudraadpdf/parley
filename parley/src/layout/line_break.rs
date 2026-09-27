@@ -1304,7 +1304,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity,
                             ) => true,
                             None => {
-                                (soft_break_policy == SoftBreakPolicy::Anywhere
+                                ((soft_break_policy == SoftBreakPolicy::Anywhere
+                                    && cluster.data.flags & ClusterData::GRAPHEME_START != 0)
                                     || boundary == Boundary::Line
                                     || preserved_space_after_zwsp)
                                     && !break_after_preserved_space_after_zwsp
@@ -1430,6 +1431,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         } else if
                         // This text can contribute "emergency" line breaks.
                         style.overflow_wrap != OverflowWrap::Normal && !is_ligature_continuation
+                        && cluster.data.flags & ClusterData::GRAPHEME_START != 0
                         && text_wrap_mode == TextWrapMode::Wrap
                         // If we're at the start of the line, this particular cluster will never fit, so it's not a valid emergency break opportunity.
                         && self.state.line.has_content_advance()
