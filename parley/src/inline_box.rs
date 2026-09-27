@@ -220,9 +220,38 @@ pub struct InlineBox {
     participation: InlineBoxParticipation,
     bidi_attachment: InlineBoxBidiAttachment,
     cloned_owner: Option<ClonedInlineOwner>,
+    letter_spacing: f32,
+    applied_letter_spacing: f32,
 }
 
 impl InlineBox {
+    /// Sets the computed tracking of an atomic inline's typographic unit.
+    /// Consecutive atomic inlines receive spacing only at their outer edges.
+    pub fn with_letter_spacing(mut self, spacing: f32) -> Self {
+        if matches!(self.participation, InlineBoxParticipation::Atomic { .. }) {
+            self.letter_spacing = spacing;
+            self.applied_letter_spacing = spacing;
+        }
+        self
+    }
+
+    pub(crate) fn letter_spacing(&self) -> Option<f32> {
+        matches!(self.participation, InlineBoxParticipation::Atomic { .. })
+            .then_some(self.letter_spacing)
+    }
+
+    pub(crate) fn advance(&self) -> f32 {
+        self.width() + self.applied_letter_spacing
+    }
+
+    pub(crate) fn resolve_letter_spacing(&mut self, spacing: f32) {
+        self.applied_letter_spacing = spacing;
+    }
+
+    pub(crate) fn restore_letter_spacing(&mut self) {
+        self.applied_letter_spacing = self.letter_spacing;
+    }
+
     /// A regular (non-glued) inline box.
     pub fn new(id: u64, index: usize, width: f32, height: f32) -> Self {
         Self {
@@ -235,6 +264,8 @@ impl InlineBox {
             },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
+            letter_spacing: 0.0,
+            applied_letter_spacing: 0.0,
         }
     }
 
@@ -246,6 +277,8 @@ impl InlineBox {
             participation: InlineBoxParticipation::TransparentAnchor,
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
+            letter_spacing: 0.0,
+            applied_letter_spacing: 0.0,
         }
     }
 
@@ -267,6 +300,8 @@ impl InlineBox {
             },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
+            letter_spacing: 0.0,
+            applied_letter_spacing: 0.0,
         }
     }
 
@@ -280,6 +315,8 @@ impl InlineBox {
             participation: InlineBoxParticipation::ContextualSpacing { width, height },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
+            letter_spacing: 0.0,
+            applied_letter_spacing: 0.0,
         }
     }
 
@@ -297,6 +334,8 @@ impl InlineBox {
             participation: InlineBoxParticipation::LogicalOwnerStart { width, height },
             bidi_attachment: InlineBoxBidiAttachment::ToNext,
             cloned_owner: None,
+            letter_spacing: 0.0,
+            applied_letter_spacing: 0.0,
         }
     }
 
@@ -338,6 +377,8 @@ impl InlineBox {
             },
             bidi_attachment: InlineBoxBidiAttachment::ToPrevious,
             cloned_owner: None,
+            letter_spacing: 0.0,
+            applied_letter_spacing: 0.0,
         }
     }
 

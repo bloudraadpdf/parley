@@ -8,7 +8,7 @@ use crate::{
     FontFamily, Layout, LayoutContext, RangedBuilder, StyleProperty, TextWrapMode,
     WhiteSpaceCollapse, WordBreak,
 };
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::ToString, sync::Arc, vec::Vec};
 
 fn unwrapped_layout(family: &str, text: &str, letter_spacing: f32) -> Layout<ColorBrush> {
     unwrapped_layout_with_style_range(family, text, letter_spacing, None)
@@ -28,6 +28,17 @@ fn unwrapped_layout_with_style_range(
 }
 
 fn configured_layout(
+    family: &str,
+    text: &str,
+    letter_spacing: f32,
+    configure: impl FnOnce(&mut RangedBuilder<'_, ColorBrush>),
+) -> Layout<ColorBrush> {
+    let mut layout = configured_unbroken_layout(family, text, letter_spacing, configure);
+    layout.break_all_lines(None);
+    layout
+}
+
+fn configured_unbroken_layout(
     family: &str,
     text: &str,
     letter_spacing: f32,
@@ -58,9 +69,7 @@ fn configured_layout(
     builder.push_default(StyleProperty::FontSize(10.0));
     builder.push_default(StyleProperty::LetterSpacing(letter_spacing));
     configure(&mut builder);
-    let mut layout = builder.build(text);
-    layout.break_all_lines(None);
-    layout
+    builder.build(text)
 }
 
 fn unwrapped_advance(text: &str, letter_spacing: f32) -> f32 {
@@ -172,6 +181,216 @@ fn unequal_spacing_preserves_requested_fragment_end_spacing() {
     assert!((layout.full_width() - plain - 15.0).abs() < 0.001);
     layout.break_all_lines(None);
     assert!((layout.full_width() - plain - 15.0).abs() < 0.001);
+}
+
+#[test]
+fn measured_whitespace_fits_its_resolved_edge_tracking() {
+    for text in ["A ", "A\u{00a0}"] {
+        let configure = |builder: &mut RangedBuilder<'_, ColorBrush>| {
+            let features = [crate::setting::FontFeature {
+                tag: crate::setting::Tag::from_bytes(*b"kern"),
+                value: 0,
+            }];
+            builder.push_default(StyleProperty::FontFeatures((&features).into()));
+            builder.push_default(StyleProperty::WhiteSpaceCollapse(
+                WhiteSpaceCollapse::BreakSpaces,
+            ));
+            builder.push_default(StyleProperty::LineBreakMode(
+                crate::style::LineBreakMode::Anywhere,
+            ));
+        };
+        let plain = configured_layout("Arimo", text, 0.0, configure);
+        let mut tracked = configured_layout("Arimo", text, 10.0, |builder| {
+            configure(builder);
+            builder.push(StyleProperty::LetterSpacing(30.0), 1..text.len());
+        });
+        let expected = plain.full_width() + 20.0;
+        assert!(
+            (tracked.full_width() - expected).abs() < 0.001,
+            "{text:?}: actual={}, expected={expected}, glyphs={:?}",
+            tracked.full_width(),
+            glyph_origins(&tracked)
+        );
+        tracked.break_all_lines(Some(expected));
+        assert_eq!(tracked.lines().count(), 1, "{text:?}");
+        assert!(
+            (tracked.full_width() - expected).abs() < 0.001,
+            "{text:?}: actual={}, expected={expected}, glyphs={:?}",
+            tracked.full_width(),
+            glyph_origins(&tracked)
+        );
+    }
+}
+
+#[test]
+fn unequal_tracking_fits_the_same_tab_stop_as_positioning() {
+    let before_tab = unwrapped_layout("Arimo", "A", 0.0).full_width() + 5.0;
+    let following = unwrapped_layout("Arimo", "B", 0.0).full_width();
+    for (interval, stops) in [
+        (15.0, 1.0),
+        (40.0, 1.0),
+        (before_tab, 2.0),
+        (before_tab + 0.01, 2.0),
+    ] {
+        let mut layout = configured_layout("Arimo", "A\tB", 10.0, |builder| {
+            builder.push_default(StyleProperty::WhiteSpaceCollapse(
+                WhiteSpaceCollapse::Preserve,
+            ));
+            builder.push_default(StyleProperty::TabSize(crate::style::TabSize::Length(
+                interval,
+            )));
+            builder.push(StyleProperty::LetterSpacing(0.0), 1..2);
+            builder.push(StyleProperty::LetterSpacing(20.0), 2..3);
+        });
+        let expected = interval * stops + following;
+        assert!((glyph_origins(&layout)[2] - interval * stops).abs() < 0.001);
+        assert!((layout.full_width() - expected).abs() < 0.001);
+        layout.break_all_lines(Some(expected));
+        assert_eq!(layout.lines().count(), 1, "interval={interval}");
+        assert!((glyph_origins(&layout)[2] - interval * stops).abs() < 0.001);
+        assert!((layout.full_width() - expected).abs() < 0.001);
+        layout.break_all_lines(None);
+        assert!((glyph_origins(&layout)[2] - interval * stops).abs() < 0.001);
+        assert!((layout.full_width() - expected).abs() < 0.001);
+    }
+}
+
+#[test]
+fn atomic_tracking_uses_each_outer_value_and_groups_consecutive_boxes() {
+    for (text, first, last, atoms, first_box_delta, final_text_delta) in [
+        ("AB", 10.0, 10.0, &[10.0, 10.0][..], 10.0, 20.0),
+        ("AB", 10.0, -10.0, &[10.0][..], 10.0, 10.0),
+        ("AB", 0.0, 20.0, &[10.0][..], 5.0, 20.0),
+        ("AB", 20.0, 0.0, &[-10.0][..], 5.0, 0.0),
+        ("AB", 10.0, 20.0, &[5.0, 25.0][..], 7.5, 30.0),
+        ("אב", 10.0, 20.0, &[15.0][..], 17.5, 30.0),
+    ] {
+        let split = text.char_indices().nth(1).unwrap().0;
+        let make = |tracked| {
+            configured_layout(
+                "Arimo",
+                text,
+                if tracked { first } else { 0.0 },
+                |builder| {
+                    builder.push(
+                        StyleProperty::LetterSpacing(if tracked { last } else { 0.0 }),
+                        split..text.len(),
+                    );
+                    for (index, &spacing) in atoms.iter().enumerate() {
+                        builder.push_inline_box(
+                            crate::InlineBox::new(index as u64, split, 10.0, 10.0)
+                                .with_letter_spacing(if tracked { spacing } else { 0.0 }),
+                        );
+                    }
+                },
+            )
+        };
+        let plain = make(false);
+        let mut tracked = make(true);
+        let boxes = |layout: &Layout<ColorBrush>| {
+            layout
+                .lines()
+                .flat_map(|line| line.items())
+                .filter_map(|item| {
+                    if let crate::PositionedLayoutItem::InlineBox(item) = item {
+                        Some(item.x)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        let initial_boxes = boxes(&plain);
+        let tracked_boxes = boxes(&tracked);
+        for (initial, actual) in initial_boxes.iter().zip(tracked_boxes) {
+            assert!(
+                (actual - initial - first_box_delta).abs() < 0.001,
+                "{text}: {first}, {last}, {atoms:?}"
+            );
+        }
+        assert!(
+            (glyph_origins(&tracked)[1] - glyph_origins(&plain)[1] - final_text_delta).abs()
+                < 0.001
+        );
+        assert!((tracked.full_width() - plain.full_width() - final_text_delta).abs() < 0.001);
+        let expected = plain.full_width() + final_text_delta;
+        tracked.break_all_lines(Some(expected));
+        assert_eq!(
+            tracked.lines().count(),
+            1,
+            "{text}: {first}, {last}, {atoms:?}"
+        );
+        tracked.break_all_lines(Some(expected - 0.01));
+        assert_eq!(
+            tracked.lines().count(),
+            2,
+            "{text}: {first}, {last}, {atoms:?}"
+        );
+        tracked.break_all_lines(None);
+        assert!((tracked.full_width() - plain.full_width() - final_text_delta).abs() < 0.001);
+    }
+}
+
+#[test]
+fn intrinsic_tracking_uses_fragment_edges_before_and_after_line_breaking() {
+    for (text, first, last, atoms, delta) in [
+        ("AB", 0.0, 20.0, &[][..], 10.0),
+        ("AB", 10.0, 20.0, &[5.0, 25.0][..], 30.0),
+        ("אב", 10.0, 20.0, &[15.0][..], 30.0),
+    ] {
+        let split = text.char_indices().nth(1).unwrap().0;
+        let plain = unwrapped_layout("Arimo", text, 0.0).full_width() + atoms.len() as f32 * 10.0;
+        for nowrap in [false, true] {
+            let mut layout = configured_unbroken_layout("Arimo", text, first, |builder| {
+                builder.push(StyleProperty::LetterSpacing(last), split..text.len());
+                builder.push_default(StyleProperty::OverflowWrap(crate::OverflowWrap::Anywhere));
+                if nowrap {
+                    builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
+                }
+                for (index, &spacing) in atoms.iter().enumerate() {
+                    builder.push_inline_box(
+                        crate::InlineBox::new(index as u64, split, 10.0, 10.0)
+                            .with_letter_spacing(spacing),
+                    );
+                }
+            });
+            let expected_max = plain + delta;
+            let expected_min = if nowrap {
+                expected_max
+            } else {
+                text.chars()
+                    .map(|character| {
+                        unwrapped_layout("Arimo", &character.to_string(), 0.0).full_width()
+                    })
+                    .fold(if atoms.is_empty() { 0.0 } else { 10.0 }, f32::max)
+            };
+            for measure in [None, Some(expected_min), None] {
+                let widths = layout.calculate_content_widths();
+                assert!(
+                    (widths.max - expected_max).abs() < 0.001,
+                    "{text}, nowrap={nowrap}: max {} != {expected_max}",
+                    widths.max
+                );
+                assert!(
+                    (widths.min - expected_min).abs() < 0.001,
+                    "{text}, nowrap={nowrap}: min {} != {expected_min}",
+                    widths.min
+                );
+                layout.break_all_lines(measure);
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_width_atomic_still_has_a_tracking_boundary_when_fitting() {
+    let plain = unwrapped_layout("Arimo", "A", 0.0).full_width();
+    let mut layout = configured_layout("Arimo", "A", 10.0, |builder| {
+        builder.push_inline_box(crate::InlineBox::new(0, 1, 0.0, 10.0));
+    });
+    assert!((layout.full_width() - plain - 5.0).abs() < 0.001);
+    layout.break_all_lines(Some(plain));
+    assert_eq!(layout.lines().count(), 2);
 }
 
 #[test]

@@ -12,6 +12,48 @@ use crate::layout::{
 };
 use crate::style::Brush;
 
+#[derive(Default)]
+struct IntrinsicLetterSpacing {
+    edges: super::line_break::LetterSpacingEdges,
+    measured: f32,
+    unconditional: f32,
+}
+
+impl IntrinsicLetterSpacing {
+    fn include<B: Brush>(
+        &mut self,
+        data: &LayoutData<B>,
+        item_index: usize,
+        cluster: Option<&ClusterData>,
+    ) {
+        self.edges.include_source_item(data, item_index, cluster);
+    }
+
+    fn measure(&mut self, trim: bool) {
+        self.unconditional = self.edges.correction(trim);
+        self.measured = self.unconditional;
+    }
+
+    fn finish(
+        &mut self,
+        owners: &super::inline_fragmentation::ClonedInlineFlow,
+        maximum: &mut f32,
+        advance: &mut f32,
+        trailing: f32,
+        unconditional: bool,
+    ) {
+        let correction = if unconditional {
+            self.unconditional
+        } else {
+            self.measured
+        };
+        owners.finish_intrinsic_fragment(maximum, advance, trailing + correction);
+        self.edges.clear();
+        self.measured = 0.0;
+        self.unconditional = 0.0;
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalWhitespaceDisposition {
     Measured,
@@ -1679,6 +1721,9 @@ impl<B: Brush> LayoutData<B> {
     /// Gives back the letter spacing that a previous line break removed from
     /// line-ending clusters, so the layout can be broken again from scratch.
     pub(crate) fn restore_line_end_letter_spacing(&mut self) {
+        for inline_box in &mut self.inline_boxes {
+            inline_box.restore_letter_spacing();
+        }
         for run in &self.runs {
             for index in run.cluster_range.clone() {
                 let trimmed = self.clusters[index].trimmed_letter_spacing;
@@ -1808,6 +1853,9 @@ impl<B: Brush> LayoutData<B> {
 
     // TODO: this method does not handle mixed direction text at all.
     pub(crate) fn calculate_content_widths(&self) -> ContentWidths {
+        let mut min_spacing = IntrinsicLetterSpacing::default();
+        let mut max_spacing = IntrinsicLetterSpacing::default();
+        let trim = self.trim_line_end_letter_spacing;
         let mut min_width = 0.0_f32;
         let mut max_width = 0.0_f32;
         let mut cloned_owners = super::inline_fragmentation::ClonedInlineFlow::default();
@@ -1867,36 +1915,44 @@ impl<B: Brush> LayoutData<B> {
                                     || (prev_text_wrap_mode == TextWrapMode::Wrap
                                         && style_resolved_opportunity)))
                         {
-                            cloned_owners.finish_intrinsic_fragment(
+                            min_spacing.finish(
+                                &cloned_owners,
                                 &mut min_width,
                                 &mut running_min_width,
                                 trailing_min_width,
+                                false,
                             );
                             trailing_min_width = 0.0;
                             if boundary == Boundary::Mandatory {
-                                cloned_owners.finish_intrinsic_fragment(
+                                max_spacing.finish(
+                                    &cloned_owners,
                                     &mut max_width,
                                     &mut running_max_width,
                                     trailing_unconditional_max_width,
+                                    true,
                                 );
                                 trailing_max_width = 0.0;
                                 trailing_unconditional_max_width = 0.0;
                             }
                         }
-                        running_min_width += cluster.advance;
-                        running_max_width += cluster.advance;
+                        let advance = cluster.advance + cluster.trimmed_letter_spacing;
+                        running_min_width += advance;
+                        running_max_width += advance;
+                        min_spacing.include(self, item_index, Some(cluster));
+                        max_spacing.include(self, item_index, Some(cluster));
                         let terminal_disposition = WhiteSpaceLayoutMode::from_style(style)
                             .terminal_disposition(cluster.info.whitespace());
                         match terminal_disposition {
                             TerminalWhitespaceDisposition::Removed
                             | TerminalWhitespaceDisposition::Hanging => {
-                                trailing_min_width += cluster.advance;
-                                trailing_max_width += cluster.advance;
-                                trailing_unconditional_max_width += cluster.advance;
+                                trailing_min_width += advance;
+                                trailing_max_width += advance;
+                                trailing_unconditional_max_width += advance;
                             }
                             TerminalWhitespaceDisposition::ConditionallyHanging => {
-                                trailing_min_width += cluster.advance;
-                                trailing_max_width += cluster.advance;
+                                trailing_min_width += advance;
+                                trailing_max_width += advance;
+                                max_spacing.unconditional = max_spacing.edges.correction(trim);
                             }
                             TerminalWhitespaceDisposition::Measured
                                 if cluster.info.whitespace() != Whitespace::Newline
@@ -1905,36 +1961,48 @@ impl<B: Brush> LayoutData<B> {
                                 trailing_min_width = 0.0;
                                 trailing_max_width = 0.0;
                                 trailing_unconditional_max_width = 0.0;
+                                min_spacing.measure(trim);
+                                max_spacing.measure(trim);
                             }
                             TerminalWhitespaceDisposition::Measured => {}
                         }
                     }
-                    min_width = min_width
-                        .max(running_min_width - trailing_min_width + cloned_owners.end_advance());
+                    min_width = min_width.max(
+                        running_min_width - trailing_min_width - min_spacing.measured
+                            + cloned_owners.end_advance(),
+                    );
                 }
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
                     cloned_owners.before_edge(ibox);
-                    let width = ibox.width();
+                    let width = ibox.width() + ibox.letter_spacing().unwrap_or(0.0);
                     running_max_width += width;
+                    max_spacing.include(self, item_index, None);
                     let mut measure_atomic = |break_before, break_after| {
                         let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
                         if can_wrap && break_before {
-                            cloned_owners.finish_intrinsic_fragment(
+                            min_spacing.finish(
+                                &cloned_owners,
                                 &mut min_width,
                                 &mut running_min_width,
                                 trailing_min_width,
+                                false,
                             );
                         }
                         running_min_width += width;
+                        min_spacing.include(self, item_index, None);
+                        min_spacing.measure(trim);
+                        max_spacing.measure(trim);
                         trailing_min_width = 0.0;
                         trailing_max_width = 0.0;
                         trailing_unconditional_max_width = 0.0;
                         if can_wrap && break_after {
-                            cloned_owners.finish_intrinsic_fragment(
+                            min_spacing.finish(
+                                &cloned_owners,
                                 &mut min_width,
                                 &mut running_min_width,
                                 0.0,
+                                false,
                             );
                         }
                     };
@@ -1971,16 +2039,21 @@ impl<B: Brush> LayoutData<B> {
                                 == LogicalInlineEdgeSourceProjection::BeforeGeometry
                                 && project
                             {
-                                cloned_owners.finish_intrinsic_fragment(
+                                min_spacing.finish(
+                                    &cloned_owners,
                                     &mut min_width,
                                     &mut running_min_width,
                                     trailing_min_width,
+                                    false,
                                 );
                                 trailing_min_width = 0.0;
                                 projected_source_boundary = projection;
                             }
                             running_min_width += width;
+                            min_spacing.include(self, item_index, None);
                             if width != 0.0 {
+                                min_spacing.measure(trim);
+                                max_spacing.measure(trim);
                                 trailing_min_width = 0.0;
                                 trailing_max_width = 0.0;
                                 trailing_unconditional_max_width = 0.0;
@@ -1988,24 +2061,30 @@ impl<B: Brush> LayoutData<B> {
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
                             {
-                                cloned_owners.finish_intrinsic_fragment(
+                                min_spacing.finish(
+                                    &cloned_owners,
                                     &mut min_width,
                                     &mut running_min_width,
                                     0.0,
+                                    false,
                                 );
                                 projected_source_boundary = projection;
                             }
                         }
-                        InlineBoxLineBreakParticipation::TransparentAnchor => {}
+                        InlineBoxLineBreakParticipation::TransparentAnchor => {
+                            min_spacing.include(self, item_index, None);
+                        }
                     }
                     cloned_owners.after_edge(ibox);
                 }
             }
-            max_width = max_width.max(running_max_width - trailing_max_width);
+            max_width =
+                max_width.max(running_max_width - trailing_max_width - max_spacing.measured);
         }
 
-        min_width = min_width.max(running_min_width - trailing_min_width);
-        max_width = max_width.max(running_max_width - trailing_unconditional_max_width);
+        min_width = min_width.max(running_min_width - trailing_min_width - min_spacing.measured);
+        max_width = max_width
+            .max(running_max_width - trailing_unconditional_max_width - max_spacing.unconditional);
 
         ContentWidths {
             min: min_width,
