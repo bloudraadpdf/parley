@@ -216,7 +216,7 @@ fn replacing_source_fit_projection_restores_the_original_cluster_advances() {
     layout.break_all_lines(Some(natural + 1.0));
     assert!(layout.lines().count() > 1);
     layout.set_source_cluster_fit_advances(Vec::new());
-    layout.break_all_lines(None);
+    layout.break_all_lines(Some(natural + 1.0));
     assert_eq!(layout.lines().count(), 1);
     assert!((layout.lines().next().unwrap().metrics().advance - natural).abs() < 0.001);
 }
