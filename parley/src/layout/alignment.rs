@@ -391,6 +391,7 @@ mod tests {
             bidi_level: 0,
             layout_item_index: None,
             advance: line_advance,
+            letter_spacing_offset: 0.0,
             is_whitespace: false,
             has_trailing_whitespace: false,
             text_range: 0..0,

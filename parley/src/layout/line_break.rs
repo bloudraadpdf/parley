@@ -2386,6 +2386,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             );
         }
 
+        resolve_inline_boundary_tracking(
+            &self.layout.data,
+            &mut self.lines.line_items[line.item_range.clone()],
+            line,
+        );
+
         if !have_metrics {
             // Line consisting entirely of whitespace?
             if !line.item_range.is_empty() {
@@ -2438,6 +2444,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         bidi_level: 0,
                         layout_item_index: None,
                         advance: 0.,
+                        letter_spacing_offset: 0.0,
                         is_whitespace: false,
                         has_trailing_whitespace: false,
                         cluster_range: cluster..cluster,
@@ -2913,6 +2920,35 @@ pub(super) fn line_letter_spacing_units<B: Brush>(
         .collect()
 }
 
+fn resolve_inline_boundary_tracking<B: Brush>(
+    data: &LayoutData<B>,
+    items: &mut [LineItemData],
+    line: &LineData,
+) {
+    let mut removed = line.removed_leading_source_ranges.clone();
+    removed.extend(line.removed_terminal_source_ranges.iter().cloned());
+    let mut preceding: Option<LetterSpacingUnit> = None;
+    let mut boundaries = Vec::<usize>::new();
+    for index in 0..items.len() {
+        let units = letter_spacing_units_from_visual_items(data, &items[index..=index], &removed);
+        if let (Some(first), Some(last)) = (units.first(), units.last()) {
+            let offset = preceding.map_or(0.0, |previous| {
+                if previous.atomic && first.value.atomic {
+                    0.0
+                } else {
+                    -first.value.spacing * 0.5
+                }
+            });
+            for boundary in boundaries.drain(..) {
+                items[boundary].letter_spacing_offset = offset;
+            }
+            preceding = Some(last.value);
+        } else if items[index].kind == LayoutItemKind::InlineBox {
+            boundaries.push(index);
+        }
+    }
+}
+
 fn letter_spacing_units_from_visual_items<B: Brush>(
     data: &LayoutData<B>,
     items: &[LineItemData],
@@ -3057,6 +3093,7 @@ fn try_commit_line<B: Brush>(
                     bidi_level: run_data.bidi_level,
                     layout_item_index: Some(state.items.start + i),
                     advance: 0.,
+                    letter_spacing_offset: 0.0,
                     is_whitespace: false,
                     has_trailing_whitespace: false,
                     cluster_range,

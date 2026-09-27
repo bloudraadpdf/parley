@@ -341,7 +341,11 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
             let item = self.line.item(self.item_index)?;
             match item {
                 LineItem::InlineBox(inline_box) => {
-                    let x = self.offset + self.line.data.metrics.offset;
+                    let item_data = &self.line.layout.data.line_items
+                        [self.line.data.item_range.start + self.item_index];
+                    let x = self.offset
+                        + self.line.data.metrics.offset
+                        + item_data.letter_spacing_offset;
 
                     self.item_index += 1;
                     self.glyph_start = 0;

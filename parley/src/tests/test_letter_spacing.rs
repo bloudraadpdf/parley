@@ -757,3 +757,75 @@ fn fragment_edges_retain_visual_units_source_ranges_and_trim_policy() {
         0.0
     );
 }
+
+#[test]
+fn empty_inline_edges_separate_the_two_tracking_halves() {
+    for (text, split, left, right, expected_shift) in [
+        ("AB", 1, 10.0, 10.0, 5.0),
+        ("AB", 1, 10.0, 20.0, 5.0),
+        ("AB", 1, -4.0, 10.0, -2.0),
+        ("אב", 2, 10.0, 20.0, 10.0),
+    ] {
+        let (visual_start, visual_end) = if text == "אב" {
+            (text.len(), 0)
+        } else {
+            (0, text.len())
+        };
+        for (edge, expected_shift) in [
+            (visual_start, 0.0),
+            (split, expected_shift),
+            (visual_end, (left + right) * 0.5),
+        ] {
+            let build = |tracked| {
+                configured_layout("Arimo", text, 0.0, |builder| {
+                    if tracked {
+                        builder.push(StyleProperty::LetterSpacing(left), 0..split);
+                        builder.push(StyleProperty::LetterSpacing(right), split..text.len());
+                    }
+                    builder.push_inline_box(crate::InlineBox::inline_start_edge(
+                        10,
+                        edge,
+                        2.0,
+                        0.0,
+                        crate::InlineBoxBreakAffinity::Independent,
+                    ));
+                    builder.push_inline_box(crate::InlineBox::inline_end_edge(
+                        11,
+                        edge,
+                        2.0,
+                        0.0,
+                        crate::InlineBoxBreakAffinity::Independent,
+                    ));
+                })
+            };
+            let plain = build(false);
+            let tracked = build(true);
+            let boxes = |layout: &Layout<ColorBrush>| {
+                layout
+                    .lines()
+                    .flat_map(|line| line.items())
+                    .filter_map(|item| {
+                        if let crate::PositionedLayoutItem::InlineBox(item) = item {
+                            Some((item.id, item.x))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            };
+            for ((id, actual), (plain_id, initial)) in
+                boxes(&tracked).into_iter().zip(boxes(&plain))
+            {
+                assert_eq!(id, plain_id);
+                assert!(
+                    (actual - initial - expected_shift).abs() < 0.001,
+                    "{text}, {left}/{right}, {id}: actual {actual}, plain {initial}"
+                );
+            }
+            let plain_origins = glyph_origins(&plain);
+            let tracked_origins = glyph_origins(&tracked);
+            assert!((tracked_origins[0] - plain_origins[0]).abs() < 0.001);
+            assert!((tracked_origins[1] - plain_origins[1] - (left + right) * 0.5).abs() < 0.001);
+        }
+    }
+}
