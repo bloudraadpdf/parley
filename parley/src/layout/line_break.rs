@@ -27,8 +27,8 @@ use crate::layout::inline_fragmentation::{
     ClonedInlineEdgeMap, ClonedInlineFlow, blocks_source_whitespace,
 };
 use crate::layout::{
-    BreakReason, DiscretionaryBreak, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
-    LineMetrics, Run, RunMetrics,
+    BreakReason, DiscretionaryBreak, DiscretionaryBreakCondition, Layout, LayoutData, LayoutItem,
+    LayoutItemKind, LineData, LineItemData, LineMetrics, Run, RunMetrics,
 };
 use crate::layout::{LetterSpacingUnit, LetterSpacingUnitRecord};
 use crate::style::Brush;
@@ -306,6 +306,7 @@ fn include_line_metric_extents(
 struct DiscretionaryAdvance {
     rendered: f32,
     fit: f32,
+    condition: DiscretionaryBreakCondition,
 }
 
 #[derive(Clone)]
@@ -460,6 +461,7 @@ struct BreakerState {
 
     line: LineState,
     prev_boundary: Option<RegularBreakCandidate>,
+    overflow_discretionary_boundary: Option<RegularBreakCandidate>,
     emergency_boundary: Option<EmergencyBreakOpportunity>,
     projected_source_boundary: Option<ProjectedSourceBoundary>,
     taken_projected_source_boundary: Option<ProjectedSourceBoundary>,
@@ -562,15 +564,17 @@ impl BreakerState {
     /// the line breaking opportunity at this point.
     fn mark_line_break_opportunity(&mut self, kind: RegularBreakKind) {
         let mut state = self.line.clone();
-        if let RegularBreakKind::ConditionalMaterial(DiscretionaryAdvance { rendered, fit })
+        let mut condition = DiscretionaryBreakCondition::Normal;
+        if let RegularBreakKind::ConditionalMaterial(material)
         | RegularBreakKind::ProjectedSource {
-            material: Some(DiscretionaryAdvance { rendered, fit }),
+            material: Some(material),
             ..
         } = kind
         {
-            state.x += rendered;
-            state.fit_x += fit;
-            state.discretionary_advance = rendered;
+            condition = material.condition;
+            state.x += material.rendered;
+            state.fit_x += material.fit;
+            state.discretionary_advance = material.rendered;
             state.discretionary_break = true;
         }
         let snapshot = BoundarySnapshot {
@@ -579,7 +583,7 @@ impl BreakerState {
             cluster_idx: self.cluster_idx,
             state,
         };
-        self.prev_boundary = Some(match kind {
+        let candidate = Some(match kind {
             RegularBreakKind::AuthoredDashPunctuation => {
                 RegularBreakCandidate::AuthoredDashPunctuation(snapshot)
             }
@@ -593,6 +597,18 @@ impl BreakerState {
             }
             RegularBreakKind::Unprioritized => RegularBreakCandidate::Unprioritized(snapshot),
         });
+        match condition {
+            DiscretionaryBreakCondition::Normal => self.prev_boundary = candidate,
+            DiscretionaryBreakCondition::Overflow => {
+                self.overflow_discretionary_boundary = candidate
+            }
+        }
+    }
+
+    fn take_overflow_candidate(&mut self) -> Option<RegularBreakCandidate> {
+        self.prev_boundary
+            .take()
+            .or_else(|| self.overflow_discretionary_boundary.take())
     }
 
     fn mark_inline_box_break_after(&mut self, affinity: InlineBoxBreakAffinity) {
@@ -777,6 +793,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             SourceStartWhitespace::following_break(preceding_break);
         self.state.line.removed_leading_source_ranges.clear();
         self.state.prev_boundary = None; // Added by Nico
+        self.state.overflow_discretionary_boundary = None;
         self.state.emergency_boundary = None;
         self.state.last_appended_authored_unit = AuthoredBreakUnit::Other;
         self.state.line.selected_source_cluster_advance = self
@@ -815,8 +832,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             && !self.advance_fits(next_fit_x, max_advance)
         {
             self.state
-                .prev_boundary
-                .take()
+                .take_overflow_candidate()
                 .map_or(LogicalOwnerEdgePlacement::Append, |candidate| {
                     LogicalOwnerEdgePlacement::Rewind(Box::new(candidate))
                 })
@@ -1195,7 +1211,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if !break_affinity.allows_break_before() {
                             if break_affinity == InlineBoxBreakAffinity::SourceText {
-                                if let Some(candidate) = self.state.prev_boundary.take() {
+                                if let Some(candidate) = self.state.take_overflow_candidate() {
                                     if try_commit_regular_candidate!(candidate) {
                                         return self.start_new_line();
                                     }
@@ -1424,6 +1440,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                         .then_some(RegularBreakKind::ConditionalMaterial(
                                             DiscretionaryAdvance {
                                                 rendered: entry.advance,
+                                                condition: entry.condition,
                                                 fit: self.layout.discretionary_fit_advance(
                                                     entry.byte_index,
                                                     entry.advance,
@@ -1654,7 +1671,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 // Take the most recent regular candidate regardless of its
                                 // provenance. Priority only changes the overflowing-separator
                                 // case above; actual content overflow remains greedy.
-                                if let Some(candidate) = self.state.prev_boundary.take() {
+                                if let Some(candidate) = self.state.take_overflow_candidate() {
                                     if try_commit_regular_candidate!(candidate) {
                                         return self.start_new_line();
                                     }
@@ -1731,7 +1748,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         .layout
                         .discretionary_fit_advance(entry.byte_index, entry.advance),
                 max_advance,
-            ) || self.state.prev_boundary.is_none())
+            ) || (self.state.prev_boundary.is_none()
+                && self.state.overflow_discretionary_boundary.is_none()))
     }
 
     fn mark_projected_source_boundary(
@@ -1755,6 +1773,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             max_advance,
             entry.map(|entry| DiscretionaryAdvance {
                 rendered: entry.advance,
+                condition: entry.condition,
                 fit: self
                     .layout
                     .discretionary_fit_advance(entry.byte_index, entry.advance),

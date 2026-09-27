@@ -7,7 +7,7 @@ use crate::layout::alignment::align_per_line;
 use crate::layout::alignment::unjustify;
 use crate::layout::data::LayoutData;
 use crate::layout::{
-    DiscretionaryBreak, DiscretionaryFitAdvance, LineBreakOverride, NormalSoftWrapSelection,
+    DiscretionaryBreak, DiscretionaryBreakCondition, DiscretionaryFitAdvance, LineBreakOverride, NormalSoftWrapSelection,
     SourceClusterFitAdvance,
 };
 use crate::style::Brush;
@@ -26,6 +26,7 @@ pub struct DiscretionaryBreakShape<B: Brush> {
     pub(crate) byte_index: usize,
     pub(crate) max_consecutive_lines: Option<u32>,
     text: String,
+    condition: DiscretionaryBreakCondition,
     layout: Arc<Layout<B>>,
 }
 
@@ -51,8 +52,15 @@ impl<B: Brush> DiscretionaryBreakShape<B> {
             byte_index,
             max_consecutive_lines,
             text,
+            condition: DiscretionaryBreakCondition::Normal,
             layout: Arc::new(layout),
         })
+    }
+
+    /// Set when this shaped replacement may participate in wrapping.
+    pub fn with_condition(mut self, condition: DiscretionaryBreakCondition) -> Self {
+        self.condition = condition;
+        self
     }
 
     /// Text used to shape this replacement.
@@ -256,6 +264,7 @@ impl<B: Brush> Layout<B> {
                     byte_index: shape.byte_index,
                     advance: shape.layout().full_width(),
                     max_consecutive_lines: shape.max_consecutive_lines,
+                    condition: shape.condition,
                 })
                 .collect(),
         );
