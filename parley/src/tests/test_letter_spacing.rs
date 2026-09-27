@@ -146,6 +146,39 @@ fn letter_spacing_is_not_applied_after_the_last_character_of_a_line() {
 }
 
 #[test]
+fn rtl_tracking_leaves_both_visual_line_edges_flush() {
+    let origins = |layout: &Layout<ColorBrush>| {
+        layout
+            .lines()
+            .flat_map(|line| line.items())
+            .flat_map(|item| match item {
+                crate::PositionedLayoutItem::GlyphRun(run) => {
+                    run.positioned_glyphs().map(|glyph| glyph.x).collect::<Vec<_>>()
+                }
+                crate::PositionedLayoutItem::InlineBox(_) => Vec::new(),
+            })
+            .collect::<Vec<_>>()
+    };
+    for text in ["ABC", "אבג", "AאבB", "אABב"] {
+        let plain = unwrapped_layout("Arimo", text, 0.0);
+        let tracked = unwrapped_layout("Arimo", text, 5.0);
+        let plain_origins = origins(&plain);
+        let tracked_origins = origins(&tracked);
+        assert_eq!(tracked_origins.len(), text.chars().count());
+        for ((actual, initial), extra) in tracked_origins
+            .iter()
+            .zip(&plain_origins)
+            .zip([0.0, 5.0, 10.0, 15.0])
+        {
+            assert!(
+                (actual - initial - extra).abs() < 0.001,
+                "{text}: {plain_origins:?} {tracked_origins:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn cluster_reports_only_letter_spacing_that_survives_line_end_trimming() {
     let layout = unwrapped_layout("Roboto", "ABC", 10.0);
     let spacing = layout

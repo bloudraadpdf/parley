@@ -2015,9 +2015,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
-    /// CSS Text 4 §8.2: letter-spacing is not applied after the last
-    /// typographic character unit of a line. The last visible cluster in
-    /// logical order gives its trailing tracking back.
+    /// Letter spacing is trimmed at the visual line edge, after bidi reordering.
     fn trim_line_end_letter_spacing(&mut self, line_idx: usize) {
         let data = &mut self.layout.data;
         if !data.trim_line_end_letter_spacing {
@@ -2025,25 +2023,34 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
         let LineLayout { lines, line_items } = &mut self.lines;
         let line = &mut lines[line_idx];
-        for line_item in line_items[line.item_range.clone()]
+        let mut visual_items = line_items[line.item_range.clone()].to_vec();
+        reorder_line_items(&mut visual_items, &data.inline_boxes);
+        for line_item in visual_items
             .iter()
             .rev()
             .filter(|item| item.kind == LayoutItemKind::TextRun)
         {
             let clusters = &data.clusters[line_item.cluster_range.clone()];
-            let Some(offset) = clusters.iter().rposition(|cluster| {
-                matches!(
-                    TerminalSourceUnit::classify(
-                        cluster,
-                        &data.styles[cluster.style_index as usize]
-                    ),
-                    TerminalSourceUnit::Barrier
-                        | TerminalSourceUnit::Candidate(
-                            TerminalWhitespaceDisposition::Hanging
-                                | TerminalWhitespaceDisposition::ConditionallyHanging
-                        )
-                )
-            }) else {
+            let is_spacing_unit = |cluster: &ClusterData| {
+                cluster.flags & ClusterData::LETTER_SPACING_BOUNDARY != 0
+                    && matches!(
+                        TerminalSourceUnit::classify(
+                            cluster,
+                            &data.styles[cluster.style_index as usize]
+                        ),
+                        TerminalSourceUnit::Barrier
+                            | TerminalSourceUnit::Candidate(
+                                TerminalWhitespaceDisposition::Hanging
+                                    | TerminalWhitespaceDisposition::ConditionallyHanging
+                            )
+                    )
+            };
+            let offset = if line_item.bidi_level & 1 != 0 {
+                clusters.iter().position(is_spacing_unit)
+            } else {
+                clusters.iter().rposition(is_spacing_unit)
+            };
+            let Some(offset) = offset else {
                 continue;
             };
             let run = &data.runs[line_item.index];
