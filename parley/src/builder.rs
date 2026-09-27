@@ -322,6 +322,10 @@ fn build_into_layout<B: Brush>(
         );
     }
 
+    if text.is_empty() && lcx.inline_boxes.is_empty() {
+        layout.data.retain_empty_text_metrics();
+    }
+
     // Move inline boxes into the layout
     layout.data.inline_boxes.clear();
     core::mem::swap(&mut layout.data.inline_boxes, &mut lcx.inline_boxes);

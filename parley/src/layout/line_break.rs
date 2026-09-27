@@ -994,15 +994,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
         self.prev_state = Some(self.state.clone());
 
-        // HACK: ignore max_advance for empty layouts
-        // Prevents crash when width is too small (https://github.com/linebender/parley/issues/186)
-        let max_advance =
-            if self.layout.data.text_len == 0 && self.layout.data.inline_boxes.is_empty() {
-                f32::MAX
-            } else {
-                max_advance
-            };
-
         let line_indent = self.resolve_indent();
         self.state.line.tab_origin = tab_origin.raw() + line_indent;
 
@@ -2246,14 +2237,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     }
 
     /// Consumes the line breaker and finalizes all line computations.
-    pub fn finish(mut self) {
-        if self.layout.data.text_len == 0 {
-            if let Some(line) = self.lines.line_items.first_mut() {
-                line.text_range = 0..0;
-                line.cluster_range = 0..0;
-            }
-        }
-    }
+    pub fn finish(self) {}
 
     #[inline]
     fn resolve_indent(&self) -> f32 {
@@ -2650,6 +2634,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run = &self.layout.data.runs[line_item.index];
                     line.metrics.ascent = run.metrics.ascent;
                     line.metrics.descent = run.metrics.descent;
+                    line.metrics.line_height =
+                        line.metrics.line_height.max(run.metrics.line_height);
                     include_line_metric_extents(
                         &mut line_extents,
                         LineMetricExtents::from_run(run.metrics),
@@ -3358,7 +3344,7 @@ fn try_commit_line<B: Brush>(
                     cluster_range.end = cluster_range.end.min(state.clusters.end);
                 }
 
-                if cluster_range.start >= cluster_range.end {
+                if cluster_range.start >= cluster_range.end && !run_data.cluster_range.is_empty() {
                     // println!("INVALID CLUSTER");
                     // dbg!(&run_data.text_range);
                     // dbg!(cluster_range);

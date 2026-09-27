@@ -1879,6 +1879,21 @@ impl<B: Brush> LayoutData<B> {
         }
     }
 
+    pub(crate) fn retain_empty_text_metrics(&mut self) {
+        self.clusters.clear();
+        self.glyphs.clear();
+        for run in &mut self.runs {
+            run.text_range = 0..0;
+            run.cluster_range = 0..0;
+            run.glyph_start = 0;
+            run.advance = 0.0;
+        }
+        for item in &mut self.items {
+            item.text_range = 0..0;
+            item.cluster_range = 0..0;
+        }
+    }
+
     pub(crate) fn finish(&mut self, grapheme_boundaries: impl Iterator<Item = usize>) {
         self.mark_grapheme_boundaries(grapheme_boundaries);
         for run in &self.runs {

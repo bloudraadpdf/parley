@@ -465,6 +465,50 @@ fn builders_empty() {
     );
 }
 
+#[test]
+fn empty_text_retains_cursor_metrics_without_content_advance() {
+    let mut fonts = create_font_context();
+    let mut context: LayoutContext<ColorBrush> = LayoutContext::new();
+    for (quantize, spacing) in [(false, 0.0), (false, 3.0), (true, 0.0), (true, 3.0)] {
+        let mut builder = context.ranged_builder(&mut fonts, "", 1.0, quantize);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(16.0));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(24.0)));
+        builder.push_default(StyleProperty::LetterSpacing(spacing));
+        builder.push_default(StyleProperty::WordSpacing(spacing));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        let mut layout = builder.build("");
+        for width in [100.0, 0.0] {
+            {
+                let mut breaker = layout.break_lines();
+                let (advance, height) = breaker
+                    .break_next(width, crate::LineTabOrigin::ZERO)
+                    .unwrap();
+                assert_eq!(advance, 0.0);
+                assert_eq!(height, 24.0);
+                assert!(breaker.is_done());
+            }
+            assert_eq!(layout.width(), 0.0);
+            assert_eq!(layout.full_width(), 0.0);
+            assert_eq!(layout.len(), 1);
+            let line = layout.lines().next().unwrap();
+            assert_eq!(line.text_range(), 0..0);
+            assert_eq!(line.metrics().advance, 0.0);
+            assert!(line.metrics().ascent > 0.0);
+            assert!(line.metrics().descent > 0.0);
+            assert_eq!(line.metrics().line_height, 24.0);
+            assert_eq!(
+                line.runs().map(|run| run.clusters().count()).sum::<usize>(),
+                0
+            );
+            layout.break_all_lines(Some(width));
+            assert_eq!(layout.full_width(), 0.0);
+        }
+    }
+}
+
 /// Test that all the builders behave the same with mixed styles.
 #[test]
 fn builders_mixed_styles() {
