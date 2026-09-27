@@ -292,6 +292,30 @@ fn test_latin_mixed_break_all_first() {
 }
 
 #[test]
+fn break_all_preserves_indic_conjuncts_across_style_changes() {
+    for split_at in [0, 12] {
+        verify_analysis(
+            "\u{0939}\u{093f}\u{0928}\u{094d}\u{0926}\u{0940}",
+            |builder| {
+                builder.push(StyleProperty::WordBreak(WordBreak::BreakAll), split_at..18);
+            },
+        )
+        .expect_boundary_list(vec![
+            Boundary::Word,
+            Boundary::None,
+            if split_at < 12 {
+                Boundary::Line
+            } else {
+                Boundary::None
+            },
+            Boundary::None,
+            Boundary::None,
+            Boundary::None,
+        ]);
+    }
+}
+
+#[test]
 fn test_all_whitespace() {
     verify_analysis("   ", |_| {})
         .expect_boundary_list(vec![Boundary::Word, Boundary::None, Boundary::None])
