@@ -283,6 +283,11 @@ impl<B: Brush> Layout<B> {
             .map(|index| &self.data.discretionary_break_shapes[index])
     }
 
+    /// Select whether subsequent line breaking restores overflow-only opportunities.
+    pub fn set_line_break_purpose(&mut self, purpose: super::LineBreakPurpose) {
+        self.data.line_break_purpose = purpose;
+    }
+
     /// Returns the style collection for the layout.
     pub fn styles(&self) -> &[Style<B>] {
         &self.data.styles

@@ -31,7 +31,8 @@ pub use bidi::{BidiAtomId, BidiLevel, BidiTopology, BidiVisualAtom, BidiVisualAt
 pub use cluster::{Affinity, Cluster, ClusterPath, ClusterSide};
 pub use data::{
     BreakReason, DiscretionaryBreak, DiscretionaryBreakCondition, DiscretionaryFitAdvance,
-    LineBreakOverride, LineStartFitAdvance, NormalSoftWrapSelection, SourceClusterFitAdvance,
+    LineBreakOverride, LineBreakPurpose, LineStartFitAdvance, NormalSoftWrapSelection,
+    SourceClusterFitAdvance,
 };
 pub use glyph::Glyph;
 pub use layout::{DiscretionaryBreakShape, Layout};

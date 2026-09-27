@@ -93,6 +93,50 @@ fn source_text_affinity_retains_source_breaks_in_intrinsic_measurement() {
 }
 
 #[test]
+fn restored_source_opportunities_stay_conditional_across_inline_boxes() {
+    use crate::layout::LineBreakPurpose;
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    for (fixture, boxes) in [
+        vec![InlineBox::contextual_spacing(1, 2, 3.0, 0.0)],
+        vec![InlineBox::atomic_with_break_affinity(
+            1,
+            2,
+            3.0,
+            0.0,
+            InlineBoxBreakAffinity::SourceText,
+        )],
+        vec![
+            InlineBox::inline_end_edge(1, 2, 0.0, 0.0, InlineBoxBreakAffinity::ToPrevious),
+            InlineBox::inline_start_edge(2, 2, 0.0, 0.0, InlineBoxBreakAffinity::ToNext),
+        ],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut layout = build_inline_box_layout(&mut lcx, &mut fcx, "abcd", 10.0, None, boxes);
+        let natural = layout.calculate_content_widths().max;
+        layout.set_line_break_overrides(vec![LineBreakOverride::overflow_opportunity(2)]);
+        assert!((layout.calculate_content_widths().min - natural).abs() < 0.001);
+        layout.break_all_lines(Some(0.0));
+        assert_eq!(
+            layout.lines().count(),
+            2,
+            "fixture {fixture}: {:?}",
+            layout
+                .lines()
+                .map(|line| line.text_range())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(layout.lines().next().unwrap().text_range(), 0..2);
+        layout.set_line_break_purpose(LineBreakPurpose::IntrinsicSizing);
+        layout.break_all_lines(Some(0.0));
+        assert_eq!(layout.lines().count(), 1);
+        assert!((layout.lines().next().unwrap().metrics().advance - natural).abs() < 0.001);
+    }
+}
+
+#[test]
 fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
