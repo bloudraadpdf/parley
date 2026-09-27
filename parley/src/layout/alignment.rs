@@ -500,7 +500,9 @@ fn source_justification_targets<B: Brush>(
         JustificationUnit::InlineBox(id) => boxes.get(id).copied(),
     };
     layout
-        .justification_opportunities
+        .selected_line_justification_opportunities
+        .as_ref()
+        .unwrap_or(&layout.justification_opportunities)
         .line_candidates(line.text_range.clone())
         .filter_map(|opportunity| match opportunity {
             JustificationOpportunity::WordSeparator(source) => {

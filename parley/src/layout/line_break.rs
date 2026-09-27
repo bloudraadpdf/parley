@@ -2998,10 +2998,7 @@ pub(super) fn line_letter_spacing_units<B: Brush>(
     data: &LayoutData<B>,
     line: &LineData,
 ) -> Vec<LetterSpacingUnitRecord> {
-    let items = &data.line_items[line.item_range.clone()];
-    let mut removed = line.removed_leading_source_ranges.clone();
-    removed.extend(line.removed_terminal_source_ranges.iter().cloned());
-    letter_spacing_units_from_visual_items(data, items, &removed)
+    line_visual_letter_spacing_units(data, line)
         .into_iter()
         .map(|record| {
             let address = match record.source {
@@ -3046,6 +3043,39 @@ pub(super) fn line_letter_spacing_units<B: Brush>(
             }
         })
         .collect()
+}
+
+pub(super) fn line_typographic_units<B: Brush>(
+    data: &LayoutData<B>,
+    line: &LineData,
+) -> Vec<super::JustificationUnit> {
+    line_visual_letter_spacing_units(data, line)
+        .into_iter()
+        .map(|unit| match unit.source {
+            LetterSpacingSource::Text {
+                run_index,
+                cluster_index,
+            } => super::JustificationUnit::Text(
+                data.clusters[cluster_index].text_range(&data.runs[run_index]),
+            ),
+            LetterSpacingSource::Atomic { box_index } => {
+                super::JustificationUnit::InlineBox(data.inline_boxes[box_index].id)
+            }
+        })
+        .collect()
+}
+
+fn line_visual_letter_spacing_units<B: Brush>(
+    data: &LayoutData<B>,
+    line: &LineData,
+) -> Vec<VisualLetterSpacingUnit> {
+    let mut removed = line.removed_leading_source_ranges.clone();
+    removed.extend(line.removed_terminal_source_ranges.iter().cloned());
+    letter_spacing_units_from_visual_items(
+        data,
+        &data.line_items[line.item_range.clone()],
+        &removed,
+    )
 }
 
 fn resolve_inline_boundary_tracking<B: Brush>(

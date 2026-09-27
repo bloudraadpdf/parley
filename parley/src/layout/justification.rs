@@ -26,37 +26,29 @@ pub enum JustificationUnit {
     InlineBox(u64),
 }
 
-/// A caller-resolved expansion opportunity in source order.
+/// A caller-resolved expansion opportunity identified by source units.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JustificationOpportunity {
     /// Expansion within a word separator.
     WordSeparator(Range<usize>),
-    /// Expansion between typographic units.
+    /// Expansion between adjacent visual typographic units.
     BetweenUnits {
-        /// The preceding source unit.
+        /// The unit on the physical left side of the opportunity.
         before: JustificationUnit,
-        /// The following source unit.
+        /// The unit on the physical right side of the opportunity.
         after: JustificationUnit,
     },
 }
 
 impl JustificationOpportunity {
-    fn source_anchor(&self) -> Option<usize> {
+    fn source_anchor(&self, boxes: &alloc::collections::BTreeMap<u64, usize>) -> Option<usize> {
+        let anchor = |unit: &JustificationUnit| match unit {
+            JustificationUnit::Text(range) => Some(range.start),
+            JustificationUnit::InlineBox(id) => boxes.get(id).copied(),
+        };
         match self {
             Self::WordSeparator(range) => Some(range.start),
-            Self::BetweenUnits {
-                before: JustificationUnit::Text(before),
-                after: JustificationUnit::Text(after),
-            } => Some(before.start.min(after.start)),
-            Self::BetweenUnits {
-                before: JustificationUnit::Text(range),
-                ..
-            }
-            | Self::BetweenUnits {
-                after: JustificationUnit::Text(range),
-                ..
-            } => Some(range.start),
-            Self::BetweenUnits { .. } => None,
+            Self::BetweenUnits { before, after } => Some(anchor(before)?.min(anchor(after)?)),
         }
     }
 
@@ -75,11 +67,19 @@ impl JustificationOpportunity {
 pub(crate) struct JustificationOpportunities {
     entries: Vec<JustificationOpportunity>,
     text_boundaries: Vec<usize>,
-    source_order: Vec<usize>,
+    source_order: Vec<(usize, usize)>,
 }
 
 impl JustificationOpportunities {
-    pub(crate) fn set(&mut self, entries: Vec<JustificationOpportunity>) {
+    pub(crate) fn set(
+        &mut self,
+        entries: Vec<JustificationOpportunity>,
+        inline_boxes: &[crate::InlineBox],
+    ) {
+        let boxes = inline_boxes
+            .iter()
+            .map(|inline| (inline.id, inline.index))
+            .collect();
         self.entries = entries;
         self.text_boundaries.clear();
         self.text_boundaries.extend(
@@ -97,10 +97,11 @@ impl JustificationOpportunities {
             self.entries
                 .iter()
                 .enumerate()
-                .filter_map(|(index, entry)| entry.source_anchor().map(|_| index)),
+                .filter_map(|(index, entry)| {
+                    entry.source_anchor(&boxes).map(|anchor| (anchor, index))
+                }),
         );
-        self.source_order
-            .sort_by_key(|&index| self.entries[index].source_anchor());
+        self.source_order.sort_unstable();
     }
 
     pub(crate) fn entries(&self) -> &[JustificationOpportunity] {
@@ -113,11 +114,11 @@ impl JustificationOpportunities {
     ) -> impl Iterator<Item = &JustificationOpportunity> {
         let start = self
             .source_order
-            .partition_point(|&index| self.entries[index].source_anchor().unwrap() < source.start);
+            .partition_point(|&(anchor, _)| anchor < source.start);
         self.source_order[start..]
             .iter()
-            .map(|&index| &self.entries[index])
-            .take_while(move |entry| entry.source_anchor().unwrap() < source.end)
+            .take_while(move |&&(anchor, _)| anchor <= source.end)
+            .map(|&(_, index)| &self.entries[index])
     }
 
     pub(crate) fn text_boundaries(
@@ -157,15 +158,18 @@ mod tests {
     #[test]
     fn candidate_contains_both_endpoints_of_an_eligible_boundary() {
         let mut opportunities = JustificationOpportunities::default();
-        opportunities.set(vec![
-            boundary(4..5, 5..6),
-            JustificationOpportunity::WordSeparator(3..4),
-            boundary(0..1, 1..3),
-            JustificationOpportunity::BetweenUnits {
-                before: JustificationUnit::Text(6..7),
-                after: JustificationUnit::InlineBox(42),
-            },
-        ]);
+        opportunities.set(
+            vec![
+                boundary(4..5, 5..6),
+                JustificationOpportunity::WordSeparator(3..4),
+                boundary(0..1, 1..3),
+                JustificationOpportunity::BetweenUnits {
+                    before: JustificationUnit::Text(6..7),
+                    after: JustificationUnit::InlineBox(42),
+                },
+            ],
+            &[],
+        );
         assert_eq!(
             opportunities.text_boundaries(0..6).collect::<Vec<_>>(),
             vec![(&(0..1), &(1..3)), (&(4..5), &(5..6))]
@@ -180,8 +184,8 @@ mod tests {
     #[test]
     fn replacing_and_clearing_policy_removes_previous_boundaries() {
         let mut opportunities = JustificationOpportunities::default();
-        opportunities.set(vec![boundary(0..1, 1..2)]);
-        opportunities.set(vec![boundary(4..5, 5..6)]);
+        opportunities.set(vec![boundary(0..1, 1..2)], &[]);
+        opportunities.set(vec![boundary(4..5, 5..6)], &[]);
         assert_eq!(opportunities.text_boundaries(0..2).count(), 0);
         assert_eq!(opportunities.text_boundaries(4..6).count(), 1);
         opportunities.clear();
@@ -196,6 +200,7 @@ mod tests {
             (0..4096)
                 .map(|index| JustificationOpportunity::WordSeparator(index * 4 + 1..index * 4 + 2))
                 .collect(),
+            &[],
         );
         let mut visited = 0;
         for index in 0..4096 {
@@ -211,5 +216,25 @@ mod tests {
             visited += entries.len();
         }
         assert_eq!(visited, opportunities.entries().len());
+    }
+
+    #[test]
+    fn atomic_endpoints_are_indexed_at_their_registered_source_boundary() {
+        let entry = JustificationOpportunity::BetweenUnits {
+            before: JustificationUnit::InlineBox(1),
+            after: JustificationUnit::InlineBox(2),
+        };
+        let mut opportunities = JustificationOpportunities::default();
+        opportunities.set(
+            vec![entry.clone()],
+            &[
+                crate::InlineBox::new(1, 0, 10.0, 10.0),
+                crate::InlineBox::new(2, 0, 10.0, 10.0),
+            ],
+        );
+        assert_eq!(
+            opportunities.line_candidates(0..0).collect::<Vec<_>>(),
+            vec![&entry]
+        );
     }
 }

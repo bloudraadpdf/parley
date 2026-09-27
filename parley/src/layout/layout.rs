@@ -87,7 +87,23 @@ impl<B: Brush> Layout<B> {
         opportunities: Vec<super::JustificationOpportunity>,
     ) {
         unjustify(&mut self.data);
-        self.data.justification_opportunities.set(opportunities);
+        self.data.selected_line_justification_opportunities = None;
+        self.data
+            .justification_opportunities
+            .set(opportunities, &self.data.inline_boxes);
+    }
+
+    /// Set expansion sites between visual neighbours of the selected lines.
+    /// This does not change the potential source boundaries used during shaping.
+    /// Rebreaking discards these selected-line sites.
+    pub fn set_selected_line_justification_opportunities(
+        &mut self,
+        opportunities: Vec<super::JustificationOpportunity>,
+    ) {
+        unjustify(&mut self.data);
+        let mut selected = super::justification::JustificationOpportunities::default();
+        selected.set(opportunities, &self.data.inline_boxes);
+        self.data.selected_line_justification_opportunities = Some(selected);
     }
 
     /// The caller-resolved source opportunities.
@@ -433,6 +449,7 @@ impl<B: Brush> Layout<B> {
     /// Returns line breaker to compute lines for the layout.
     pub fn break_lines(&mut self) -> BreakLines<'_, B> {
         unjustify(&mut self.data);
+        self.data.selected_line_justification_opportunities = None;
         self.data.restore_line_end_letter_spacing();
         BreakLines::new(self)
     }

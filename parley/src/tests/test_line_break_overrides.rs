@@ -254,6 +254,88 @@ fn source_justification_retains_owned_halves_at_inline_borders() {
 }
 
 #[test]
+fn selected_line_justification_follows_mixed_bidi_visual_neighbours() {
+    use crate::{JustificationOpportunity::BetweenUnits, JustificationUnit::Text};
+    let text = "A\u{05d0}\u{05d1}C";
+    let mut layout = configured_layout(text, |_| {});
+    let potential = vec![
+        BetweenUnits {
+            before: Text(0..1),
+            after: Text(1..3),
+        },
+        BetweenUnits {
+            before: Text(1..3),
+            after: Text(3..5),
+        },
+        BetweenUnits {
+            before: Text(3..5),
+            after: Text(5..6),
+        },
+    ];
+    layout.set_justification_opportunities(potential.clone());
+    let width = layout.calculate_content_widths().max + 12.0;
+    layout.break_all_lines(Some(width));
+    let advances = |layout: &Layout<ColorBrush>| {
+        layout
+            .lines()
+            .next()
+            .unwrap()
+            .runs()
+            .flat_map(|run| {
+                run.visual_clusters()
+                    .map(|cluster| (cluster.text_range(), cluster.advance()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = advances(&layout);
+    assert_eq!(
+        before
+            .iter()
+            .map(|(source, _)| source.clone())
+            .collect::<Vec<_>>(),
+        vec![0..1, 3..5, 1..3, 5..6]
+    );
+    layout.set_selected_line_justification_opportunities(
+        before
+            .windows(2)
+            .map(|pair| BetweenUnits {
+                before: Text(pair[0].0.clone()),
+                after: Text(pair[1].0.clone()),
+            })
+            .collect(),
+    );
+    assert_eq!(layout.justification_opportunities(), potential);
+    layout.align(
+        Some(width),
+        Alignment::Left,
+        AlignmentOptions {
+            justification_mode: crate::JustificationMode::SourceOpportunities,
+            last_line_alignment: Some(Alignment::Justify),
+            ..Default::default()
+        },
+    );
+    for (index, ((source, natural), (_, expanded))) in
+        before.iter().zip(advances(&layout)).enumerate()
+    {
+        let growth = if index < 3 { 4.0 } else { 0.0 };
+        assert!(
+            (expanded - natural - growth).abs() < 0.001,
+            "{source:?}: {expanded} != {}",
+            natural + growth
+        );
+    }
+    layout.break_all_lines(Some(width));
+    assert!(
+        layout
+            .data
+            .selected_line_justification_opportunities
+            .is_none()
+    );
+    assert_eq!(advances(&layout), before);
+}
+
+#[test]
 fn join_controls_at_word_edges_preserve_intrinsic_word_breaks() {
     let plain = configured_layout("This is a simple test", |_| {});
     for joined in [
@@ -277,9 +359,7 @@ fn join_controls_at_word_edges_preserve_intrinsic_word_breaks() {
 #[test]
 fn join_controls_after_spaces_preserve_soft_wraps() {
     let plain = "This is a simple test";
-    let width = configured_layout(plain, |_| {})
-        .calculate_content_widths()
-        .min;
+    let width = configured_layout(plain, |_| {}).calculate_content_widths().min;
     let line_count = |text| {
         let mut layout = configured_layout(text, |_| {});
         layout.break_all_lines(Some(width));
@@ -300,9 +380,7 @@ fn emergency_min_content_keeps_combining_marks_with_base() {
         builder.push_default(StyleProperty::OverflowWrap(crate::OverflowWrap::Anywhere));
     });
     let min = layout.calculate_content_widths().min;
-    let cluster = configured_layout("a\u{0301}\u{0301}\u{0301}", |_| {})
-        .calculate_content_widths()
-        .max;
+    let cluster = configured_layout("a\u{0301}\u{0301}\u{0301}", |_| {}).calculate_content_widths().max;
     assert!((min - cluster).abs() < 0.001, "{min} != {cluster}");
     layout.break_all_lines(Some(min));
     assert_eq!(layout.lines().count(), 2);

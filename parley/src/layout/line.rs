@@ -48,6 +48,12 @@ impl<'a, B: Brush> Line<'a, B> {
         super::line_break::line_letter_spacing_units(&self.layout.data, self.data).into_iter()
     }
 
+    /// Typographic source units in this selected line's resolved visual order.
+    /// Transparent boundaries and default-ignorable controls are excluded.
+    pub fn typographic_units(&self) -> impl Iterator<Item = super::JustificationUnit> {
+        super::line_break::line_typographic_units(&self.layout.data, self.data).into_iter()
+    }
+
     /// Returns this line's contribution to [`Layout::width`].
     /// Positive indentation is included; trailing whitespace is excluded.
     pub fn measured_advance(&self) -> f32 {
