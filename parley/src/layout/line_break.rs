@@ -100,8 +100,16 @@ impl SourceEndContribution {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum FragmentFit {
+    #[default]
+    Fits,
+    PendingOverflow,
+}
+
 #[derive(Clone, Default)]
 struct LineState {
+    fragment_fit: FragmentFit,
     cloned_owners: ClonedInlineFlow,
     cloned_start_edges: Vec<u64>,
     start_position: LineStartPosition,
@@ -746,6 +754,7 @@ pub struct BreakLines<'a, B: Brush> {
     prev_state: Option<BreakerState>,
     done: bool,
     cloned_edges: ClonedInlineEdgeMap,
+    has_negative_end_edges: bool,
     uniform_letter_spacing: Option<f32>,
     letter_spacing_edges: LetterSpacingEdges,
 }
@@ -773,6 +782,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.lines.clear();
         lines.line_items.clear();
         let cloned_edges = ClonedInlineEdgeMap::new(&layout.data);
+        let has_negative_end_edges = layout.data.inline_boxes.iter().any(|edge| {
+            edge.width() < 0.0
+                && matches!(edge.line_break_participation(),
+                    InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) if edge.is_end())
+        });
         let uniform_letter_spacing = uniform_letter_spacing(&layout.data);
         Self {
             layout,
@@ -781,6 +795,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             prev_state: None,
             done: false,
             cloned_edges,
+            has_negative_end_edges,
             uniform_letter_spacing,
             letter_spacing_edges: LetterSpacingEdges::default(),
         }
@@ -803,6 +818,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.cloned_start_edges = self.state.line.cloned_owners.start_ids().collect();
         self.state.line.x = self.state.line.cloned_owners.start_advance();
         self.state.line.fit_x = self.state.line.x;
+        self.state.line.fragment_fit = FragmentFit::Fits;
         self.state.line.running_line_height = 0.;
         self.state.line.discretionary_advance = 0.;
         self.state.line.discretionary_break = false;
@@ -845,12 +861,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         next_fit_x: f32,
         max_advance: f32,
     ) -> LogicalOwnerEdgePlacement {
-        if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
+        if self.state.line.fragment_fit != FragmentFit::PendingOverflow
+            && source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
             && self.state.line.text_wrap_mode == TextWrapMode::Wrap
             && self.state.line.has_content_advance()
             && edge_width != 0.0
             && !self.advance_fits(next_fit_x, max_advance)
         {
+            if self.has_negative_end_edges {
+                self.state.line.fragment_fit = FragmentFit::PendingOverflow;
+                return LogicalOwnerEdgePlacement::Append;
+            }
             self.state
                 .take_overflow_candidate()
                 .map_or(LogicalOwnerEdgePlacement::Append, |candidate| {
@@ -973,6 +994,39 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }};
         }
 
+        macro_rules! commit_overflow_candidate {
+            () => {{
+                if let Some(candidate) = self.state.take_overflow_candidate() {
+                    try_commit_regular_candidate!(candidate)
+                } else if let Some(previous) = self.state.emergency_boundary.take() {
+                    let previous = previous.0;
+                    self.state.line = previous.state;
+                    if commit_current_line!(self, max_advance, line_indent, BreakReason::Emergency)
+                    {
+                        self.state.item_idx = previous.item_idx;
+                        self.state.run_idx = previous.run_idx;
+                        self.state.cluster_idx = previous.cluster_idx;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }};
+        }
+
+        macro_rules! finish_source_fragment {
+            () => {
+                if self.state.line.fragment_fit == FragmentFit::PendingOverflow {
+                    self.state.line.fragment_fit = FragmentFit::Fits;
+                    if commit_overflow_candidate!() {
+                        return self.start_new_line();
+                    }
+                }
+            };
+        }
+
         // dbg!(&self.layout.items);
 
         // println!("\nBREAK NEXT");
@@ -1010,6 +1064,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 && self.state.line.has_content_advance()
                                 && candidate.is_some()
                             {
+                                finish_source_fragment!();
                                 self.state.item_idx += 1;
                                 self.state.mark_line_break_opportunity(candidate.unwrap());
                                 let next_fit_x = self.state.line.fit_x + width;
@@ -1066,6 +1121,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 == LogicalInlineEdgeSourceProjection::BeforeGeometry
                                 && project
                             {
+                                finish_source_fragment!();
                                 self.mark_projected_source_boundary(projection, max_advance);
                             }
                             // A start edge and an atomic box at the same source
@@ -1137,8 +1193,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 .line
                                 .cloned_owners
                                 .after_edge(&self.layout.data.inline_boxes[inline_box_index]);
+                            if self.advance_fits(self.state.line.fit_x, max_advance) {
+                                self.state.line.fragment_fit = FragmentFit::Fits;
+                            }
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
+                                && self.state.line.fragment_fit != FragmentFit::PendingOverflow
                             {
                                 self.mark_projected_source_boundary(projection, max_advance);
                             }
@@ -1157,6 +1217,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     };
                     let width = inline_box.advance();
                     let height = inline_box.height();
+                    if break_affinity.allows_break_before() {
+                        finish_source_fragment!();
+                    }
                     if break_affinity == InlineBoxBreakAffinity::SourceText
                         && self.state.line.text_wrap_mode == TextWrapMode::Wrap
                         && self.state.line.has_content_advance()
@@ -1165,6 +1228,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             inline_box.index,
                         )
                     {
+                        finish_source_fragment!();
                         self.mark_projected_source_boundary(
                             Some(ProjectedSourceBoundary::Exact {
                                 byte_index: inline_box.index,
@@ -1233,7 +1297,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if !break_affinity.allows_break_before() {
-                            if break_affinity == InlineBoxBreakAffinity::SourceText {
+                            if break_affinity == InlineBoxBreakAffinity::SourceText
+                                && self.state.line.fragment_fit != FragmentFit::PendingOverflow
+                            {
                                 if let Some(candidate) = self.state.take_overflow_candidate() {
                                     if try_commit_regular_candidate!(candidate) {
                                         return self.start_new_line();
@@ -1506,11 +1572,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     }),
                                 };
                                 if let Some(candidate_kind) = candidate_kind {
+                                    finish_source_fragment!();
                                     self.state.mark_line_break_opportunity(candidate_kind);
                                 }
                                 // break_opportunity = true;
                             }
                         } else if is_newline {
+                            finish_source_fragment!();
                             self.state.append_cluster_to_line(
                                 self.state.line.x,
                                 self.state.line.fit_x,
@@ -1534,6 +1602,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         && text_wrap_mode == TextWrapMode::Wrap
                         // If we're at the start of the line, this particular cluster will never fit, so it's not a valid emergency break opportunity.
                         && self.state.line.has_content_advance()
+                        && self.state.line.fragment_fit != FragmentFit::PendingOverflow
                         {
                             self.state.mark_emergency_break_opportunity();
                         }
@@ -1661,6 +1730,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             && !self.state.line.removes_leading_source_at(byte_index);
                         match line_fit {
                             LineFit::Fits | LineFit::TrailingPreservedSpaceOverflow => {
+                                if self.advance_fits(next_fit_x - hanging_tracking, max_advance) {
+                                    self.state.line.fragment_fit = FragmentFit::Fits;
+                                }
                                 let line_height = run.metrics().line_height;
                                 self.state.accept_cluster(
                                     next_x,
@@ -1710,38 +1782,20 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 }
                             }
                             LineFit::ContentOverflow => {
-                                // Take the most recent regular candidate regardless of its
-                                // provenance. Priority only changes the overflowing-separator
-                                // case above; actual content overflow remains greedy.
-                                if let Some(candidate) = self.state.take_overflow_candidate() {
-                                    if try_commit_regular_candidate!(candidate) {
-                                        return self.start_new_line();
-                                    }
-                                } else if let Some(prev_emergency) =
-                                    self.state.emergency_boundary.take()
-                                {
-                                    let prev_emergency = prev_emergency.0;
-                                    self.state.line = prev_emergency.state;
-                                    if commit_current_line!(
-                                        self,
-                                        max_advance,
-                                        line_indent,
-                                        BreakReason::Emergency
-                                    ) {
-                                        self.state.item_idx = prev_emergency.item_idx;
-                                        self.state.run_idx = prev_emergency.run_idx;
-                                        self.state.cluster_idx = prev_emergency.cluster_idx;
-                                        return self.start_new_line();
-                                    }
+                                if !self.has_negative_end_edges && commit_overflow_candidate!() {
+                                    return self.start_new_line();
                                 } else {
-                                    let line_height = run.metrics().line_height;
-                                    self.state.append_cluster_to_line(
+                                    if self.has_negative_end_edges {
+                                        self.state.line.fragment_fit = FragmentFit::PendingOverflow;
+                                    }
+                                    self.state.accept_cluster(
                                         next_x,
                                         next_fit_x,
-                                        line_height,
+                                        run.metrics().line_height,
                                         cluster.info().authored_break_unit(),
+                                        contributes_justification_space
+                                            && self.has_negative_end_edges,
                                     );
-                                    self.state.cluster_idx += 1;
                                 }
                             }
                         }
@@ -1769,6 +1823,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }
         }
 
+        finish_source_fragment!();
         if self.state.line.items.end == 0 {
             self.state.line.items.end = 1;
         }

@@ -2435,3 +2435,123 @@ fn nested_cloned_edges_repeat_in_source_order_at_explicit_breaks() {
     assert_eq!(placed_inline_edges(&lines[1])[1].1, 3.0);
     assert!(lines[1].metrics().advance > placed_inline_edges(&lines[1])[3].1 + 4.0);
 }
+
+fn negative_margin_layout(
+    text: &str,
+    edges: &[(usize, f32)],
+    direction: crate::BaseDirection,
+) -> crate::Layout<ColorBrush> {
+    use crate::layout::SourceClusterFitAdvance;
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.set_direction(direction);
+    for (id, &(index, margin)) in edges.iter().enumerate() {
+        builder.push_inline_box(InlineBox::inline_end_edge(
+            id as u64,
+            index,
+            margin,
+            0.0,
+            InlineBoxBreakAffinity::ToPrevious,
+        ));
+    }
+    let mut layout = builder.build(text);
+    let advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    SourceClusterFitAdvance::new(cluster.text_range().start, 10.0).unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(advances);
+    layout
+}
+
+#[test]
+fn negative_inline_end_margin_participates_in_terminal_fragment_fitting() {
+    for direction in [crate::BaseDirection::Ltr, crate::BaseDirection::Rtl] {
+        for (text, edges, width, expected) in [
+            ("aaaa bbbbbb", vec![(11, -10.0)], 100.0, vec![0..11]),
+            ("aaaa bbbbbb", vec![(11, -30.0)], 80.0, vec![0..11]),
+            ("aaaa bbbbbb", vec![(11, -10.0)], 99.0, vec![0..5, 5..11]),
+            ("aaaa bbbbbb", vec![(11, 0.0)], 100.0, vec![0..5, 5..11]),
+            ("aaaa bbbbbb", vec![(11, 10.0)], 110.0, vec![0..5, 5..11]),
+            (
+                "aaaa bbbbbb cc",
+                vec![(11, -30.0)],
+                80.0,
+                vec![0..11, 11..14],
+            ),
+            (
+                "aaaa bbbbbb",
+                vec![(11, 10.0), (11, -40.0)],
+                80.0,
+                vec![0..11],
+            ),
+            (
+                "aaaa bbbbbb",
+                vec![(11, -10.0), (11, -20.0)],
+                80.0,
+                vec![0..11],
+            ),
+            (
+                "aaaa bbbbbb",
+                vec![(11, 30.0), (11, -10.0)],
+                100.0,
+                vec![0..5, 5..11],
+            ),
+            (
+                "aaaa bbbbbb cccc",
+                vec![(16, -40.0)],
+                80.0,
+                vec![0..5, 5..16],
+            ),
+            (
+                "aaaa bbbbbb\ncc",
+                vec![(14, -50.0)],
+                80.0,
+                vec![0..5, 5..12, 12..14],
+            ),
+            ("אבגד הוזחטי", vec![(21, -30.0)], 80.0, vec![0..21]),
+        ] {
+            let mut layout = negative_margin_layout(text, &edges, direction);
+            layout.break_all_lines(Some(width));
+            let lines: Vec<_> = layout.lines().map(|line| line.text_range()).collect();
+            assert_eq!(
+                lines, expected,
+                "{direction:?}: {text:?}, {edges:?}, width {width}"
+            );
+        }
+    }
+}
+
+#[test]
+fn reverted_negative_margin_fragment_can_select_a_different_width() {
+    let mut layout =
+        negative_margin_layout("aaaa bbbbbb", &[(11, -30.0)], crate::BaseDirection::Ltr);
+    let mut breaker = layout.break_lines();
+    assert!(
+        breaker
+            .break_next(79.0, crate::layout::LineTabOrigin::ZERO)
+            .is_some()
+    );
+    assert!(breaker.revert());
+    assert!(
+        breaker
+            .break_next(80.0, crate::layout::LineTabOrigin::ZERO)
+            .is_some()
+    );
+    breaker.finish();
+    assert_eq!(
+        layout
+            .lines()
+            .map(|line| line.text_range())
+            .collect::<Vec<_>>(),
+        [0..11]
+    );
+}
