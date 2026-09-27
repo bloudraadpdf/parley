@@ -242,6 +242,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         font_synthesis_style: FontSynthesisStyle::ObliqueOnly,
         font_variations: FontVariations::empty(), // TODO: Set a non-default value
         font_features: FontFeatures::empty(),     // TODO: Set a non-default value
+        font_features_for_justification: FontFeatures::empty(),
         font_metric_advance_quantization: true,
         locale: Some("en-US".parse().unwrap()),
         font_language_override: None,

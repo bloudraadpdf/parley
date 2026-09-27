@@ -88,9 +88,15 @@ impl<B: Brush> Layout<B> {
     ) {
         unjustify(&mut self.data);
         self.data.selected_line_justification_opportunities = None;
-        self.data
-            .justification_opportunities
-            .set(opportunities, &self.data.inline_boxes);
+        if self.justification_opportunities() != opportunities {
+            self.clear_justification_shape_selection();
+            for shape in &mut self.data.deferred_justification_shapes {
+                shape.prepared = None;
+            }
+            self.data
+                .justification_opportunities
+                .set(opportunities, &self.data.inline_boxes);
+        }
     }
 
     /// Set expansion sites between visual neighbours of the selected lines.
@@ -121,13 +127,48 @@ impl<B: Brush> Layout<B> {
             .text_boundaries(source)
     }
 
+    pub(crate) fn clear_justification_shape_selection(&mut self) {
+        unjustify(&mut self.data);
+        self.data.restore_line_end_letter_spacing();
+        if let Some(variants) = self.data.justification_shape_variants.take() {
+            self.data.clusters = variants.original;
+            self.data.glyphs.truncate(variants.original_glyph_len);
+        }
+    }
+
+    /// Whether naturally broken lines need alternative character-justification shapes.
+    pub fn needs_justification_shape_preparation(
+        &self,
+        policy: crate::JustificationShapePolicy,
+    ) -> bool {
+        self.has_justification_shape_candidates()
+            && self.data.lines.iter().any(|line| {
+                super::line_break::line_needs_justification_shape(
+                    &self.data,
+                    line,
+                    &self.data.line_items[line.item_range.clone()],
+                    policy,
+                )
+            })
+    }
+
+    /// Whether source-bound alternative feature settings are retained for a
+    /// shaped cluster containing more than one source character.
+    pub fn has_justification_shape_candidates(&self) -> bool {
+        !self.data.deferred_justification_shapes.is_empty()
+    }
+
     /// Set physical fitting advances for shaped source clusters. Rendering
     /// advances and Unicode break opportunities are unchanged. Replacing the
     /// list restores original fit advances before applying new entries; an
     /// empty list removes the projection.
     pub fn set_source_cluster_fit_advances(&mut self, mut advances: Vec<SourceClusterFitAdvance>) {
-        unjustify(&mut self.data);
-        self.data.restore_line_end_letter_spacing();
+        let policy = self
+            .data
+            .justification_shape_variants
+            .as_ref()
+            .map(|variants| variants.policy);
+        self.clear_justification_shape_selection();
         if self.data.source_cluster_fit_baseline.len() == self.data.clusters.len() {
             for (cluster, original) in self
                 .data
@@ -139,26 +180,20 @@ impl<B: Brush> Layout<B> {
             }
         }
         self.data.source_cluster_fit_baseline.clear();
-        if advances.is_empty() {
-            return;
+        if !advances.is_empty() {
+            self.data.source_cluster_fit_baseline = self
+                .data
+                .clusters
+                .iter()
+                .map(|cluster| cluster.line_break_advance)
+                .collect();
         }
-        self.data.source_cluster_fit_baseline = self
-            .data
-            .clusters
-            .iter()
-            .map(|cluster| cluster.line_break_advance)
-            .collect();
         advances.sort_by_key(|entry| entry.byte_index);
         advances.dedup_by_key(|entry| entry.byte_index);
-        for run in &self.data.runs {
-            for cluster in &mut self.data.clusters[run.cluster_range.clone()] {
-                let byte_index = cluster.text_range(run).start;
-                if let Ok(index) =
-                    advances.binary_search_by_key(&byte_index, |entry| entry.byte_index)
-                {
-                    cluster.line_break_advance = advances[index].advance;
-                }
-            }
+        apply_source_fit_projection(&self.data.runs, &mut self.data.clusters, &advances);
+        self.data.source_cluster_fit_advances = advances;
+        if let Some(policy) = policy {
+            self.set_justification_shape_policy(policy);
         }
     }
 
@@ -552,6 +587,26 @@ impl<B: Brush> Default for Layout<B> {
     fn default() -> Self {
         Self {
             data: LayoutData::default(),
+        }
+    }
+}
+
+/// Apply caller-owned physical fit values to source-identical cluster variants.
+pub(crate) fn apply_source_fit_projection(
+    runs: &[super::data::RunData],
+    clusters: &mut [super::data::ClusterData],
+    advances: &[SourceClusterFitAdvance],
+) {
+    if advances.is_empty() {
+        return;
+    }
+    for run in runs {
+        for cluster in &mut clusters[run.cluster_range.clone()] {
+            let byte_index = cluster.text_range(run).start;
+            if let Ok(index) = advances.binary_search_by_key(&byte_index, |entry| entry.byte_index)
+            {
+                cluster.line_break_advance = advances[index].advance;
+            }
         }
     }
 }

@@ -38,6 +38,10 @@ use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WordBreak};
 
 use core::ops::Range;
 
+mod justification;
+pub(crate) use justification::line_needs_justification_shape;
+use justification::{CandidateMutations, CommittedShape, ShapeCandidateBuffers};
+
 #[derive(Default)]
 struct LineLayout {
     lines: Vec<LineData>,
@@ -757,6 +761,10 @@ pub struct BreakLines<'a, B: Brush> {
     has_negative_end_edges: bool,
     uniform_letter_spacing: Option<f32>,
     letter_spacing_edges: LetterSpacingEdges,
+    candidate_mutations: Option<CandidateMutations>,
+    shape_candidates: Option<ShapeCandidateBuffers<B>>,
+    reject_terminal_candidate: bool,
+    previous_shape_commit: Option<CommittedShape>,
 }
 
 macro_rules! commit_current_line {
@@ -781,6 +789,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        let shape_candidates = ShapeCandidateBuffers::new(&mut layout.data);
         let cloned_edges = ClonedInlineEdgeMap::new(&layout.data);
         let has_negative_end_edges = layout.data.inline_boxes.iter().any(|edge| {
             edge.width() < 0.0
@@ -798,6 +807,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             has_negative_end_edges,
             uniform_letter_spacing,
             letter_spacing_edges: LetterSpacingEdges::default(),
+            candidate_mutations: None,
+            shape_candidates,
+            reject_terminal_candidate: false,
+            previous_shape_commit: None,
         }
     }
 
@@ -846,6 +859,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         };
 
         self.finish_line(self.lines.lines.len() - 1, line_height, &tab_advances);
+        if self.candidate_mutations.is_none() {
+            if let Some(candidates) = &mut self.shape_candidates {
+                let line = self.lines.lines.last().expect("committed line");
+                candidates.remember(
+                    &self.layout.data,
+                    &self.lines.line_items[line.item_range.clone()],
+                );
+            }
+        }
         self.last_line_data()
     }
 
@@ -924,9 +946,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         {
             return None;
         }
-        for cluster in &mut self.layout.data.clusters[idx..end] {
-            cluster.advance = 0.0;
-            cluster.line_break_advance = 0.0;
+        for (offset, cluster) in self.layout.data.clusters[idx..end].iter_mut().enumerate() {
+            CandidateMutations::cluster(
+                &mut self.candidate_mutations,
+                idx + offset,
+                cluster,
+                |cluster| {
+                    cluster.advance = 0.0;
+                    cluster.line_break_advance = 0.0;
+                },
+            );
         }
         self.state.line.x -= reclaimed;
         self.state.line.fit_x -= reclaimed_fit;
@@ -956,6 +985,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         max_advance: f32,
         tab_origin: LineTabOrigin,
     ) -> Option<(f32, f32)> {
+        if self.shape_candidates.is_some() && self.candidate_mutations.is_none() {
+            return self.break_next_with_shapes(max_advance, tab_origin);
+        }
         // Maintain iterator state
         if self.done {
             return None;
@@ -1579,6 +1611,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             }
                         } else if is_newline {
                             finish_source_fragment!();
+                            if self.reject_terminal_candidate && commit_overflow_candidate!() {
+                                return self.start_new_line();
+                            }
                             self.state.append_cluster_to_line(
                                 self.state.line.x,
                                 self.state.line.fit_x,
@@ -1827,6 +1862,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if self.state.line.items.end == 0 {
             self.state.line.items.end = 1;
         }
+        if self.reject_terminal_candidate && commit_overflow_candidate!() {
+            return self.start_new_line();
+        }
         if commit_current_line!(self, max_advance, line_indent, BreakReason::None) {
             self.done = true;
             return self.start_new_line();
@@ -1964,6 +2002,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     ///
     /// Inline boxes are supported and each contributes as 1 character.
     pub fn break_next_with_length(&mut self, max_chars: u32) -> Option<()> {
+        if self.shape_candidates.is_some() && self.candidate_mutations.is_none() {
+            return self.break_length_with_original_shape(max_chars);
+        }
         if self.done {
             return None;
         }
@@ -2173,6 +2214,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Reverts the last computed line, returning to the previous state.
     pub fn revert(&mut self) -> bool {
         if let Some(state) = self.prev_state.take() {
+            self.revert_shape_candidate();
             self.state = state;
             self.lines.lines.truncate(self.state.lines);
             self.lines.line_items.truncate(self.state.items);
@@ -2278,15 +2320,36 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run = &data.runs[run_index];
                     let glyph_index = run.spacing_glyph(&data.clusters, cluster_index);
                     let cluster = &mut data.clusters[cluster_index];
-                    cluster.advance -= adjustment;
-                    cluster.line_break_advance -= adjustment;
-                    cluster.trimmed_letter_spacing = adjustment;
+                    CandidateMutations::cluster(
+                        &mut self.candidate_mutations,
+                        cluster_index,
+                        cluster,
+                        |cluster| {
+                            cluster.advance -= adjustment;
+                            cluster.line_break_advance -= adjustment;
+                            cluster.trimmed_letter_spacing = adjustment;
+                        },
+                    );
                     if let Some(index) = glyph_index {
-                        data.glyphs[index].advance -= adjustment;
+                        CandidateMutations::glyph(
+                            &mut self.candidate_mutations,
+                            index,
+                            &mut data.glyphs[index],
+                            |glyph| {
+                                glyph.advance -= adjustment;
+                            },
+                        );
                     }
                 }
                 LetterSpacingSource::Atomic { box_index } => {
-                    data.inline_boxes[box_index].resolve_letter_spacing(retained);
+                    CandidateMutations::inline_box(
+                        &mut self.candidate_mutations,
+                        box_index,
+                        &mut data.inline_boxes[box_index],
+                        |inline_box| {
+                            inline_box.resolve_letter_spacing(retained);
+                        },
+                    );
                 }
             }
             line.metrics.advance -= adjustment;
@@ -2330,6 +2393,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         );
         let line = &mut self.lines.lines[line_idx];
         line.terminal_whitespace = terminal.whitespace;
+        line.terminal_fit_whitespace = terminal.fit_whitespace;
         line.terminal_justification_start = terminal.justification_start;
         line.removed_terminal_source_ranges = terminal.removed_source_ranges;
         if line.break_reason == BreakReason::Regular {
@@ -2401,10 +2465,24 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     if let Some(last) =
                                         self.layout.data.glyphs[start..end].last_mut()
                                     {
-                                        last.advance += delta;
+                                        CandidateMutations::glyph(
+                                            &mut self.candidate_mutations,
+                                            end - 1,
+                                            last,
+                                            |glyph| {
+                                                glyph.advance += delta;
+                                            },
+                                        );
                                     }
                                 }
-                                cluster.advance = new_advance;
+                                CandidateMutations::cluster(
+                                    &mut self.candidate_mutations,
+                                    cluster_range.start + offset,
+                                    cluster,
+                                    |cluster| {
+                                        cluster.advance = new_advance;
+                                    },
+                                );
                             }
                             line_x += line.resolve_cluster_advance(
                                 cluster.text_range(run).start,
@@ -2700,6 +2778,9 @@ const fn indent_start_is_scope_line(start: crate::IndentStart, each_line: bool) 
 
 impl<B: Brush> Drop for BreakLines<'_, B> {
     fn drop(&mut self) {
+        if let Some(candidates) = self.shape_candidates.take() {
+            candidates.finish(&mut self.layout.data);
+        }
         // Compute the overall width and height of the entire layout
         // The "width" excludes trailing whitespace. The "full_width" includes it.
         let mut width = 0_f32;
@@ -3351,6 +3432,7 @@ fn try_commit_line<B: Brush>(
         item_range: start_item_idx..end_item_idx,
         max_advance,
         break_reason,
+        source_fit_delta: state.fit_x - state.x,
         num_spaces: state.num_spaces,
         indent: line_indent,
         tab_origin: state.tab_origin,
@@ -3461,6 +3543,7 @@ fn line_end_bidi_items<B: Brush>(
 
 struct CollectedTerminalWhitespace {
     whitespace: TerminalWhitespace,
+    fit_whitespace: TerminalWhitespace,
     removed_source_ranges: Vec<Range<usize>>,
     justification_spaces: usize,
     justification_start: Option<usize>,
@@ -3472,6 +3555,7 @@ fn collect_terminal_whitespace<B: Brush>(
     selected_source_cluster_advance: &SelectedSourceClusterAdvance,
 ) -> CollectedTerminalWhitespace {
     let mut terminal = TerminalWhitespace::Absent;
+    let mut fit_terminal = TerminalWhitespace::Absent;
     let mut removed_source_ranges: Vec<Range<usize>> = Vec::new();
     let mut justification_spaces = 0;
     let mut justification_start = None;
@@ -3498,6 +3582,9 @@ fn collect_terminal_whitespace<B: Brush>(
                             let advance = selected_source_cluster_advance
                                 .resolve(range.start, cluster.advance);
                             let removes_source = terminal.removes_source(disposition);
+                            let fit_advance = selected_source_cluster_advance
+                                .resolve(range.start, cluster.line_break_advance);
+                            fit_terminal.include(disposition, fit_advance, physical_side);
                             if terminal.include(disposition, advance, physical_side)
                                 == TerminalWhitespaceScan::Stop
                             {
@@ -3519,6 +3606,7 @@ fn collect_terminal_whitespace<B: Brush>(
     }
     CollectedTerminalWhitespace {
         whitespace: terminal,
+        fit_whitespace: fit_terminal,
         removed_source_ranges,
         justification_spaces,
         justification_start,

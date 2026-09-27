@@ -174,6 +174,9 @@ pub enum StyleProperty<'a, B: Brush> {
     FontVariations(FontVariations<'a>),
     /// Font feature settings.
     FontFeatures(FontFeatures<'a>),
+    /// Alternative feature settings for expanded character justification.
+    /// The original shape remains selected until a line chooses the alternative.
+    FontFeaturesForJustification(FontFeatures<'a>),
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
     FontMetricAdvanceQuantization(bool),
@@ -250,6 +253,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub font_variations: FontVariations<'settings>,
     /// Font feature settings.
     pub font_features: FontFeatures<'settings>,
+    /// Alternative feature settings for expanded character justification.
+    pub font_features_for_justification: FontFeatures<'settings>,
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
     pub font_metric_advance_quantization: bool,
@@ -317,6 +322,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             font_synthesis_style: FontSynthesisStyle::default(),
             font_variations: FontVariations::empty(),
             font_features: FontFeatures::empty(),
+            font_features_for_justification: FontFeatures::empty(),
             font_metric_advance_quantization: true,
             locale: None,
             font_language_override: None,

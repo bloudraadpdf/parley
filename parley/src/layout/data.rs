@@ -1018,6 +1018,9 @@ pub(crate) struct LineData {
     pub(crate) max_advance: f32,
     /// Source-terminal whitespace policy and physical placement.
     pub(crate) terminal_whitespace: TerminalWhitespace,
+    /// Physical fitting adjustment relative to the selected rendered advance.
+    pub(crate) source_fit_delta: f32,
+    pub(crate) terminal_fit_whitespace: TerminalWhitespace,
     /// Number of justified clusters on the line.
     pub(crate) num_spaces: usize,
     pub(crate) terminal_justification_start: Option<usize>,
@@ -1025,6 +1028,8 @@ pub(crate) struct LineData {
         super::justification::JustificationUnitAddress,
         super::justification::JustificationSideSpacing,
     >,
+    pub(crate) justification_shape_fallback: bool,
+    pub(crate) applied_alignment: Option<super::Alignment>,
     /// Source-cluster advance selected for this materialised line.
     pub(crate) selected_source_cluster_advance: SelectedSourceClusterAdvance,
     /// Collapsible terminal source clusters removed on this materialised line.
@@ -1047,6 +1052,15 @@ pub(crate) struct LineData {
 impl LineData {
     pub(crate) fn measured_advance(&self) -> f32 {
         self.metrics.advance + self.indent.max(0.0) - self.metrics.trailing_whitespace
+    }
+
+    pub(crate) fn fitting_advance(&self) -> f32 {
+        let advance = self.metrics.advance + self.source_fit_delta;
+        advance
+            - self
+                .terminal_fit_whitespace
+                .resolve(self.break_reason, advance, self.max_advance)
+                .advance()
     }
 
     pub(crate) fn size(&self) -> f32 {
@@ -1203,6 +1217,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) line_start_fit_advances: Vec<LineStartFitAdvance>,
     /// Original cluster fit values retained while a caller projection is active.
     pub(crate) source_cluster_fit_baseline: Vec<f32>,
+    pub(crate) source_cluster_fit_advances: Vec<SourceClusterFitAdvance>,
     pub(crate) discretionary_fit_advances: Vec<DiscretionaryFitAdvance>,
     /// Sorted discretionary break material, keyed by UTF-8 boundary.
     pub(crate) discretionary_breaks: Vec<DiscretionaryBreak>,
@@ -1225,6 +1240,11 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) items: Vec<LayoutItem>,
     pub(crate) clusters: Vec<ClusterData>,
     pub(crate) glyphs: Vec<Glyph>,
+    pub(crate) justification_shape_variants:
+        Option<crate::shape::justification::JustificationShapeVariants>,
+    pub(crate) justification_source_text: Option<alloc::sync::Arc<str>>,
+    pub(crate) deferred_justification_shapes:
+        Vec<crate::shape::justification::DeferredJustificationShape>,
 
     // Output of line breaking
     pub(crate) lines: Vec<LineData>,
@@ -1269,6 +1289,7 @@ impl<B: Brush> Default for LayoutData<B> {
             selected_line_justification_opportunities: None,
             line_start_fit_advances: Vec::new(),
             source_cluster_fit_baseline: Vec::new(),
+            source_cluster_fit_advances: Vec::new(),
             discretionary_fit_advances: Vec::new(),
             discretionary_breaks: Vec::new(),
             discretionary_break_shapes: Vec::new(),
@@ -1286,6 +1307,9 @@ impl<B: Brush> Default for LayoutData<B> {
             items: Vec::new(),
             clusters: Vec::new(),
             glyphs: Vec::new(),
+            justification_source_text: None,
+            justification_shape_variants: None,
+            deferred_justification_shapes: Vec::new(),
             lines: Vec::new(),
             line_items: Vec::new(),
             alignment: None,
@@ -1495,6 +1519,7 @@ impl<B: Brush> LayoutData<B> {
         self.selected_line_justification_opportunities = None;
         self.line_start_fit_advances.clear();
         self.source_cluster_fit_baseline.clear();
+        self.source_cluster_fit_advances.clear();
         self.discretionary_breaks.clear();
         self.discretionary_break_shapes.clear();
         self.line_break_purpose = LineBreakPurpose::LineLayout;
@@ -1512,6 +1537,9 @@ impl<B: Brush> LayoutData<B> {
         self.items.clear();
         self.clusters.clear();
         self.glyphs.clear();
+        self.justification_source_text = None;
+        self.justification_shape_variants = None;
+        self.deferred_justification_shapes.clear();
         self.lines.clear();
         self.line_items.clear();
         self.is_aligned_justified = false;

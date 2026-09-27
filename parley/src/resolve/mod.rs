@@ -150,6 +150,9 @@ impl ResolveContext {
             StyleProperty::FontSynthesisStyle(value) => FontSynthesisStyle(*value),
             StyleProperty::FontVariations(value) => FontVariations(self.resolve_variations(value)),
             StyleProperty::FontFeatures(value) => FontFeatures(self.resolve_features(value)),
+            StyleProperty::FontFeaturesForJustification(value) => {
+                FontFeaturesForJustification(self.resolve_features(value))
+            }
             StyleProperty::FontMetricAdvanceQuantization(value) => {
                 FontMetricAdvanceQuantization(*value)
             }
@@ -199,6 +202,8 @@ impl ResolveContext {
             font_synthesis_style: raw_style.font_synthesis_style,
             font_variations: self.resolve_variations(&raw_style.font_variations),
             font_features: self.resolve_features(&raw_style.font_features),
+            font_features_for_justification: self
+                .resolve_features(&raw_style.font_features_for_justification),
             font_metric_advance_quantization: FontMetricAdvanceProjection(
                 raw_style.font_metric_advance_quantization,
             ),
@@ -389,6 +394,7 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     FontVariations(Resolved<FontVariation>),
     /// Font feature settings.
     FontFeatures(Resolved<FontFeature>),
+    FontFeaturesForJustification(Resolved<FontFeature>),
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
     FontMetricAdvanceQuantization(bool),
@@ -475,6 +481,7 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) font_variations: Resolved<FontVariation>,
     /// Font feature settings.
     pub(crate) font_features: Resolved<FontFeature>,
+    pub(crate) font_features_for_justification: Resolved<FontFeature>,
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
     font_metric_advance_quantization: FontMetricAdvanceProjection,
@@ -526,6 +533,7 @@ impl<B: Brush> ResolvedStyle<B> {
             FontSynthesisStyle(value) => self.font_synthesis_style = value,
             FontVariations(value) => self.font_variations = value,
             FontFeatures(value) => self.font_features = value,
+            FontFeaturesForJustification(value) => self.font_features_for_justification = value,
             FontMetricAdvanceQuantization(value) => {
                 self.font_metric_advance_quantization = FontMetricAdvanceProjection(value);
             }
@@ -569,6 +577,7 @@ impl<B: Brush> ResolvedStyle<B> {
             FontSynthesisStyle(value) => self.font_synthesis_style == *value,
             FontVariations(value) => self.font_variations == *value,
             FontFeatures(value) => self.font_features == *value,
+            FontFeaturesForJustification(value) => self.font_features_for_justification == *value,
             FontMetricAdvanceQuantization(value) => {
                 self.font_metric_advance_quantization.0 == *value
             }

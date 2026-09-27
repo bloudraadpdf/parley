@@ -167,6 +167,26 @@ pub(crate) fn unjustify<B: Brush>(layout: &mut LayoutData<B>) {
     }
 }
 
+pub(super) fn resolved_last_alignment(primary: Alignment, last: Option<Alignment>) -> Alignment {
+    last.unwrap_or(if primary == Alignment::Justify {
+        Alignment::Start
+    } else {
+        primary
+    })
+}
+
+pub(super) fn requested_line_alignment(
+    primary: Alignment,
+    last: Option<Alignment>,
+    reason: BreakReason,
+) -> Alignment {
+    if matches!(reason, BreakReason::None | BreakReason::Explicit) {
+        resolved_last_alignment(primary, last)
+    } else {
+        primary
+    }
+}
+
 /// The actual alignment implementation.
 ///
 /// This is const-generic over `UNDO_JUSTIFICATION`: justified alignment adjusts clusters'
@@ -183,6 +203,8 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
 ) {
     // Apply alignment to line items
     for line_index in 0..layout.lines.len() {
+        layout.lines[line_index].applied_alignment =
+            (!UNDO_JUSTIFICATION).then_some(Alignment::Start);
         // Per-line alignment width override (peedeeef CSS 2.1 §9.5 Rule 9).
         // Falls back to `layout.alignment_width` when no override is set
         // for this line.
@@ -226,20 +248,11 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
             continue;
         }
 
-        let last_alignment =
-            options
-                .last_line_alignment
-                .unwrap_or(if alignment == Alignment::Justify {
-                    Alignment::Start
-                } else {
-                    alignment
-                });
+        let last_alignment = resolved_last_alignment(alignment, options.last_line_alignment);
         let effective_alignment =
-            if matches!(break_reason, BreakReason::None | BreakReason::Explicit) {
-                last_alignment
-            } else {
-                alignment
-            };
+            requested_line_alignment(alignment, options.last_line_alignment, break_reason);
+        layout.lines[line_index].applied_alignment =
+            (!UNDO_JUSTIFICATION).then_some(effective_alignment);
         match (effective_alignment, is_rtl) {
             (Alignment::Left, _) | (Alignment::Start, false) | (Alignment::End, true) => {
                 // Do nothing
@@ -253,6 +266,8 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
             (Alignment::Justify, _) => {
                 // Justified alignment doesn't have any effect if free_space is negative or zero
                 if free_space <= 0.0 {
+                    layout.lines[line_index].applied_alignment =
+                        (!UNDO_JUSTIFICATION).then_some(Alignment::Start);
                     continue;
                 }
 
@@ -274,14 +289,20 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                     JustificationMode::SourceOpportunities => source_targets.len(),
                 };
 
-                // Justified alignment doesn't apply to the last line of a paragraph
-                // (`BreakReason::None`), (`BreakReason::Explicit`), if there are no whitespace
-                // gaps to adjust, or if a preserved tab would move off its tab stop
-                // (CSS Text 3 §7.1). In that case, start-align, i.e., left-align for LTR text
-                // and right-align for RTL text.
+                // Unexpandable lines use text-align-last, including an original
+                // shape retained because its optional-disabled alternative cannot fit.
+                // Preserved tabs must remain on their tab stops (CSS Text 3 §7.1).
                 if opportunities == 0
+                    || layout.lines[line_index].justification_shape_fallback
                     || line_contains_tab(&layout.line_items[item_range.clone()], &layout.clusters)
                 {
+                    let fallback = if last_alignment == Alignment::Justify {
+                        Alignment::Center
+                    } else {
+                        last_alignment
+                    };
+                    layout.lines[line_index].applied_alignment =
+                        (!UNDO_JUSTIFICATION).then_some(fallback);
                     layout.lines[line_index].metrics.offset += match (last_alignment, is_rtl) {
                         (Alignment::Right, _)
                         | (Alignment::Start, true)

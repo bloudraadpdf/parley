@@ -37,6 +37,25 @@ impl<'a, B: Brush> Line<'a, B> {
             .is_some_and(|run| run.paragraph_has_strong_direction)
     }
 
+    /// Alignment actually applied to this line, including terminal-line fallback.
+    /// `None` means the current line has not been aligned.
+    pub fn alignment(&self) -> Option<super::Alignment> {
+        self.data.applied_alignment
+    }
+
+    /// Requested native alignment before opportunity or shaping fallback.
+    /// Delegated alignment remains distinct from a requested justification.
+    pub fn requested_alignment(&self) -> Option<super::Alignment> {
+        self.data.applied_alignment?;
+        self.layout.data.alignment.map(|primary| {
+            super::alignment::requested_line_alignment(
+                primary,
+                self.layout.data.last_line_alignment,
+                self.data.break_reason,
+            )
+        })
+    }
+
     /// Returns the metrics for the line.
     pub fn metrics(&self) -> &LineMetrics {
         &self.data.metrics
@@ -58,6 +77,11 @@ impl<'a, B: Brush> Line<'a, B> {
     /// Positive indentation is included; trailing whitespace is excluded.
     pub fn measured_advance(&self) -> f32 {
         self.data.measured_advance()
+    }
+
+    /// Whether optional shaping could not fit and requires alignment fallback.
+    pub fn justification_shape_fallback(&self) -> bool {
+        self.data.justification_shape_fallback
     }
 
     pub fn break_reason(&self) -> BreakReason {
