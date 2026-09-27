@@ -7,8 +7,8 @@ use crate::layout::alignment::align_per_line;
 use crate::layout::alignment::unjustify;
 use crate::layout::data::LayoutData;
 use crate::layout::{
-    DiscretionaryBreak, DiscretionaryBreakCondition, DiscretionaryFitAdvance, LineBreakOverride, NormalSoftWrapSelection,
-    SourceClusterFitAdvance,
+    DiscretionaryBreak, DiscretionaryBreakCondition, DiscretionaryFitAdvance, LineBreakOverride,
+    NormalSoftWrapSelection, SourceClusterFitAdvance,
 };
 use crate::style::Brush;
 use alloc::{string::String, sync::Arc, vec::Vec};
@@ -250,10 +250,7 @@ impl<B: Brush> Layout<B> {
 
     /// Set shaped replacements for discretionary boundaries.
     /// Their widths and metrics contribute only when the boundary is selected.
-    pub fn set_discretionary_break_shapes(
-        &mut self,
-        mut shapes: Vec<DiscretionaryBreakShape<B>>,
-    ) {
+    pub fn set_discretionary_break_shapes(&mut self, mut shapes: Vec<DiscretionaryBreakShape<B>>) {
         shapes.sort_by_key(|shape| shape.byte_index);
         shapes.dedup_by_key(|shape| shape.byte_index);
         shapes.retain(|shape| shape.byte_index <= self.data.text_len);

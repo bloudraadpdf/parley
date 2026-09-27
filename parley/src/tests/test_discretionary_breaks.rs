@@ -17,6 +17,26 @@ fn roboto_layout(text: &str) -> Layout<ColorBrush> {
     builder.build(text)
 }
 
+fn set_uniform_fit_advances(layout: &mut Layout<ColorBrush>, text: &str, advance: f32) {
+    let advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    let range = cluster.text_range();
+                    let physical = if &text[range.clone()] == "\u{00ad}" {
+                        0.0
+                    } else {
+                        advance
+                    };
+                    SourceClusterFitAdvance::new(range.start, physical).unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(advances);
+}
+
 fn unwrapped_advance(text: &str) -> f32 {
     let mut layout = roboto_layout(text);
     layout.break_all_lines(None);
@@ -29,26 +49,7 @@ fn restored_normal_breaks_follow_phrases_and_precede_deferred_hyphens() {
 
     let text = "ab\u{00ad}cd efgh";
     let mut layout = roboto_layout(text);
-    let source_advances = layout
-        .runs()
-        .flat_map(|run| {
-            run.clusters()
-                .map(|cluster| {
-                    let range = cluster.text_range();
-                    SourceClusterFitAdvance::new(
-                        range.start,
-                        if &text[range.clone()] == "\u{00ad}" {
-                            0.0
-                        } else {
-                            10.0
-                        },
-                    )
-                    .unwrap()
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    layout.set_source_cluster_fit_advances(source_advances);
+    set_uniform_fit_advances(&mut layout, text, 10.0);
     let restored = "ab\u{00ad}c".len();
     layout.set_line_break_overrides(vec![LineBreakOverride::overflow_opportunity(restored)]);
     layout.set_discretionary_breaks(vec![DiscretionaryBreak {
@@ -194,26 +195,7 @@ fn overflow_discretionaries_follow_ordinary_breaks_and_do_not_reduce_intrinsic_w
 fn a_later_overflowing_discretionary_does_not_replace_a_fitting_fallback() {
     let text = "ab\u{00ad}c\u{00ad}de";
     let mut layout = roboto_layout(text);
-    let advances = layout
-        .runs()
-        .flat_map(|run| {
-            run.clusters()
-                .map(|cluster| {
-                    let range = cluster.text_range();
-                    SourceClusterFitAdvance::new(
-                        range.start,
-                        if &text[range.clone()] == "\u{00ad}" {
-                            0.0
-                        } else {
-                            10.0
-                        },
-                    )
-                    .unwrap()
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    layout.set_source_cluster_fit_advances(advances);
+    set_uniform_fit_advances(&mut layout, text, 10.0);
     let breaks: Vec<_> = text
         .match_indices('\u{00ad}')
         .map(|(index, _)| DiscretionaryBreak {
@@ -243,23 +225,7 @@ fn projected_upright_advances_select_the_soft_hyphen_without_changing_rendered_w
     let text = "hyphen\u{00ad}ation";
     let break_at = "hyphen\u{00ad}".len();
     let mut layout = roboto_layout(text);
-    let advances = layout
-        .runs()
-        .flat_map(|run| {
-            run.clusters()
-                .map(|cluster| {
-                    let range = cluster.text_range();
-                    let physical = if &text[range.clone()] == "\u{00ad}" {
-                        0.0
-                    } else {
-                        12.0
-                    };
-                    SourceClusterFitAdvance::new(range.start, physical).unwrap()
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    layout.set_source_cluster_fit_advances(advances);
+    set_uniform_fit_advances(&mut layout, text, 12.0);
     layout.set_discretionary_breaks(vec![DiscretionaryBreak {
         byte_index: break_at,
         advance: unwrapped_advance("-"),
