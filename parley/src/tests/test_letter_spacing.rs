@@ -84,6 +84,96 @@ fn glyph_count(layout: &Layout<ColorBrush>) -> usize {
         .sum()
 }
 
+fn glyph_origins(layout: &Layout<ColorBrush>) -> Vec<f32> {
+    layout
+        .lines()
+        .flat_map(|line| line.items())
+        .flat_map(|item| match item {
+            crate::PositionedLayoutItem::GlyphRun(run) => run
+                .positioned_glyphs()
+                .map(|glyph| glyph.x)
+                .collect::<Vec<_>>(),
+            crate::PositionedLayoutItem::InlineBox(_) => Vec::new(),
+        })
+        .collect()
+}
+
+#[test]
+fn adjacent_spacing_values_contribute_half_each_after_bidi() {
+    for (text, values, expected) in [
+        (
+            "ABCD",
+            &[0.0, 10.0, 20.0, 0.0][..],
+            &[0.0, 5.0, 20.0, 30.0][..],
+        ),
+        (
+            "AאבB",
+            &[0.0, 10.0, 20.0, 0.0][..],
+            &[0.0, 10.0, 25.0, 30.0][..],
+        ),
+        ("אבג", &[10.0, 20.0, 30.0][..], &[0.0, 25.0, 40.0][..]),
+    ] {
+        let plain = unwrapped_layout("Arimo", text, 0.0);
+        let tracked = configured_layout("Arimo", text, 0.0, |builder| {
+            for ((start, character), spacing) in text.char_indices().zip(values) {
+                builder.push(
+                    StyleProperty::LetterSpacing(*spacing),
+                    start..start + character.len_utf8(),
+                );
+            }
+        });
+        let actual = glyph_origins(&tracked);
+        let natural = glyph_origins(&plain);
+        assert_eq!(actual.len(), expected.len());
+        assert_eq!(natural.len(), expected.len());
+        for ((actual, natural), expected) in actual.iter().zip(&natural).zip(expected) {
+            assert!(
+                (actual - natural - expected).abs() < 0.001,
+                "{text}: {actual} - {natural} != {expected}"
+            );
+        }
+        assert!(
+            (tracked.full_width() - plain.full_width() - expected.last().unwrap()).abs() < 0.001
+        );
+    }
+}
+
+#[test]
+fn unequal_spacing_fits_with_visual_half_edges_and_restores_before_rebreak() {
+    for (text, first, last) in [("AB", 0.0, 10.0), ("אב", 10.0, 30.0), ("AB", 0.0, -4.0)] {
+        let plain = unwrapped_layout("Arimo", text, 0.0).full_width();
+        let split = text.char_indices().nth(1).unwrap().0;
+        let mut layout = configured_layout("Arimo", text, first, |builder| {
+            builder.push(StyleProperty::LetterSpacing(last), split..text.len());
+            builder.push_default(StyleProperty::LineBreakMode(
+                crate::style::LineBreakMode::Anywhere,
+            ));
+        });
+        let expected = plain + (first + last) * 0.5;
+        assert!((layout.full_width() - expected).abs() < 0.001);
+        layout.break_all_lines(Some(expected - 0.01));
+        assert_eq!(layout.lines().count(), 2, "{text}: {first}, {last}");
+        layout.break_all_lines(Some(expected));
+        assert_eq!(layout.lines().count(), 1, "{text}: {first}, {last}");
+        assert!((layout.full_width() - expected).abs() < 0.001);
+        layout.break_all_lines(None);
+        assert!((layout.full_width() - expected).abs() < 0.001);
+    }
+}
+
+#[test]
+fn unequal_spacing_preserves_requested_fragment_end_spacing() {
+    let plain = unwrapped_layout("Arimo", "AB", 0.0).full_width();
+    let mut layout = configured_layout("Arimo", "AB", 0.0, |builder| {
+        builder.push(StyleProperty::LetterSpacing(10.0), 1..2);
+    });
+    layout.set_line_end_letter_spacing_trim(false);
+    layout.break_all_lines(None);
+    assert!((layout.full_width() - plain - 15.0).abs() < 0.001);
+    layout.break_all_lines(None);
+    assert!((layout.full_width() - plain - 15.0).abs() < 0.001);
+}
+
 #[test]
 fn letter_spacing_disables_optional_ligatures() {
     // CSS Text 4 §8.2: non-zero tracking must not apply optional ligatures.
@@ -243,24 +333,11 @@ fn letter_spacing_is_not_applied_after_the_last_character_of_a_line() {
 
 #[test]
 fn rtl_tracking_leaves_both_visual_line_edges_flush() {
-    let origins = |layout: &Layout<ColorBrush>| {
-        layout
-            .lines()
-            .flat_map(|line| line.items())
-            .flat_map(|item| match item {
-                crate::PositionedLayoutItem::GlyphRun(run) => run
-                    .positioned_glyphs()
-                    .map(|glyph| glyph.x)
-                    .collect::<Vec<_>>(),
-                crate::PositionedLayoutItem::InlineBox(_) => Vec::new(),
-            })
-            .collect::<Vec<_>>()
-    };
     for text in ["ABC", "אבג", "AאבB", "אABב"] {
         let plain = unwrapped_layout("Arimo", text, 0.0);
         let tracked = unwrapped_layout("Arimo", text, 5.0);
-        let plain_origins = origins(&plain);
-        let tracked_origins = origins(&tracked);
+        let plain_origins = glyph_origins(&plain);
+        let tracked_origins = glyph_origins(&tracked);
         assert_eq!(tracked_origins.len(), text.chars().count());
         for ((actual, initial), extra) in tracked_origins
             .iter()

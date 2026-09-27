@@ -16,7 +16,7 @@ use crate::inline_box::{
     InlineBoxBidiAttachment, InlineBoxLineBreakParticipation, InlineBoxLineMetricParticipation,
     InlineBoxShapingParticipation, LogicalInlineEdgeSourceProjection,
 };
-use crate::layout::bidi::reorder_by_level_with_attachments;
+use crate::layout::bidi::{BidiReorderUnitLevel, reorder_by_level_with_attachments};
 use crate::layout::data::{
     LineBreakOverrideDisposition, NormalSoftWrapSelection, PhysicalLineEdge,
     ProjectedSourceBoundary, ProjectedSourceClusterParticipation, ProjectedSourceLineFill,
@@ -27,8 +27,8 @@ use crate::layout::inline_fragmentation::{
     ClonedInlineEdgeMap, ClonedInlineFlow, blocks_source_whitespace,
 };
 use crate::layout::{
-    BreakReason, DiscretionaryBreak, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData,
-    LineItemData, LineMetrics, Run, RunMetrics,
+    BreakReason, DiscretionaryBreak, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
+    LineMetrics, Run, RunMetrics,
 };
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
@@ -703,6 +703,8 @@ pub struct BreakLines<'a, B: Brush> {
     prev_state: Option<BreakerState>,
     done: bool,
     cloned_edges: ClonedInlineEdgeMap,
+    uniform_letter_spacing: Option<f32>,
+    letter_spacing_edges: LetterSpacingEdges,
 }
 
 macro_rules! commit_current_line {
@@ -728,6 +730,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.lines.clear();
         lines.line_items.clear();
         let cloned_edges = ClonedInlineEdgeMap::new(&layout.data);
+        let uniform_letter_spacing = uniform_letter_spacing(&layout.data);
         Self {
             layout,
             lines,
@@ -735,6 +738,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             prev_state: None,
             done: false,
             cloned_edges,
+            uniform_letter_spacing,
+            letter_spacing_edges: LetterSpacingEdges::default(),
         }
     }
 
@@ -1518,12 +1523,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // println!("Cluster {} next_x: {}", self.state.cluster_idx, next_x);
 
-                        // CSS Text 4 §8.2: tracking after the last character of a
-                        // line is not applied, so it never decides the fit.
+                        // CSS Text §8.2 excludes the two visual edge half-spaces.
                         let hanging_tracking = if whitespace == Whitespace::None
                             && !cluster.info().is_default_ignorable()
                         {
-                            run_data.letter_spacing.max(0.0)
+                            line_edge_letter_spacing(
+                                &mut self.letter_spacing_edges,
+                                &self.layout.data,
+                                &self.state,
+                                self.uniform_letter_spacing,
+                            )
                         } else {
                             0.0
                         };
@@ -2015,60 +2024,51 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
-    /// Letter spacing is trimmed at the visual line edge, after bidi reordering.
+    /// Resolve adjacent half-spaces after bidi reordering.
     fn trim_line_end_letter_spacing(&mut self, line_idx: usize) {
-        let data = &mut self.layout.data;
-        if !data.trim_line_end_letter_spacing {
+        if self.uniform_letter_spacing == Some(0.0) {
             return;
         }
         let LineLayout { lines, line_items } = &mut self.lines;
         let line = &mut lines[line_idx];
-        let mut visual_items = line_items[line.item_range.clone()].to_vec();
-        reorder_line_items(&mut visual_items, &data.inline_boxes);
-        for line_item in visual_items
-            .iter()
-            .rev()
-            .filter(|item| item.kind == LayoutItemKind::TextRun)
-        {
-            let clusters = &data.clusters[line_item.cluster_range.clone()];
-            let is_spacing_unit = |cluster: &ClusterData| {
-                cluster.flags & ClusterData::LETTER_SPACING_BOUNDARY != 0
-                    && matches!(
-                        TerminalSourceUnit::classify(
-                            cluster,
-                            &data.styles[cluster.style_index as usize]
-                        ),
-                        TerminalSourceUnit::Barrier
-                            | TerminalSourceUnit::Candidate(
-                                TerminalWhitespaceDisposition::Hanging
-                                    | TerminalWhitespaceDisposition::ConditionallyHanging
-                            )
-                    )
-            };
-            let offset = if line_item.bidi_level & 1 != 0 {
-                clusters.iter().position(is_spacing_unit)
-            } else {
-                clusters.iter().rposition(is_spacing_unit)
-            };
-            let Some(offset) = offset else {
+        let terminal = collect_terminal_whitespace(
+            &line_items[line.item_range.clone()],
+            &self.layout.data,
+            &line.selected_source_cluster_advance,
+        );
+        let mut removed = line.removed_leading_source_ranges.clone();
+        removed.extend(terminal.removed_source_ranges);
+        let units = visual_letter_spacing_units(
+            &self.layout.data,
+            &line_items[line.item_range.clone()],
+            &removed,
+        );
+        let data = &mut self.layout.data;
+        for (index, unit) in units.iter().enumerate() {
+            let retained = units.get(index + 1).map_or_else(
+                || {
+                    if data.trim_line_end_letter_spacing {
+                        0.0
+                    } else {
+                        unit.spacing
+                    }
+                },
+                |next| (unit.spacing + next.spacing) * 0.5,
+            );
+            let adjustment = unit.spacing - retained;
+            if nearly_zero(adjustment) {
                 continue;
-            };
-            let run = &data.runs[line_item.index];
-            let cluster_index = line_item.cluster_range.start + offset;
-            let tracking = run.cluster_letter_spacing(&data.clusters[cluster_index]);
-            if nearly_zero(tracking) {
-                return;
             }
-            let glyph_index = run.spacing_glyph(&data.clusters, cluster_index);
-            let cluster = &mut data.clusters[cluster_index];
-            cluster.advance -= tracking;
-            cluster.line_break_advance -= tracking;
-            cluster.trimmed_letter_spacing = tracking;
+            let run = &data.runs[unit.run_index];
+            let glyph_index = run.spacing_glyph(&data.clusters, unit.cluster_index);
+            let cluster = &mut data.clusters[unit.cluster_index];
+            cluster.advance -= adjustment;
+            cluster.line_break_advance -= adjustment;
+            cluster.trimmed_letter_spacing = adjustment;
             if let Some(index) = glyph_index {
-                data.glyphs[index].advance -= tracking;
+                data.glyphs[index].advance -= adjustment;
             }
-            line.metrics.advance -= tracking;
-            return;
+            line.metrics.advance -= adjustment;
         }
     }
 
@@ -2509,6 +2509,226 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
 //     })
 // }
 
+/// Only visual edge values are needed while deciding whether a prefix fits.
+#[derive(Clone, Copy)]
+struct SpacingEdgePair {
+    first: f32,
+    last: f32,
+}
+
+impl SpacingEdgePair {
+    fn concatenate(before: Option<Self>, after: Option<Self>, rtl: bool) -> Option<Self> {
+        match (before, after) {
+            (Some(before), Some(after)) => Some(if rtl {
+                Self {
+                    first: after.first,
+                    last: before.last,
+                }
+            } else {
+                Self {
+                    first: before.first,
+                    last: after.last,
+                }
+            }),
+            (before, after) => before.or(after),
+        }
+    }
+}
+
+/// Incremental counterpart of `reorder_by_level_with_attachments`, retaining
+/// two values per embedding level instead of rebuilding every line prefix.
+/// The current attachment unit remains open: a following owner edge can join
+/// it, and a partial RTL text item grows at its visual left edge.
+#[derive(Default)]
+struct LetterSpacingEdges {
+    source_start: Option<(usize, usize)>,
+    item_index: Option<usize>,
+    cluster_end: usize,
+    levels: Vec<Option<SpacingEdgePair>>,
+    group_level: Option<BidiReorderUnitLevel>,
+    group_edges: Option<SpacingEdgePair>,
+    item_edges: Option<SpacingEdgePair>,
+    attaches_next: bool,
+}
+
+impl LetterSpacingEdges {
+    fn append_group(&mut self) {
+        let Some(level) = self.group_level else {
+            return;
+        };
+        let level = usize::from(level.value());
+        while self.levels.len() > level + 1 {
+            let child = self.levels.pop().unwrap();
+            let parent = self.levels.len() - 1;
+            self.levels[parent] =
+                SpacingEdgePair::concatenate(self.levels[parent], child, parent & 1 != 0);
+        }
+        self.levels.resize(level + 1, None);
+        self.levels[level] =
+            SpacingEdgePair::concatenate(self.levels[level], self.group_edges, level & 1 != 0);
+    }
+
+    fn begin_item(&mut self, index: usize, level: u8, attachment: InlineBoxBidiAttachment) {
+        self.group_edges = SpacingEdgePair::concatenate(self.group_edges, self.item_edges, false);
+        self.item_edges = None;
+        if self.attaches_next || attachment == InlineBoxBidiAttachment::ToPrevious {
+            if let Some(group_level) = &mut self.group_level {
+                group_level.include(level, attachment);
+            } else {
+                self.group_level = Some(BidiReorderUnitLevel::new(level, attachment));
+            }
+        } else {
+            self.append_group();
+            self.group_level = Some(BidiReorderUnitLevel::new(level, attachment));
+            self.group_edges = None;
+        }
+        self.attaches_next = attachment == InlineBoxBidiAttachment::ToNext;
+        self.item_index = Some(index);
+    }
+
+    fn visual_edges(&self) -> Option<SpacingEdgePair> {
+        let level = usize::from(self.group_level?.value());
+        let pending = SpacingEdgePair::concatenate(self.group_edges, self.item_edges, false);
+        let mut child = None;
+        // Implicit intermediate levels matter: each reversal in UAX #9 L2
+        // changes which edge of a nested group is first. No prefix allocation.
+        for depth in (0..self.levels.len().max(level + 1)).rev() {
+            let existing = self.levels.get(depth).copied().flatten();
+            child = SpacingEdgePair::concatenate(existing, child, depth & 1 != 0);
+            if depth == level {
+                child = SpacingEdgePair::concatenate(child, pending, depth & 1 != 0);
+            }
+        }
+        child
+    }
+
+    fn extend<B: Brush>(&mut self, data: &LayoutData<B>, state: &BreakerState) {
+        let source_start = (state.line.items.start, state.line.clusters.start);
+        let cluster_end = state.cluster_idx + 1;
+        if self.source_start != Some(source_start)
+            || self.item_index.is_some_and(|index| index > state.item_idx)
+            || self.cluster_end > cluster_end
+        {
+            // A selected earlier break rewinds the source cursor. Its suffix
+            // is consumed on the next line, with a fresh bidi edge summary.
+            *self = Self {
+                source_start: Some(source_start),
+                ..Self::default()
+            };
+        }
+        for item_index in self.item_index.unwrap_or(state.line.items.start)..=state.item_idx {
+            let item = &data.items[item_index];
+            if self.item_index != Some(item_index) {
+                let attachment = match item.kind {
+                    LayoutItemKind::TextRun => InlineBoxBidiAttachment::Independent,
+                    LayoutItemKind::InlineBox => data.inline_boxes[item.index].bidi_attachment(),
+                };
+                self.begin_item(item_index, item.bidi_level, attachment);
+            }
+            if item.kind == LayoutItemKind::TextRun {
+                let run = &data.runs[item.index];
+                let start = item
+                    .cluster_range
+                    .start
+                    .max(state.line.clusters.start)
+                    .max(self.cluster_end);
+                let end = item.cluster_range.end.min(cluster_end);
+                for cluster in &data.clusters[start..end] {
+                    if is_letter_spacing_unit(cluster)
+                        && !state
+                            .line
+                            .removes_leading_source_at(cluster.text_range(run).start)
+                    {
+                        let spacing = run.cluster_letter_spacing(cluster);
+                        self.item_edges = SpacingEdgePair::concatenate(
+                            self.item_edges,
+                            Some(SpacingEdgePair {
+                                first: spacing,
+                                last: spacing,
+                            }),
+                            item.bidi_level & 1 != 0,
+                        );
+                    }
+                }
+                self.cluster_end = end;
+            }
+        }
+    }
+}
+
+fn line_edge_letter_spacing<B: Brush>(
+    edges: &mut LetterSpacingEdges,
+    data: &LayoutData<B>,
+    state: &BreakerState,
+    uniform: Option<f32>,
+) -> f32 {
+    let trim = data.trim_line_end_letter_spacing;
+    if let Some(spacing) = uniform {
+        return if trim { spacing } else { 0.0 };
+    }
+    edges.extend(data, state);
+    edges.visual_edges().map_or(0.0, |edges| {
+        (edges.first + if trim { edges.last } else { -edges.last }) * 0.5
+    })
+}
+
+#[derive(Clone, Copy)]
+struct VisualLetterSpacingUnit {
+    run_index: usize,
+    cluster_index: usize,
+    spacing: f32,
+}
+
+fn is_letter_spacing_unit(cluster: &ClusterData) -> bool {
+    cluster.flags & ClusterData::LETTER_SPACING_BOUNDARY != 0
+        && !cluster.info.is_default_ignorable()
+        && cluster.info.whitespace() != Whitespace::Newline
+}
+
+fn uniform_letter_spacing<B: Brush>(data: &LayoutData<B>) -> Option<f32> {
+    let mut values = data.runs.iter().flat_map(|run| {
+        data.clusters[run.cluster_range.clone()]
+            .iter()
+            .filter(|cluster| is_letter_spacing_unit(cluster))
+            .map(|cluster| run.cluster_letter_spacing(cluster))
+    });
+    let first = values.next().unwrap_or(0.0);
+    values.all(|value| value == first).then_some(first)
+}
+
+fn visual_letter_spacing_units<B: Brush>(
+    data: &LayoutData<B>,
+    items: &[LineItemData],
+    removed: &[Range<usize>],
+) -> Vec<VisualLetterSpacingUnit> {
+    let mut items = items.to_vec();
+    reorder_line_items(&mut items, &data.inline_boxes);
+    let mut units = Vec::new();
+    for item in items.iter().filter(|item| item.is_text_run()) {
+        let run = &data.runs[item.index];
+        let mut append = |cluster_index| {
+            let cluster = &data.clusters[cluster_index];
+            if is_letter_spacing_unit(cluster)
+                && !removed
+                    .iter()
+                    .any(|range| range.contains(&cluster.text_range(run).start))
+            {
+                units.push(VisualLetterSpacingUnit {
+                    run_index: item.index,
+                    cluster_index,
+                    spacing: run.cluster_letter_spacing(cluster),
+                });
+            }
+        };
+        if item.bidi_level & 1 == 0 {
+            item.cluster_range.clone().for_each(&mut append);
+        } else {
+            item.cluster_range.clone().rev().for_each(&mut append);
+        }
+    }
+    units
+}
+
 fn try_commit_line<B: Brush>(
     layout: &Layout<B>,
     cloned_edges: &ClonedInlineEdgeMap,
@@ -2837,8 +3057,51 @@ fn reorder_line_items(runs: &mut [LineItemData], inline_boxes: &[crate::InlineBo
 
 #[cfg(test)]
 mod tests {
-    use super::{indent_start_is_scope_line, line_advance_fits};
+    use super::{
+        LetterSpacingEdges, SpacingEdgePair, indent_start_is_scope_line, line_advance_fits,
+    };
     use crate::IndentStart;
+
+    #[test]
+    fn incremental_spacing_edges_match_nested_bidi_and_owner_attachments() {
+        use crate::inline_box::InlineBoxBidiAttachment::{Independent, ToNext, ToPrevious};
+        use crate::layout::bidi::reorder_by_level_with_attachments;
+        for encoded_levels in 0..256 {
+            let levels = core::array::from_fn::<_, 4, _>(|index| {
+                ((encoded_levels >> (index * 2)) & 3) as u8
+            });
+            for attachments in [
+                [Independent; 4],
+                [ToNext, Independent, Independent, ToPrevious],
+                [Independent, ToPrevious, ToNext, Independent],
+                [ToPrevious, ToNext, ToNext, Independent],
+            ] {
+                let mut edges = LetterSpacingEdges::default();
+                for index in 0..4 {
+                    edges.begin_item(index, levels[index], attachments[index]);
+                    if attachments[index] == Independent {
+                        edges.item_edges = Some(SpacingEdgePair {
+                            first: index as f32,
+                            last: index as f32,
+                        });
+                    }
+                    let mut order = (0..=index).collect::<alloc::vec::Vec<_>>();
+                    reorder_by_level_with_attachments(
+                        &mut order,
+                        |index| levels[index],
+                        |index| attachments[index],
+                    );
+                    order.retain(|&index| attachments[index] == Independent);
+                    let expected = order
+                        .first()
+                        .zip(order.last())
+                        .map(|(&first, &last)| (first as f32, last as f32));
+                    let actual = edges.visual_edges().map(|edges| (edges.first, edges.last));
+                    assert_eq!(actual, expected, "{levels:?}: prefix {}", index + 1);
+                }
+            }
+        }
+    }
 
     #[test]
     fn line_fit_absorbs_only_the_bound_of_float_accumulation_error() {

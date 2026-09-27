@@ -733,8 +733,8 @@ pub(crate) struct ClusterData {
     /// `advance`; nominal-metric line breaking excludes shaping adjustments
     /// such as kerning while the rendered cluster retains them.
     pub(crate) line_break_advance: f32,
-    /// Letter spacing removed because the cluster ended a line; restored
-    /// before the layout is broken again.
+    /// Difference between source tracking and the resolved visual interval;
+    /// restored before the layout is broken again.
     pub(crate) trimmed_letter_spacing: f32,
 }
 

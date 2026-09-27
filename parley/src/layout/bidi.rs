@@ -230,13 +230,13 @@ impl BidiReorderUnit {
 }
 
 #[derive(Clone, Copy)]
-enum BidiReorderUnitLevel {
+pub(super) enum BidiReorderUnitLevel {
     AttachedOnly(u8),
     Content(u8),
 }
 
 impl BidiReorderUnitLevel {
-    fn new(level: u8, attachment: InlineBoxBidiAttachment) -> Self {
+    pub(super) fn new(level: u8, attachment: InlineBoxBidiAttachment) -> Self {
         match attachment {
             InlineBoxBidiAttachment::Independent => Self::Content(level),
             InlineBoxBidiAttachment::ToPrevious | InlineBoxBidiAttachment::ToNext => {
@@ -245,7 +245,7 @@ impl BidiReorderUnitLevel {
         }
     }
 
-    fn include(&mut self, level: u8, attachment: InlineBoxBidiAttachment) {
+    pub(super) fn include(&mut self, level: u8, attachment: InlineBoxBidiAttachment) {
         match (*self, attachment) {
             (_, InlineBoxBidiAttachment::Independent) => *self = Self::Content(level),
             (
@@ -261,7 +261,7 @@ impl BidiReorderUnitLevel {
         }
     }
 
-    fn value(self) -> u8 {
+    pub(super) fn value(self) -> u8 {
         match self {
             Self::AttachedOnly(level) | Self::Content(level) => level,
         }
