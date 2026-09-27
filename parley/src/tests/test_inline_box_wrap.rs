@@ -137,6 +137,47 @@ fn restored_source_opportunities_stay_conditional_across_inline_boxes() {
 }
 
 #[test]
+fn projected_deferred_hyphens_do_not_replace_restored_normal_breaks() {
+    let text = "abcdef\u{00ad}g";
+    let hyphen = "abcdef\u{00ad}".len();
+    let (mut layout, _, _) = logical_inline_edge_fixture(text, hyphen, 1, TextWrapMode::Wrap);
+    let advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    let range = cluster.text_range();
+                    crate::layout::SourceClusterFitAdvance::new(
+                        range.start,
+                        if &text[range.clone()] == "\u{00ad}" {
+                            0.0
+                        } else {
+                            10.0
+                        },
+                    )
+                    .unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(advances);
+    layout.set_line_break_overrides(vec![
+        LineBreakOverride::overflow_opportunity(2),
+        LineBreakOverride::overflow_opportunity(hyphen),
+    ]);
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: hyphen,
+        advance: 0.0,
+        max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Overflow,
+    }]);
+    layout.break_all_lines(Some(65.0));
+    let first = layout.lines().next().unwrap();
+    assert_eq!(first.text_range(), 0..2);
+    assert!(!first.ends_at_discretionary_break());
+}
+
+#[test]
 fn transparent_anchor_does_not_create_a_soft_wrap_opportunity() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
