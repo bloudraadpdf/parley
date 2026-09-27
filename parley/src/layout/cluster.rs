@@ -163,6 +163,13 @@ impl<'a, B: Brush> Cluster<'a, B> {
         })
     }
 
+    /// Advance used by line fitting before any line-end letter-spacing trim.
+    /// This can differ from the shaped advance when a caller supplies a
+    /// physical-axis projection, such as upright vertical glyph metrics.
+    pub fn fit_advance(&self) -> f32 {
+        self.data.line_break_advance + self.data.trimmed_letter_spacing
+    }
+
     /// Letter spacing included in this cluster's advance after line-end trimming.
     pub fn applied_letter_spacing(&self) -> f32 {
         self.run.data.cluster_letter_spacing(self.data) - self.data.trimmed_letter_spacing
