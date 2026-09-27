@@ -212,6 +212,14 @@ pub(crate) struct JustificationShapeVariants {
 }
 
 impl<B: Brush> crate::Layout<B> {
+    /// Returns the policy used by the active source shaping alternatives.
+    pub fn justification_shape_policy(&self) -> Option<JustificationShapePolicy> {
+        self.data
+            .justification_shape_variants
+            .as_ref()
+            .map(|variants| variants.policy)
+    }
+
     /// Use prepared alternatives when the selected line receives character spacing.
     pub fn set_justification_shape_policy(&mut self, policy: JustificationShapePolicy) {
         self.clear_justification_shape_selection();

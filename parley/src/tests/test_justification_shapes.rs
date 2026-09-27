@@ -167,15 +167,18 @@ fn expanded_line_selects_alternative_and_unexpanded_line_keeps_original() {
     let mut fonts = create_font_context();
     let mut context = LayoutContext::<ColorBrush>::new();
     let mut layout = office_layout(&mut context, &mut fonts, "office office", false);
+    assert_eq!(layout.justification_shape_policy(), None);
     prepare(
         &mut context,
         &mut layout,
         &[1, 2, 3, 4, 5, 8, 9, 10, 11, 12],
     );
-    layout.set_justification_shape_policy(crate::JustificationShapePolicy {
+    let policy = crate::JustificationShapePolicy {
         regular_lines: true,
         terminal_lines: false,
-    });
+    };
+    layout.set_justification_shape_policy(policy);
+    assert_eq!(layout.justification_shape_policy(), Some(policy));
     layout.break_all_lines(Some(45.0));
     assert_eq!(layout.len(), 2);
     assert_eq!(line_glyph_count(&layout, 0), 7);
@@ -183,6 +186,9 @@ fn expanded_line_selects_alternative_and_unexpanded_line_keeps_original() {
     layout.break_all_lines(Some(500.0));
     assert_eq!(layout.len(), 1);
     assert_eq!(line_glyph_count(&layout, 0), 9);
+    assert_eq!(layout.justification_shape_policy(), Some(policy));
+    layout.set_justification_shape_policy(crate::JustificationShapePolicy::default());
+    assert_eq!(layout.justification_shape_policy(), None);
 }
 
 #[test]
