@@ -77,6 +77,183 @@ fn full_width(text: &str) -> f32 {
 }
 
 #[test]
+fn source_justification_expands_only_selected_interior_separators() {
+    let mut layout = roboto_layout("A B C D E", None);
+    let width = full_width("A B C D") + 2.0;
+    layout.set_justification_opportunities(vec![
+        crate::JustificationOpportunity::WordSeparator(1..2),
+        crate::JustificationOpportunity::WordSeparator(5..6),
+        crate::JustificationOpportunity::WordSeparator(7..8),
+    ]);
+    layout.break_all_lines(Some(width));
+    let advances = |layout: &Layout<ColorBrush>| {
+        layout
+            .lines()
+            .next()
+            .unwrap()
+            .runs()
+            .flat_map(|run| {
+                run.clusters()
+                    .map(|cluster| (cluster.text_range(), cluster.advance()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = advances(&layout);
+    assert_eq!(layout.lines().next().unwrap().text_range(), 0..8);
+    layout.align(
+        Some(width),
+        Alignment::Justify,
+        AlignmentOptions {
+            justification_mode: crate::JustificationMode::SourceOpportunities,
+            ..Default::default()
+        },
+    );
+    let after = advances(&layout);
+    for ((range, original), (_, expanded)) in before.iter().zip(&after) {
+        let required = if range.start == 1 || range.start == 5 {
+            *original + 1.0
+        } else {
+            *original
+        };
+        assert!(
+            (expanded - required).abs() < 0.001,
+            "{range:?}: {expanded} != {required}"
+        );
+    }
+    layout.align(Some(width), Alignment::Start, AlignmentOptions::default());
+    assert_eq!(advances(&layout), before);
+}
+
+#[test]
+fn source_justification_places_atomic_group_between_two_expansion_sites() {
+    use crate::{
+        JustificationOpportunity::BetweenUnits,
+        JustificationUnit::{InlineBox as BoxUnit, Text},
+        PositionedLayoutItem,
+    };
+    for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+        for terminal in [false, true] {
+            let mut layout = configured_layout(if terminal { "XX" } else { "XX Z" }, |builder| {
+                builder.set_direction(direction);
+                builder.push_inline_box(InlineBox::new(41, 1, 10.0, 10.0));
+                builder.push_inline_box(InlineBox::new(42, 1, 10.0, 10.0));
+            });
+            let width = full_width("XX") + 24.0;
+            layout.set_justification_opportunities(vec![
+                BetweenUnits {
+                    before: Text(0..1),
+                    after: BoxUnit(41),
+                },
+                BetweenUnits {
+                    before: BoxUnit(42),
+                    after: Text(1..2),
+                },
+            ]);
+            layout.break_all_lines(Some(width));
+            let origins = |layout: &Layout<ColorBrush>| {
+                layout
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .items()
+                    .filter_map(|item| match item {
+                        PositionedLayoutItem::InlineBox(value) => {
+                            assert_eq!(value.width, 10.0);
+                            Some(value.x)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let before = origins(&layout);
+            assert_eq!(before.len(), 2);
+            layout.align(
+                Some(width),
+                if terminal {
+                    Alignment::Left
+                } else {
+                    Alignment::Justify
+                },
+                AlignmentOptions {
+                    justification_mode: crate::JustificationMode::SourceOpportunities,
+                    last_line_alignment: terminal.then_some(Alignment::Justify),
+                    ..Default::default()
+                },
+            );
+            for (actual, original) in origins(&layout).iter().zip(&before) {
+                assert!(
+                    (actual - original - 2.0).abs() < 0.001,
+                    "{actual} != {}",
+                    original + 2.0
+                );
+            }
+            layout.align(Some(width), Alignment::Left, AlignmentOptions::default());
+            assert_eq!(origins(&layout), before);
+        }
+    }
+}
+
+#[test]
+fn source_justification_retains_owned_halves_at_inline_borders() {
+    use crate::{
+        JustificationOpportunity::BetweenUnits, JustificationUnit::Text, PositionedLayoutItem,
+    };
+    let mut layout = configured_layout("AB Z", |builder| {
+        builder.push_inline_box(InlineBox::inline_end_edge(
+            71,
+            1,
+            0.0,
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        ));
+        builder.push_inline_box(InlineBox::inline_start_edge(
+            72,
+            1,
+            0.0,
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        ));
+    });
+    let width = full_width("AB") + 4.0;
+    layout.set_justification_opportunities(vec![BetweenUnits {
+        before: Text(0..1),
+        after: Text(1..2),
+    }]);
+    layout.break_all_lines(Some(width));
+    layout.align(
+        Some(width),
+        Alignment::Justify,
+        AlignmentOptions {
+            justification_mode: crate::JustificationMode::SourceOpportunities,
+            ..Default::default()
+        },
+    );
+    let line = layout.lines().next().unwrap();
+    let boundaries = line
+        .items()
+        .filter_map(|item| match item {
+            PositionedLayoutItem::InlineBox(value) => Some(value.x),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for boundary in boundaries {
+        assert!(
+            (boundary - full_width("A") - 2.0).abs() < 0.001,
+            "{boundary}"
+        );
+    }
+    let units = line.letter_spacing_units().collect::<Vec<_>>();
+    assert_eq!(units[0].leading_justification(), 0.0);
+    assert!((units[0].trailing_justification() - 2.0).abs() < 0.001);
+    assert!((units[0].applied_advance() - 4.0).abs() < 0.001);
+    assert!((units[1].leading_justification() - 2.0).abs() < 0.001);
+    assert_eq!(units[1].trailing_justification(), 0.0);
+    layout.align(Some(width), Alignment::Start, AlignmentOptions::default());
+    assert!(layout.lines().next().unwrap().letter_spacing_units().all(|unit| unit.leading_justification() == 0.0 && unit.trailing_justification() == 0.0));
+}
+
+#[test]
 fn join_controls_at_word_edges_preserve_intrinsic_word_breaks() {
     let plain = configured_layout("This is a simple test", |_| {});
     for joined in [
@@ -100,7 +277,9 @@ fn join_controls_at_word_edges_preserve_intrinsic_word_breaks() {
 #[test]
 fn join_controls_after_spaces_preserve_soft_wraps() {
     let plain = "This is a simple test";
-    let width = configured_layout(plain, |_| {}).calculate_content_widths().min;
+    let width = configured_layout(plain, |_| {})
+        .calculate_content_widths()
+        .min;
     let line_count = |text| {
         let mut layout = configured_layout(text, |_| {});
         layout.break_all_lines(Some(width));
@@ -121,7 +300,9 @@ fn emergency_min_content_keeps_combining_marks_with_base() {
         builder.push_default(StyleProperty::OverflowWrap(crate::OverflowWrap::Anywhere));
     });
     let min = layout.calculate_content_widths().min;
-    let cluster = configured_layout("a\u{0301}\u{0301}\u{0301}", |_| {}).calculate_content_widths().max;
+    let cluster = configured_layout("a\u{0301}\u{0301}\u{0301}", |_| {})
+        .calculate_content_widths()
+        .max;
     assert!((min - cluster).abs() < 0.001, "{min} != {cluster}");
     layout.break_all_lines(Some(min));
     assert_eq!(layout.lines().count(), 2);

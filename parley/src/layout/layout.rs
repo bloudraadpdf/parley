@@ -86,6 +86,7 @@ impl<B: Brush> Layout<B> {
         &mut self,
         opportunities: Vec<super::JustificationOpportunity>,
     ) {
+        unjustify(&mut self.data);
         self.data.justification_opportunities.set(opportunities);
     }
 

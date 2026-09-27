@@ -3004,6 +3004,19 @@ pub(super) fn line_letter_spacing_units<B: Brush>(
     letter_spacing_units_from_visual_items(data, items, &removed)
         .into_iter()
         .map(|record| {
+            let address = match record.source {
+                LetterSpacingSource::Text { cluster_index, .. } => {
+                    super::justification::JustificationUnitAddress::TextCluster(cluster_index)
+                }
+                LetterSpacingSource::Atomic { box_index } => {
+                    super::justification::JustificationUnitAddress::InlineBox(box_index)
+                }
+            };
+            let justification = line
+                .justification_side_spacing
+                .get(&address)
+                .copied()
+                .unwrap_or_default();
             let (source, applied_advance) = match record.source {
                 LetterSpacingSource::Text {
                     run_index,
@@ -3028,7 +3041,8 @@ pub(super) fn line_letter_spacing_units<B: Brush>(
                 unit: record.value,
                 source_start: source.start,
                 source_end: source.end,
-                applied_advance,
+                applied_advance: applied_advance + justification.applied_after,
+                justification,
             }
         })
         .collect()

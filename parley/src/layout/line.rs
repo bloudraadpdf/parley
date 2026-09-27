@@ -355,7 +355,7 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
 
                     self.item_index += 1;
                     self.glyph_start = 0;
-                    self.offset += inline_box.advance();
+                    self.offset += item_data.advance;
                     return Some(PositionedLayoutItem::InlineBox(PositionedInlineBox {
                         x,
                         y: self.line.data.metrics.baseline - inline_box.height(),

@@ -49,6 +49,7 @@ pub struct LetterSpacingUnitRecord {
     pub(super) source_start: usize,
     pub(super) source_end: usize,
     pub(super) applied_advance: f32,
+    pub(super) justification: super::justification::JustificationSideSpacing,
 }
 
 impl LetterSpacingUnitRecord {
@@ -64,5 +65,15 @@ impl LetterSpacingUnitRecord {
     /// this preserves trimmed versus continuing-fragment spacing.
     pub const fn applied_advance(self) -> f32 {
         self.applied_advance
+    }
+
+    /// Extra leading half-spacing owned by this unit after justification.
+    pub const fn leading_justification(self) -> f32 {
+        self.justification.leading
+    }
+
+    /// Extra trailing half-spacing owned by this unit after justification.
+    pub const fn trailing_justification(self) -> f32 {
+        self.justification.trailing
     }
 }

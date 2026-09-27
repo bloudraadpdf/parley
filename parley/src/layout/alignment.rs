@@ -43,6 +43,8 @@ pub enum JustificationMode {
     InterWord,
     /// Expand advances between eligible non-whitespace clusters.
     InterCharacter,
+    /// Expand only the caller-resolved source opportunities.
+    SourceOpportunities,
     /// Do not expand cluster advances; fall back to start alignment.
     None,
 }
@@ -56,6 +58,9 @@ pub struct AlignmentOptions {
     pub align_when_overflowing: bool,
     /// Which justification strategy to apply when [`Alignment::Justify`] is requested.
     pub justification_mode: JustificationMode,
+    /// Alignment of the last line and lines ending at an explicit break.
+    /// `None` uses the primary alignment, with justification falling back to start.
+    pub last_line_alignment: Option<Alignment>,
 }
 
 #[expect(
@@ -67,6 +72,7 @@ impl Default for AlignmentOptions {
         Self {
             align_when_overflowing: false,
             justification_mode: JustificationMode::InterWord,
+            last_line_alignment: None,
         }
     }
 }
@@ -81,13 +87,13 @@ pub(crate) fn align<B: Brush>(
     alignment: Alignment,
     options: AlignmentOptions,
 ) {
-    #[cfg(feature = "accesskit")]
-    {
-        layout.alignment = Some(alignment);
-    }
+    layout.alignment = Some(alignment);
     layout.alignment_width = alignment_width.unwrap_or(layout.width);
+    layout.last_line_alignment = options.last_line_alignment;
     layout.per_line_alignment_widths.clear();
-    layout.aligned_justification_mode = if alignment == Alignment::Justify {
+    layout.aligned_justification_mode = if alignment == Alignment::Justify
+        || options.last_line_alignment == Some(Alignment::Justify)
+    {
         match options.justification_mode {
             JustificationMode::None => None,
             mode => Some(mode),
@@ -119,12 +125,16 @@ pub(crate) fn align_per_line<B: Brush>(
     options: AlignmentOptions,
 ) {
     let canonical_width = alignment_widths.last().copied().unwrap_or(layout.width);
+    layout.alignment = Some(alignment);
     layout.alignment_width = canonical_width;
+    layout.last_line_alignment = options.last_line_alignment;
     layout.per_line_alignment_widths.clear();
     layout
         .per_line_alignment_widths
         .extend_from_slice(alignment_widths);
-    layout.aligned_justification_mode = if alignment == Alignment::Justify {
+    layout.aligned_justification_mode = if alignment == Alignment::Justify
+        || options.last_line_alignment == Some(Alignment::Justify)
+    {
         match options.justification_mode {
             JustificationMode::None => None,
             mode => Some(mode),
@@ -145,9 +155,10 @@ pub(crate) fn unjustify<B: Brush>(layout: &mut LayoutData<B>) {
     if let Some(mode) = layout.aligned_justification_mode {
         align_impl::<_, true>(
             layout,
-            Alignment::Justify,
+            layout.alignment.unwrap_or(Alignment::Start),
             AlignmentOptions {
                 justification_mode: mode,
+                last_line_alignment: layout.last_line_alignment,
                 ..AlignmentOptions::default()
             },
         );
@@ -215,7 +226,21 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
             continue;
         }
 
-        match (alignment, is_rtl) {
+        let last_alignment =
+            options
+                .last_line_alignment
+                .unwrap_or(if alignment == Alignment::Justify {
+                    Alignment::Start
+                } else {
+                    alignment
+                });
+        let effective_alignment =
+            if matches!(break_reason, BreakReason::None | BreakReason::Explicit) {
+                last_alignment
+            } else {
+                alignment
+            };
+        match (effective_alignment, is_rtl) {
             (Alignment::Left, _) | (Alignment::Start, false) | (Alignment::End, true) => {
                 // Do nothing
             }
@@ -232,13 +257,12 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                 }
 
                 let justification_mode = options.justification_mode;
-                if justification_mode == JustificationMode::None {
-                    if is_rtl {
-                        layout.lines[line_index].metrics.offset += free_space;
-                    }
-                    continue;
-                }
-
+                let source_targets = if justification_mode == JustificationMode::SourceOpportunities
+                {
+                    source_justification_targets(layout, line_index)
+                } else {
+                    alloc::vec::Vec::new()
+                };
                 let opportunities = match justification_mode {
                     JustificationMode::InterWord => num_spaces,
                     JustificationMode::InterCharacter => count_inter_character_opportunities(
@@ -247,6 +271,7 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                         is_rtl,
                     ),
                     JustificationMode::None => 0,
+                    JustificationMode::SourceOpportunities => source_targets.len(),
                 };
 
                 // Justified alignment doesn't apply to the last line of a paragraph
@@ -254,18 +279,58 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                 // gaps to adjust, or if a preserved tab would move off its tab stop
                 // (CSS Text 3 §7.1). In that case, start-align, i.e., left-align for LTR text
                 // and right-align for RTL text.
-                if matches!(break_reason, BreakReason::None | BreakReason::Explicit)
-                    || opportunities == 0
+                if opportunities == 0
                     || line_contains_tab(&layout.line_items[item_range.clone()], &layout.clusters)
                 {
-                    if is_rtl {
-                        layout.lines[line_index].metrics.offset += free_space;
-                    }
+                    layout.lines[line_index].metrics.offset += match (last_alignment, is_rtl) {
+                        (Alignment::Right, _)
+                        | (Alignment::Start, true)
+                        | (Alignment::End, false) => free_space,
+                        (Alignment::Center | Alignment::Justify, _) => free_space * 0.5,
+                        _ => 0.0,
+                    };
                     continue;
                 }
 
                 let adjustment =
                     free_space / opportunities as f32 * if UNDO_JUSTIFICATION { -1. } else { 1. };
+                if justification_mode == JustificationMode::SourceOpportunities {
+                    for site in source_targets {
+                        match site.before.address {
+                            super::justification::JustificationUnitAddress::TextCluster(index) => {
+                                layout.clusters[index].advance += adjustment
+                            }
+                            super::justification::JustificationUnitAddress::InlineBox(_) => {
+                                layout.line_items[site.before.item_index].advance += adjustment
+                            }
+                        }
+                        if let Some(after) = site.after {
+                            if site.before.item_index < after.item_index {
+                                for item in &mut layout.line_items
+                                    [site.before.item_index + 1..after.item_index]
+                                {
+                                    if !item.is_text_run() {
+                                        item.letter_spacing_offset -= adjustment * 0.5;
+                                    }
+                                }
+                            }
+                            if !UNDO_JUSTIFICATION {
+                                let spacing =
+                                    &mut layout.lines[line_index].justification_side_spacing;
+                                let before_spacing =
+                                    spacing.entry(site.before.address).or_default();
+                                before_spacing.trailing += adjustment * 0.5;
+                                before_spacing.applied_after += adjustment;
+                                spacing.entry(after.address).or_default().leading +=
+                                    adjustment * 0.5;
+                            }
+                        }
+                    }
+                    if UNDO_JUSTIFICATION {
+                        layout.lines[line_index].justification_side_spacing.clear();
+                    }
+                    continue;
+                }
                 let terminal_start = (justification_mode == JustificationMode::InterWord)
                     .then_some(layout.lines[line_index].terminal_justification_start)
                     .flatten();
@@ -356,8 +421,113 @@ fn cluster_is_justification_opportunity(
     match justification_mode {
         JustificationMode::InterWord => cluster.info.whitespace().is_space_or_nbsp(),
         JustificationMode::InterCharacter => !cluster.info.is_whitespace(),
-        JustificationMode::None => false,
+        JustificationMode::None | JustificationMode::SourceOpportunities => false,
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SourceUnitPosition {
+    visual_index: usize,
+    item_index: usize,
+    address: super::justification::JustificationUnitAddress,
+}
+
+struct SourceExpansionSite {
+    before: SourceUnitPosition,
+    after: Option<SourceUnitPosition>,
+}
+
+fn source_justification_targets<B: Brush>(
+    layout: &LayoutData<B>,
+    line_index: usize,
+) -> alloc::vec::Vec<SourceExpansionSite> {
+    use super::justification::JustificationUnitAddress;
+    use super::{JustificationOpportunity, JustificationUnit};
+    use alloc::{collections::BTreeMap, vec::Vec};
+
+    let line = &layout.lines[line_index];
+    let mut text_units = Vec::new();
+    let mut boxes = BTreeMap::new();
+    let mut visual_index = 0;
+    for item_index in line.item_range.clone() {
+        let item = &layout.line_items[item_index];
+        if item.is_text_run() {
+            let run = &layout.runs[item.index];
+            let clusters: &mut dyn Iterator<Item = usize> = if item.bidi_level & 1 == 0 {
+                &mut item.cluster_range.clone()
+            } else {
+                &mut item.cluster_range.clone().rev()
+            };
+            for index in clusters {
+                let source = layout.clusters[index].text_range(run);
+                text_units.push((
+                    source,
+                    SourceUnitPosition {
+                        visual_index,
+                        item_index,
+                        address: JustificationUnitAddress::TextCluster(index),
+                    },
+                ));
+                visual_index += 1;
+            }
+        } else {
+            boxes.insert(
+                layout.inline_boxes[item.index].id,
+                SourceUnitPosition {
+                    visual_index,
+                    item_index,
+                    address: JustificationUnitAddress::InlineBox(item.index),
+                },
+            );
+            visual_index += 1;
+        }
+    }
+    text_units.sort_unstable_by_key(|(range, _)| range.start);
+    let text_unit = |source: &core::ops::Range<usize>| {
+        if source.is_empty()
+            || line
+                .terminal_justification_start
+                .is_some_and(|start| source.end > start)
+        {
+            return None;
+        }
+        let insertion = text_units.partition_point(|(range, _)| range.start <= source.start);
+        let (range, position) = text_units.get(insertion.checked_sub(1)?)?;
+        (source.end <= range.end).then_some(*position)
+    };
+    let unit = |source: &JustificationUnit| match source {
+        JustificationUnit::Text(range) => text_unit(range),
+        JustificationUnit::InlineBox(id) => boxes.get(id).copied(),
+    };
+    layout
+        .justification_opportunities
+        .line_candidates(line.text_range.clone())
+        .filter_map(|opportunity| match opportunity {
+            JustificationOpportunity::WordSeparator(source) => {
+                text_unit(source).map(|before| SourceExpansionSite {
+                    before,
+                    after: None,
+                })
+            }
+            JustificationOpportunity::BetweenUnits { before, after } => {
+                let before = unit(before)?;
+                let after = unit(after)?;
+                if before.address == after.address {
+                    None
+                } else if before.visual_index < after.visual_index {
+                    Some(SourceExpansionSite {
+                        before,
+                        after: Some(after),
+                    })
+                } else {
+                    Some(SourceExpansionSite {
+                        before: after,
+                        after: Some(before),
+                    })
+                }
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

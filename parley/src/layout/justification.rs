@@ -4,6 +4,19 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum JustificationUnitAddress {
+    TextCluster(usize),
+    InlineBox(usize),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct JustificationSideSpacing {
+    pub(crate) leading: f32,
+    pub(crate) trailing: f32,
+    pub(crate) applied_after: f32,
+}
+
 /// A source unit at an eligible expansion boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JustificationUnit {
@@ -28,6 +41,25 @@ pub enum JustificationOpportunity {
 }
 
 impl JustificationOpportunity {
+    fn source_anchor(&self) -> Option<usize> {
+        match self {
+            Self::WordSeparator(range) => Some(range.start),
+            Self::BetweenUnits {
+                before: JustificationUnit::Text(before),
+                after: JustificationUnit::Text(after),
+            } => Some(before.start.min(after.start)),
+            Self::BetweenUnits {
+                before: JustificationUnit::Text(range),
+                ..
+            }
+            | Self::BetweenUnits {
+                after: JustificationUnit::Text(range),
+                ..
+            } => Some(range.start),
+            Self::BetweenUnits { .. } => None,
+        }
+    }
+
     fn text_boundary(&self) -> Option<(&Range<usize>, &Range<usize>)> {
         match self {
             Self::BetweenUnits {
@@ -43,6 +75,7 @@ impl JustificationOpportunity {
 pub(crate) struct JustificationOpportunities {
     entries: Vec<JustificationOpportunity>,
     text_boundaries: Vec<usize>,
+    source_order: Vec<usize>,
 }
 
 impl JustificationOpportunities {
@@ -59,10 +92,32 @@ impl JustificationOpportunities {
             let (before, after) = self.entries[index].text_boundary().unwrap();
             (before.start.min(after.start), before.end.max(after.end))
         });
+        self.source_order.clear();
+        self.source_order.extend(
+            self.entries
+                .iter()
+                .enumerate()
+                .filter_map(|(index, entry)| entry.source_anchor().map(|_| index)),
+        );
+        self.source_order
+            .sort_by_key(|&index| self.entries[index].source_anchor());
     }
 
     pub(crate) fn entries(&self) -> &[JustificationOpportunity] {
         &self.entries
+    }
+
+    pub(crate) fn line_candidates(
+        &self,
+        source: Range<usize>,
+    ) -> impl Iterator<Item = &JustificationOpportunity> {
+        let start = self
+            .source_order
+            .partition_point(|&index| self.entries[index].source_anchor().unwrap() < source.start);
+        self.source_order[start..]
+            .iter()
+            .map(|&index| &self.entries[index])
+            .take_while(move |entry| entry.source_anchor().unwrap() < source.end)
     }
 
     pub(crate) fn text_boundaries(
@@ -83,6 +138,7 @@ impl JustificationOpportunities {
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
         self.text_boundaries.clear();
+        self.source_order.clear();
     }
 }
 
@@ -131,5 +187,29 @@ mod tests {
         opportunities.clear();
         assert!(opportunities.entries().is_empty());
         assert_eq!(opportunities.text_boundaries(0..8).count(), 0);
+    }
+
+    #[test]
+    fn many_line_candidate_queries_visit_each_source_opportunity_once() {
+        let mut opportunities = JustificationOpportunities::default();
+        opportunities.set(
+            (0..4096)
+                .map(|index| JustificationOpportunity::WordSeparator(index * 4 + 1..index * 4 + 2))
+                .collect(),
+        );
+        let mut visited = 0;
+        for index in 0..4096 {
+            let entries = opportunities
+                .line_candidates(index * 4..index * 4 + 4)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                entries,
+                vec![&JustificationOpportunity::WordSeparator(
+                    index * 4 + 1..index * 4 + 2
+                )]
+            );
+            visited += entries.len();
+        }
+        assert_eq!(visited, opportunities.entries().len());
     }
 }

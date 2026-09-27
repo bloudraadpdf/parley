@@ -1021,6 +1021,10 @@ pub(crate) struct LineData {
     /// Number of justified clusters on the line.
     pub(crate) num_spaces: usize,
     pub(crate) terminal_justification_start: Option<usize>,
+    pub(crate) justification_side_spacing: alloc::collections::BTreeMap<
+        super::justification::JustificationUnitAddress,
+        super::justification::JustificationSideSpacing,
+    >,
     /// Source-cluster advance selected for this materialised line.
     pub(crate) selected_source_cluster_advance: SelectedSourceClusterAdvance,
     /// Collapsible terminal source clusters removed on this materialised line.
@@ -1225,9 +1229,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) line_items: Vec<LineItemData>,
 
     // Output of alignment
-    #[cfg(feature = "accesskit")]
-    /// Directly store the alignment if accessibility is enabled so we can
-    /// set the corresponding AccessKit property.
+    /// Primary alignment retained for inverse justification and accessibility.
     pub(crate) alignment: Option<super::Alignment>,
     /// Whether the layout is aligned with [`crate::Alignment::Justify`].
     pub(crate) is_aligned_justified: bool,
@@ -1235,6 +1237,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) aligned_justification_mode: Option<JustificationMode>,
     /// The width the layout was aligned to.
     pub(crate) alignment_width: f32,
+    pub(crate) last_line_alignment: Option<super::Alignment>,
     /// Per-line override widths supplied by [`crate::Layout::align_per_line`].
     /// When non-empty, the entry at `line_index` overrides
     /// [`Self::alignment_width`] for that line; lines without an entry fall
@@ -1282,11 +1285,11 @@ impl<B: Brush> Default for LayoutData<B> {
             glyphs: Vec::new(),
             lines: Vec::new(),
             line_items: Vec::new(),
-            #[cfg(feature = "accesskit")]
             alignment: None,
             is_aligned_justified: false,
             aligned_justification_mode: None,
             alignment_width: 0.0,
+            last_line_alignment: None,
             per_line_alignment_widths: Vec::new(),
             indent_amount: 0.0,
             indent_options: IndentOptions::default(),
@@ -1509,7 +1512,9 @@ impl<B: Brush> LayoutData<B> {
         self.line_items.clear();
         self.is_aligned_justified = false;
         self.aligned_justification_mode = None;
+        self.alignment = None;
         self.alignment_width = 0.0;
+        self.last_line_alignment = None;
         self.per_line_alignment_widths.clear();
         self.indent_amount = 0.0;
         self.indent_options = IndentOptions::default();
