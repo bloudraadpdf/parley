@@ -1310,6 +1310,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     && !break_after_preserved_space_after_zwsp
                             }
                         };
+                        // A format control can share a shaped cluster with a preceding
+                        // space while carrying no advance of its own. The opportunity
+                        // after that space is outside visible ligature material.
+                        let breakable_ignorable_after_space = is_ligature_continuation
+                            && cluster.info().is_default_ignorable()
+                            && cluster.advance() == 0.0
+                            && preceding_clusters
+                                .last()
+                                .is_some_and(|previous| previous.info.whitespace() == Whitespace::Space);
                         let projected_source_cluster =
                             self.state.taken_projected_source_boundary.map_or(
                                 ProjectedSourceClusterParticipation::Normal,
@@ -1350,7 +1359,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             //
                             // We also don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
                             // line breaks. We should accept the overflowing fragment in that scenario.
-                            if !is_ligature_continuation && self.state.line.has_content_advance() {
+                            if (!is_ligature_continuation || breakable_ignorable_after_space)
+                                && self.state.line.has_content_advance() {
                                 let discretionary = self
                                     .layout
                                     .data
@@ -1449,6 +1459,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 .filter(|_| self.state.cluster_idx + 1 < cluster_end)
                             {
                                 let rtl_end = run.is_rtl() && cluster.is_ligature_start();
+                                if whitespace == Whitespace::Space
+                                    && cluster.info().is_default_ignorable()
+                                    && cluster.advance() == 0.0
+                                    && cluster.info().boundary() == Boundary::Line
+                                {
+                                    break;
+                                }
                                 if !cluster.is_ligature_continuation() && !rtl_end {
                                     break;
                                 }

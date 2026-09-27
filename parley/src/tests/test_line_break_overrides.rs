@@ -98,6 +98,23 @@ fn join_controls_at_word_edges_preserve_intrinsic_word_breaks() {
 }
 
 #[test]
+fn join_controls_after_spaces_preserve_soft_wraps() {
+    let plain = "This is a simple test";
+    let width = configured_layout(plain, |_| {}).calculate_content_widths().min;
+    let line_count = |text| {
+        let mut layout = configured_layout(text, |_| {});
+        layout.break_all_lines(Some(width));
+        layout.lines().count()
+    };
+    for joined in [
+        "\u{200d}This\u{200d} \u{200d}is\u{200d} \u{200d}a\u{200d} \u{200d}simple\u{200d} \u{200d}test\u{200d}",
+        "\u{200c}This\u{200c} \u{200c}is\u{200c} \u{200c}a\u{200c} \u{200c}simple\u{200c} \u{200c}test\u{200c}",
+    ] {
+        assert_eq!(line_count(joined), line_count(plain));
+    }
+}
+
+#[test]
 fn rtl_ligatures_survive_transparent_inline_boundaries() {
     let glyphs = |text: &str, max_advance: Option<f32>, with_boundaries: bool| {
         let mut fcx = create_font_context();
