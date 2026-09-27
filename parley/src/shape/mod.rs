@@ -383,9 +383,7 @@ fn shape_item<'a, B: Brush>(
     let mut font_selector =
         FontSelector::new(fq, rcx, styles, first_style_index, fb_script, item.locale);
 
-    let grapheme_cluster_boundaries = analysis_data_sources
-        .grapheme_segmenter()
-        .segment_str(item_text);
+    let grapheme_cluster_boundaries = analysis_data_sources.grapheme_boundaries(item_text);
     let mut item_infos_iter = item_infos.iter();
     let mut code_unit_offset_in_string = text_range.start;
     let char_cluster = &mut scx.char_cluster;

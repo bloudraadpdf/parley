@@ -4,7 +4,10 @@
 //! CSS letter-spacing invariants around invisible formatting characters.
 
 use super::{test_builders::create_font_context, utils::ColorBrush};
-use crate::{FontFamily, Layout, LayoutContext, StyleProperty, TextWrapMode, WhiteSpaceCollapse};
+use crate::{
+    FontFamily, Layout, LayoutContext, RangedBuilder, StyleProperty, TextWrapMode,
+    WhiteSpaceCollapse, WordBreak,
+};
 use alloc::{sync::Arc, vec::Vec};
 
 fn unwrapped_layout(family: &str, text: &str, letter_spacing: f32) -> Layout<ColorBrush> {
@@ -17,6 +20,19 @@ fn unwrapped_layout_with_style_range(
     letter_spacing: f32,
     enlarged: Option<core::ops::Range<usize>>,
 ) -> Layout<ColorBrush> {
+    configured_layout(family, text, letter_spacing, |builder| {
+        if let Some(range) = enlarged {
+            builder.push(StyleProperty::FontSize(12.0), range);
+        }
+    })
+}
+
+fn configured_layout(
+    family: &str,
+    text: &str,
+    letter_spacing: f32,
+    configure: impl FnOnce(&mut RangedBuilder<'_, ColorBrush>),
+) -> Layout<ColorBrush> {
     let mut font_context = create_font_context();
     font_context.collection.register_fonts(
         fontique::Blob::new(Arc::new(
@@ -27,14 +43,21 @@ fn unwrapped_layout_with_style_range(
         )),
         None,
     );
+    font_context.collection.register_fonts(
+        fontique::Blob::new(Arc::new(
+            include_bytes!(
+                "../../../parley_dev/assets/fonts/noto_sans_bengali/NotoSansBengali-Regular.ttf"
+            )
+            .to_vec(),
+        )),
+        None,
+    );
     let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
     let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named(family)));
     builder.push_default(StyleProperty::FontSize(10.0));
     builder.push_default(StyleProperty::LetterSpacing(letter_spacing));
-    if let Some(range) = enlarged {
-        builder.push(StyleProperty::FontSize(12.0), range);
-    }
+    configure(&mut builder);
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
     layout
@@ -69,6 +92,79 @@ fn letter_spacing_disables_optional_ligatures() {
 
     assert_eq!(glyph_count(&ligated), 1, "Roboto ligates fi by default");
     assert_eq!(glyph_count(&tracked), 2);
+}
+
+#[test]
+fn explicitly_enabled_ligatures_keep_their_grapheme_spacing() {
+    let shape = |spacing| {
+        configured_layout("Roboto", "fi", spacing, |builder| {
+            let features = [crate::setting::FontFeature {
+                tag: crate::setting::Tag::from_bytes(*b"liga"),
+                value: 1,
+            }];
+            builder.push_default(StyleProperty::FontFeatures((&features).into()));
+        })
+    };
+    let plain = shape(0.0);
+    let tracked = shape(5.0);
+    assert_eq!(glyph_count(&plain), 1);
+    assert_eq!(glyph_count(&tracked), 1);
+    assert!((tracked.full_width() - plain.full_width() - 5.0).abs() < 0.001);
+}
+
+#[test]
+fn break_all_keeps_bengali_vowel_conjuncts_whole() {
+    let text = "অ্যাএ্যা";
+    let mut layout = configured_layout("Noto Sans Bengali", text, 5.0, |builder| {
+        builder.push_default(StyleProperty::WordBreak(WordBreak::BreakAll));
+    });
+    layout.break_all_lines(Some(1.0));
+    assert_eq!(
+        layout.lines().map(|line| line.text_range()).collect::<Vec<_>>(),
+        [0..12, 12..24]
+    );
+}
+
+#[test]
+fn indic_linker_boundaries_follow_unicode_18_gb9c() {
+    let analysis = crate::analysis::AnalysisDataSources::new();
+    for text in ["অ্যা", "এ্যা", "অ\u{200d}্যা", "অ্\u{200d}যা", "অ্ক", "্য"] {
+        assert_eq!(
+            analysis.grapheme_boundaries(text).collect::<Vec<_>>(),
+            [0, text.len()]
+        );
+    }
+    for (text, boundaries) in [
+        ("অ্\u{200c}যা", &[0, 9, 15][..]),
+        ("অ্যা এ্যা", &[0, 12, 13, 25][..]),
+        ("অ্ ক", &[0, 6, 7, 10][..]),
+        ("fi", &[0, 1, 2][..]),
+    ] {
+        assert_eq!(
+            analysis.grapheme_boundaries(text).collect::<Vec<_>>(),
+            boundaries
+        );
+    }
+}
+
+#[test]
+fn bengali_vowel_conjunct_is_one_letter_spacing_unit() {
+    for (text, intervals) in [
+        ("অ্যা", 0.0),
+        ("এ্যা", 0.0),
+        ("অ্যা এ্যা", 2.0),
+        ("অ্যান্টিগুয়া", 3.0),
+        ("এ্যাডভোকেট", 4.0),
+    ] {
+        let plain = unwrapped_layout("Noto Sans Bengali", text, 0.0);
+        let tracked = unwrapped_layout("Noto Sans Bengali", text, 5.0);
+        let plain = plain.lines().next().unwrap().metrics().advance;
+        let tracked = tracked.lines().next().unwrap().metrics().advance;
+        assert!(
+            (tracked - plain - intervals * 5.0).abs() < 0.001,
+            "{text}: plain={plain}, tracked={tracked}"
+        );
+    }
 }
 
 #[test]
@@ -152,9 +248,10 @@ fn rtl_tracking_leaves_both_visual_line_edges_flush() {
             .lines()
             .flat_map(|line| line.items())
             .flat_map(|item| match item {
-                crate::PositionedLayoutItem::GlyphRun(run) => {
-                    run.positioned_glyphs().map(|glyph| glyph.x).collect::<Vec<_>>()
-                }
+                crate::PositionedLayoutItem::GlyphRun(run) => run
+                    .positioned_glyphs()
+                    .map(|glyph| glyph.x)
+                    .collect::<Vec<_>>(),
                 crate::PositionedLayoutItem::InlineBox(_) => Vec::new(),
             })
             .collect::<Vec<_>>()

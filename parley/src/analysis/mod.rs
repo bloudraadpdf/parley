@@ -16,15 +16,15 @@ use icu_normalizer::properties::{
 };
 use icu_properties::props::{
     BidiMirroringGlyph, GeneralCategory, GeneralCategoryGroup, GraphemeClusterBreak,
-    LineBreak as UnicodeLineBreak, Script,
+    IndicConjunctBreak, LineBreak as UnicodeLineBreak, Script,
 };
 use icu_properties::{
     CodePointMapData, CodePointMapDataBorrowed, PropertyNamesShort, PropertyNamesShortBorrowed,
 };
 use icu_segmenter::options::{LineBreakOptions, LineBreakWordOption, WordBreakInvariantOptions};
 use icu_segmenter::{
-    GraphemeClusterSegmenter, GraphemeClusterSegmenterBorrowed, LineSegmenter,
-    LineSegmenterBorrowed, WordSegmenter, WordSegmenterBorrowed,
+    GraphemeClusterSegmenter, LineSegmenter, LineSegmenterBorrowed, WordSegmenter,
+    WordSegmenterBorrowed,
 };
 use parley_data::Properties;
 
@@ -43,8 +43,26 @@ impl AnalysisDataSources {
     }
 
     #[inline(always)]
-    pub(crate) fn grapheme_segmenter(&self) -> GraphemeClusterSegmenterBorrowed<'_> {
+    pub(crate) fn grapheme_boundaries<'a>(
+        &self,
+        text: &'a str,
+    ) -> impl Iterator<Item = usize> + 'a {
+        let conjunct = CodePointMapData::<IndicConjunctBreak>::new();
         const { GraphemeClusterSegmenter::new() }
+            .segment_str(text)
+            .filter(move |boundary| {
+                // UAX #29 revision 49, GB9c: Linker Extend* × Consonant.
+                let next = text[*boundary..].chars().next();
+                if !next.is_some_and(|ch| conjunct.get(ch) == IndicConjunctBreak::Consonant) {
+                    return true;
+                }
+                text[..*boundary]
+                    .chars()
+                    .rev()
+                    .map(|ch| conjunct.get(ch))
+                    .find(|property| *property != IndicConjunctBreak::Extend)
+                    != Some(IndicConjunctBreak::Linker)
+            })
     }
 
     #[inline(always)]
