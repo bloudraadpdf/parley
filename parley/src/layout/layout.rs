@@ -6,7 +6,10 @@ use crate::layout::alignment::align;
 use crate::layout::alignment::align_per_line;
 use crate::layout::alignment::unjustify;
 use crate::layout::data::LayoutData;
-use crate::layout::{DiscretionaryBreak, LineBreakOverride, NormalSoftWrapSelection};
+use crate::layout::{
+    DiscretionaryBreak, DiscretionaryFitAdvance, LineBreakOverride, NormalSoftWrapSelection,
+    SourceClusterFitAdvance,
+};
 use crate::style::Brush;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -24,6 +27,41 @@ pub struct Layout<B: Brush> {
 }
 
 impl<B: Brush> Layout<B> {
+    /// Set physical fitting advances for shaped source clusters. Rendering
+    /// advances and Unicode break opportunities are unchanged.
+    pub fn set_source_cluster_fit_advances(&mut self, mut advances: Vec<SourceClusterFitAdvance>) {
+        advances.sort_by_key(|entry| entry.byte_index);
+        advances.dedup_by_key(|entry| entry.byte_index);
+        for run in &self.data.runs {
+            for cluster in &mut self.data.clusters[run.cluster_range.clone()] {
+                let byte_index = cluster.text_range(run).start;
+                if let Ok(index) =
+                    advances.binary_search_by_key(&byte_index, |entry| entry.byte_index)
+                {
+                    cluster.line_break_advance = advances[index].advance;
+                }
+            }
+        }
+    }
+
+    /// Set physical fitting advances for material inserted by selected
+    /// discretionary breaks. The material's rendered advance is unchanged.
+    pub fn set_discretionary_fit_advances(&mut self, mut advances: Vec<DiscretionaryFitAdvance>) {
+        advances.sort_by_key(|entry| entry.byte_index);
+        advances.dedup_by_key(|entry| entry.byte_index);
+        advances.retain(|entry| entry.byte_index <= self.data.text_len);
+        self.data.discretionary_fit_advances = advances;
+    }
+
+    pub(crate) fn discretionary_fit_advance(&self, byte_index: usize, rendered: f32) -> f32 {
+        self.data
+            .discretionary_fit_advances
+            .binary_search_by_key(&byte_index, |entry| entry.byte_index)
+            .map_or(rendered, |index| {
+                self.data.discretionary_fit_advances[index].advance
+            })
+    }
+
     /// Set position-dependent fitting advances for line-start shaping.
     /// These constraints do not change the shaped glyphs or add break opportunities.
     pub fn set_line_start_fit_advances(&mut self, mut advances: Vec<super::LineStartFitAdvance>) {

@@ -337,6 +337,40 @@ pub struct LineStartFitAdvance {
     pub(crate) inside_line: f32,
 }
 
+/// Physical advance used to fit a shaped source cluster without changing its
+/// glyph advance or the source range exposed by the layout.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SourceClusterFitAdvance {
+    pub(crate) byte_index: usize,
+    pub(crate) advance: f32,
+}
+
+impl SourceClusterFitAdvance {
+    pub fn new(byte_index: usize, advance: f32) -> Option<Self> {
+        (advance.is_finite() && advance >= 0.0).then_some(Self {
+            byte_index,
+            advance,
+        })
+    }
+}
+
+/// Physical advance of discretionary material when line fitting differs from
+/// its shaped advance, as for an upright vertical hyphen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DiscretionaryFitAdvance {
+    pub(crate) byte_index: usize,
+    pub(crate) advance: f32,
+}
+
+impl DiscretionaryFitAdvance {
+    pub fn new(byte_index: usize, advance: f32) -> Option<Self> {
+        (advance.is_finite() && advance >= 0.0).then_some(Self {
+            byte_index,
+            advance,
+        })
+    }
+}
+
 impl LineStartFitAdvance {
     /// Returns a fitting constraint for a finite, non-negative advance.
     pub fn new(byte_index: usize, inside_line: f32) -> Option<Self> {
@@ -1078,6 +1112,7 @@ pub(crate) struct LayoutData<B: Brush> {
     /// `false` suppresses the Unicode soft break at that boundary.
     pub(crate) line_break_overrides: Vec<LineBreakOverride>,
     pub(crate) line_start_fit_advances: Vec<LineStartFitAdvance>,
+    pub(crate) discretionary_fit_advances: Vec<DiscretionaryFitAdvance>,
     /// Sorted discretionary break material, keyed by UTF-8 boundary.
     pub(crate) discretionary_breaks: Vec<DiscretionaryBreak>,
     pub(crate) base_level: u8,
@@ -1139,6 +1174,7 @@ impl<B: Brush> Default for LayoutData<B> {
             reclaim_space_before_inline_box: false,
             line_break_overrides: Vec::new(),
             line_start_fit_advances: Vec::new(),
+            discretionary_fit_advances: Vec::new(),
             discretionary_breaks: Vec::new(),
             base_level: 0,
             text_len: 0,

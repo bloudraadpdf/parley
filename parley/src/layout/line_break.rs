@@ -295,7 +295,10 @@ fn include_line_metric_extents(
 /// selected. Private construction prevents ordinary authored punctuation from
 /// being represented as inserted discretionary material.
 #[derive(Clone, Copy)]
-struct DiscretionaryAdvance(f32);
+struct DiscretionaryAdvance {
+    rendered: f32,
+    fit: f32,
+}
 
 #[derive(Clone)]
 enum RegularBreakCandidate {
@@ -551,15 +554,15 @@ impl BreakerState {
     /// the line breaking opportunity at this point.
     fn mark_line_break_opportunity(&mut self, kind: RegularBreakKind) {
         let mut state = self.line.clone();
-        if let RegularBreakKind::ConditionalMaterial(DiscretionaryAdvance(advance))
+        if let RegularBreakKind::ConditionalMaterial(DiscretionaryAdvance { rendered, fit })
         | RegularBreakKind::ProjectedSource {
-            material: Some(DiscretionaryAdvance(advance)),
+            material: Some(DiscretionaryAdvance { rendered, fit }),
             ..
         } = kind
         {
-            state.x += advance;
-            state.fit_x += advance;
-            state.discretionary_advance = advance;
+            state.x += rendered;
+            state.fit_x += fit;
+            state.discretionary_advance = rendered;
             state.discretionary_break = true;
         }
         let snapshot = BoundarySnapshot {
@@ -1317,9 +1320,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let breakable_ignorable_after_space = is_ligature_continuation
                             && cluster.info().is_default_ignorable()
                             && cluster.advance() == 0.0
-                            && preceding_clusters
-                                .last()
-                                .is_some_and(|previous| previous.info.whitespace() == Whitespace::Space);
+                            && preceding_clusters.last().is_some_and(|previous| {
+                                previous.info.whitespace() == Whitespace::Space
+                            });
                         let projected_source_cluster =
                             self.state.taken_projected_source_boundary.map_or(
                                 ProjectedSourceClusterParticipation::Normal,
@@ -1361,7 +1364,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // We also don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
                             // line breaks. We should accept the overflowing fragment in that scenario.
                             if (!is_ligature_continuation || breakable_ignorable_after_space)
-                                && self.state.line.has_content_advance() {
+                                && self.state.line.has_content_advance()
+                            {
                                 let discretionary = self
                                     .layout
                                     .data
@@ -1388,7 +1392,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     (_, _, Some(entry)) => self
                                         .discretionary_break_allowed(entry, max_advance)
                                         .then_some(RegularBreakKind::ConditionalMaterial(
-                                            DiscretionaryAdvance(entry.advance),
+                                            DiscretionaryAdvance {
+                                                rendered: entry.advance,
+                                                fit: self.layout.discretionary_fit_advance(
+                                                    entry.byte_index,
+                                                    entry.advance,
+                                                ),
+                                            },
                                         )),
                                     (SoftBreakPolicy::Unicode(WordBreak::BreakAll), _, None) => {
                                         Some(RegularBreakKind::Unprioritized)
@@ -1637,8 +1647,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 .get(self.state.cluster_idx)
                                 .is_some_and(|next| {
                                     next.flags & ClusterData::GRAPHEME_START != 0
-                                        && self.layout.data.styles[next.style_index as usize].overflow_wrap
-                                        == OverflowWrap::Normal
+                                        && self.layout.data.styles[next.style_index as usize]
+                                            .overflow_wrap
+                                            == OverflowWrap::Normal
                                 })
                         {
                             self.state.mark_emergency_break_opportunity();
@@ -1665,8 +1676,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         entry
             .max_consecutive_lines
             .is_none_or(|limit| self.state.consecutive_discretionary_lines < limit)
-            && (self.advance_fits(self.state.line.fit_x + entry.advance, max_advance)
-                || self.state.prev_boundary.is_none())
+            && (self.advance_fits(
+                self.state.line.fit_x
+                    + self
+                        .layout
+                        .discretionary_fit_advance(entry.byte_index, entry.advance),
+                max_advance,
+            ) || self.state.prev_boundary.is_none())
     }
 
     fn mark_projected_source_boundary(
@@ -1688,7 +1704,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.mark_projected_source_boundary(
             projection,
             max_advance,
-            entry.map(|entry| DiscretionaryAdvance(entry.advance)),
+            entry.map(|entry| DiscretionaryAdvance {
+                rendered: entry.advance,
+                fit: self
+                    .layout
+                    .discretionary_fit_advance(entry.byte_index, entry.advance),
+            }),
         );
     }
 

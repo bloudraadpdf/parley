@@ -4,7 +4,7 @@
 //! Selection of discretionary (soft hyphen) break opportunities.
 
 use super::{test_builders::create_font_context, utils::ColorBrush};
-use crate::layout::DiscretionaryBreak;
+use crate::layout::{DiscretionaryBreak, DiscretionaryFitAdvance, SourceClusterFitAdvance};
 use crate::{FontFamily, Layout, LayoutContext, StyleProperty};
 use alloc::{vec, vec::Vec};
 
@@ -65,4 +65,127 @@ fn an_earlier_fitting_opportunity_beats_an_overflowing_hyphen() {
     let first = layout.lines().next().expect("the text produces a line");
     assert!(!first.ends_at_discretionary_break());
     assert_eq!(first.text_range(), 0.."a ".len());
+}
+
+#[test]
+fn projected_upright_advances_select_the_soft_hyphen_without_changing_rendered_width() {
+    let text = "hyphen\u{00ad}ation";
+    let break_at = "hyphen\u{00ad}".len();
+    let mut layout = roboto_layout(text);
+    let advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    let range = cluster.text_range();
+                    let physical = if &text[range.clone()] == "\u{00ad}" {
+                        0.0
+                    } else {
+                        12.0
+                    };
+                    SourceClusterFitAdvance::new(range.start, physical).unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(advances);
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: break_at,
+        advance: unwrapped_advance("-"),
+        max_consecutive_lines: None,
+    }]);
+    layout.set_discretionary_fit_advances(vec![
+        DiscretionaryFitAdvance::new(break_at, 12.0).unwrap(),
+    ]);
+    layout.break_all_lines(Some(84.0));
+
+    let lines: Vec<_> = layout.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].ends_at_discretionary_break());
+    assert_eq!(lines[0].text_range(), 0..break_at);
+    assert_eq!(lines[1].text_range(), break_at..text.len());
+    assert!(
+        lines[0].metrics().advance < 84.0,
+        "line placement retains shaped advances"
+    );
+}
+
+#[test]
+fn projected_upright_advances_do_not_invent_breaks_inside_an_unbreakable_word() {
+    let text = "hyphenation";
+    let mut layout = roboto_layout(text);
+    let advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    SourceClusterFitAdvance::new(cluster.text_range().start, 12.0).unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(advances);
+    layout.break_all_lines(Some(84.0));
+    assert_eq!(layout.lines().count(), 1);
+}
+
+#[test]
+fn projected_discretionary_material_must_fit_before_preempting_an_earlier_space() {
+    let text = "a hy\u{00ad}phenation";
+    let break_at = "a hy\u{00ad}".len();
+    let mut layout = roboto_layout(text);
+    let advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    let range = cluster.text_range();
+                    let physical = if &text[range.clone()] == "\u{00ad}" {
+                        0.0
+                    } else {
+                        12.0
+                    };
+                    SourceClusterFitAdvance::new(range.start, physical).unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(advances);
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: break_at,
+        advance: unwrapped_advance("-"),
+        max_consecutive_lines: None,
+    }]);
+    layout.set_discretionary_fit_advances(vec![
+        DiscretionaryFitAdvance::new(break_at, 50.0).unwrap(),
+    ]);
+    layout.break_all_lines(Some(60.0));
+
+    let first = layout.lines().next().unwrap();
+    assert!(!first.ends_at_discretionary_break());
+    assert_eq!(first.text_range(), 0.."a ".len());
+}
+
+#[test]
+fn projected_upright_advances_preserve_unicode_cjk_breaks() {
+    let text = "漢字漢字";
+    let mut layout = roboto_layout(text);
+    let advances = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    SourceClusterFitAdvance::new(cluster.text_range().start, 12.0).unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(advances);
+    layout.break_all_lines(Some(24.0));
+
+    let ranges = layout
+        .lines()
+        .map(|line| line.text_range())
+        .collect::<Vec<_>>();
+    assert_eq!(ranges, vec![0.."漢字".len(), "漢字".len()..text.len()]);
 }
