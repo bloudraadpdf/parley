@@ -105,6 +105,11 @@ impl<'a, B: Brush> Run<'a, B> {
         self.data.bidi_level & 1 != 0
     }
 
+    /// Returns whether the run's script uses cursive shaping.
+    pub fn is_cursive_script(&self) -> bool {
+        self.data.cursive_script
+    }
+
     /// Returns the cluster range for the run.
     pub fn cluster_range(&self) -> Range<usize> {
         self.line_data

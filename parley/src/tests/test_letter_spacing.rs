@@ -481,6 +481,15 @@ fn cursive_scripts_receive_no_letter_spacing() {
     // CSS Text 4 §8.2.1: letter-spacing is not applied within cursive scripts.
     let plain = unwrapped_layout("Noto Naskh Arabic", "ععع", 0.0);
     let tracked = unwrapped_layout("Noto Naskh Arabic", "ععع", 5.0);
+    assert!(plain
+        .lines()
+        .flat_map(|line| line.runs())
+        .all(|run| run.is_cursive_script()));
+    let latin = unwrapped_layout("Roboto", "abc", 0.0);
+    assert!(latin
+        .lines()
+        .flat_map(|line| line.runs())
+        .all(|run| !run.is_cursive_script()));
 
     let advance = |layout: &Layout<ColorBrush>| layout.lines().next().unwrap().metrics().advance;
     assert!((advance(&tracked) - advance(&plain)).abs() < 0.001);
