@@ -1636,7 +1636,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 .clusters
                                 .get(self.state.cluster_idx)
                                 .is_some_and(|next| {
-                                    self.layout.data.styles[next.style_index as usize].overflow_wrap
+                                    next.flags & ClusterData::GRAPHEME_START != 0
+                                        && self.layout.data.styles[next.style_index as usize].overflow_wrap
                                         == OverflowWrap::Normal
                                 })
                         {
