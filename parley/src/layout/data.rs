@@ -1112,6 +1112,8 @@ pub(crate) struct LayoutData<B: Brush> {
     /// `false` suppresses the Unicode soft break at that boundary.
     pub(crate) line_break_overrides: Vec<LineBreakOverride>,
     pub(crate) line_start_fit_advances: Vec<LineStartFitAdvance>,
+    /// Original cluster fit values retained while a caller projection is active.
+    pub(crate) source_cluster_fit_baseline: Vec<f32>,
     pub(crate) discretionary_fit_advances: Vec<DiscretionaryFitAdvance>,
     /// Sorted discretionary break material, keyed by UTF-8 boundary.
     pub(crate) discretionary_breaks: Vec<DiscretionaryBreak>,
@@ -1174,6 +1176,7 @@ impl<B: Brush> Default for LayoutData<B> {
             reclaim_space_before_inline_box: false,
             line_break_overrides: Vec::new(),
             line_start_fit_advances: Vec::new(),
+            source_cluster_fit_baseline: Vec::new(),
             discretionary_fit_advances: Vec::new(),
             discretionary_breaks: Vec::new(),
             base_level: 0,
@@ -1376,6 +1379,9 @@ impl<B: Brush> LayoutData<B> {
         self.reclaim_space_before_inline_box = false;
         self.line_break_overrides.clear();
         self.line_start_fit_advances.clear();
+        self.source_cluster_fit_baseline.clear();
+        self.discretionary_breaks.clear();
+        self.discretionary_fit_advances.clear();
         self.base_level = 0;
         self.text_len = 0;
         self.width = 0.;

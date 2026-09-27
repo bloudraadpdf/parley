@@ -28,8 +28,30 @@ pub struct Layout<B: Brush> {
 
 impl<B: Brush> Layout<B> {
     /// Set physical fitting advances for shaped source clusters. Rendering
-    /// advances and Unicode break opportunities are unchanged.
+    /// advances and Unicode break opportunities are unchanged. Replacing the
+    /// list restores original fit advances before applying new entries; an
+    /// empty list removes the projection.
     pub fn set_source_cluster_fit_advances(&mut self, mut advances: Vec<SourceClusterFitAdvance>) {
+        if self.data.source_cluster_fit_baseline.len() == self.data.clusters.len() {
+            for (cluster, original) in self
+                .data
+                .clusters
+                .iter_mut()
+                .zip(&self.data.source_cluster_fit_baseline)
+            {
+                cluster.line_break_advance = *original;
+            }
+        }
+        self.data.source_cluster_fit_baseline.clear();
+        if advances.is_empty() {
+            return;
+        }
+        self.data.source_cluster_fit_baseline = self
+            .data
+            .clusters
+            .iter()
+            .map(|cluster| cluster.line_break_advance)
+            .collect();
         advances.sort_by_key(|entry| entry.byte_index);
         advances.dedup_by_key(|entry| entry.byte_index);
         for run in &self.data.runs {

@@ -189,3 +189,23 @@ fn projected_upright_advances_preserve_unicode_cjk_breaks() {
         .collect::<Vec<_>>();
     assert_eq!(ranges, vec![0.."漢字".len(), "漢字".len()..text.len()]);
 }
+
+#[test]
+fn replacing_source_fit_projection_restores_the_original_cluster_advances() {
+    let text = "a b";
+    let mut layout = roboto_layout(text);
+    let projected = layout
+        .runs()
+        .flat_map(|run| {
+            run.clusters()
+                .map(|cluster| {
+                    SourceClusterFitAdvance::new(cluster.text_range().start, 100.0).unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    layout.set_source_cluster_fit_advances(projected);
+    layout.set_source_cluster_fit_advances(Vec::new());
+    layout.break_all_lines(Some(unwrapped_advance(text) + 1.0));
+    assert_eq!(layout.lines().count(), 1);
+}
