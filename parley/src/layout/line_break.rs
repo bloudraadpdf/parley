@@ -2651,8 +2651,7 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
         let mut height = 0_f64; // f32 causes test failures due to accumulated error
         for line in &self.lines.lines {
             let indent_extra = line.indent.max(0.0);
-            width =
-                width.max(line.metrics.advance + indent_extra - line.metrics.trailing_whitespace);
+            width = width.max(line.measured_advance());
             full_width = full_width.max(line.metrics.advance + indent_extra);
             height += line.metrics.line_height as f64;
         }

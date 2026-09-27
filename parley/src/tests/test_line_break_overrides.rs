@@ -1159,3 +1159,43 @@ fn collapsed_bidi_source_edges_do_not_force_an_exact_fit_wrap() {
 
     assert_eq!(line_texts(&layout, text), [text]);
 }
+
+#[test]
+fn measured_line_advance_retains_positive_indentation() {
+    let mut glyph = roboto_layout("X", Some(WhiteSpaceCollapse::Preserve));
+    glyph.break_all_lines(None);
+    let x = glyph.width();
+    for rtl in [false, true] {
+        for indent in [-20.0_f32, 20.0] {
+            for each_line in [false, true] {
+                let mut layout = configured_layout("X\nXX", |builder| {
+                    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+                        WhiteSpaceCollapse::Preserve,
+                    ));
+                    builder.set_direction(if rtl {
+                        BaseDirection::Rtl
+                    } else {
+                        BaseDirection::Ltr
+                    });
+                });
+                layout.set_text_indent(
+                    indent,
+                    IndentOptions {
+                        each_line,
+                        hanging: false,
+                    },
+                );
+                layout.break_all_lines(None);
+                let expected = [
+                    x + indent.max(0.0),
+                    2.0 * x + if each_line { indent.max(0.0) } else { 0.0 },
+                ];
+                assert_eq!(layout.len(), 2);
+                for (line, expected) in layout.lines().zip(expected) {
+                    assert_close(line.measured_advance(), expected);
+                }
+                assert_close(layout.width(), expected.into_iter().fold(0.0_f32, f32::max));
+            }
+        }
+    }
+}

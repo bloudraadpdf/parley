@@ -1040,6 +1040,10 @@ pub(crate) struct LineData {
 }
 
 impl LineData {
+    pub(crate) fn measured_advance(&self) -> f32 {
+        self.metrics.advance + self.indent.max(0.0) - self.metrics.trailing_whitespace
+    }
+
     pub(crate) fn size(&self) -> f32 {
         self.metrics.ascent + self.metrics.descent + self.metrics.leading
     }

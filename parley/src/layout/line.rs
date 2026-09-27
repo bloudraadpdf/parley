@@ -48,6 +48,12 @@ impl<'a, B: Brush> Line<'a, B> {
         super::line_break::line_letter_spacing_units(&self.layout.data, self.data).into_iter()
     }
 
+    /// Returns this line's contribution to [`Layout::width`].
+    /// Positive indentation is included; trailing whitespace is excluded.
+    pub fn measured_advance(&self) -> f32 {
+        self.data.measured_advance()
+    }
+
     pub fn break_reason(&self) -> BreakReason {
         self.data.break_reason
     }
