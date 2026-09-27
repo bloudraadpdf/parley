@@ -30,6 +30,7 @@ use crate::layout::{
     BreakReason, DiscretionaryBreak, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
     LineMetrics, Run, RunMetrics,
 };
+use crate::layout::{LetterSpacingUnit, LetterSpacingUnitRecord};
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
 use crate::util::nearly_zero;
@@ -2077,11 +2078,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         );
         let mut removed = line.removed_leading_source_ranges.clone();
         removed.extend(terminal.removed_source_ranges);
-        let units = visual_letter_spacing_units(
-            &self.layout.data,
-            &line_items[line.item_range.clone()],
-            &removed,
-        );
+        let mut visual_items = line_items[line.item_range.clone()].to_vec();
+        reorder_line_items(&mut visual_items, &self.layout.data.inline_boxes);
+        let units =
+            letter_spacing_units_from_visual_items(&self.layout.data, &visual_items, &removed);
         let data = &mut self.layout.data;
         for (index, unit) in units.iter().enumerate() {
             let retained = units.get(index + 1).map_or_else(
@@ -2585,25 +2585,9 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
 /// Only visual edge values are needed while deciding whether a prefix fits.
 #[derive(Clone, Copy)]
 struct SpacingEdgePair {
-    first: LetterSpacingValue,
-    last: LetterSpacingValue,
+    first: LetterSpacingUnit,
+    last: LetterSpacingUnit,
     adjustment: f32,
-}
-
-#[derive(Clone, Copy)]
-struct LetterSpacingValue {
-    spacing: f32,
-    atomic: bool,
-}
-
-impl LetterSpacingValue {
-    fn interval_to(self, next: Self) -> f32 {
-        if self.atomic && next.atomic {
-            0.0
-        } else {
-            (self.spacing + next.spacing) * 0.5
-        }
-    }
 }
 
 impl SpacingEdgePair {
@@ -2679,7 +2663,7 @@ impl LetterSpacingEdges {
             if item.kind == LayoutItemKind::InlineBox {
                 if let Some(spacing) = data.inline_boxes[item.index].letter_spacing() {
                     self.push_value(
-                        LetterSpacingValue {
+                        LetterSpacingUnit {
                             spacing,
                             atomic: true,
                         },
@@ -2690,7 +2674,7 @@ impl LetterSpacingEdges {
         }
         if let Some(cluster) = cluster.filter(|cluster| is_letter_spacing_unit(cluster)) {
             self.push_value(
-                LetterSpacingValue {
+                LetterSpacingUnit {
                     spacing: data.runs[item.index].cluster_letter_spacing(cluster),
                     atomic: false,
                 },
@@ -2699,7 +2683,7 @@ impl LetterSpacingEdges {
         }
     }
 
-    fn push_value(&mut self, value: LetterSpacingValue, rtl: bool) {
+    fn push_value(&mut self, value: LetterSpacingUnit, rtl: bool) {
         self.item_edges = SpacingEdgePair::concatenate(
             self.item_edges,
             Some(SpacingEdgePair {
@@ -2828,7 +2812,7 @@ fn line_edge_letter_spacing<B: Brush>(
 #[derive(Clone, Copy)]
 struct VisualLetterSpacingUnit {
     source: LetterSpacingSource,
-    value: LetterSpacingValue,
+    value: LetterSpacingUnit,
 }
 
 #[derive(Clone, Copy)]
@@ -2870,22 +2854,60 @@ fn uniform_letter_spacing<B: Brush>(data: &LayoutData<B>) -> Option<f32> {
     values.all(|value| value == first).then_some(first)
 }
 
-fn visual_letter_spacing_units<B: Brush>(
+pub(super) fn line_letter_spacing_units<B: Brush>(
+    data: &LayoutData<B>,
+    line: &LineData,
+) -> Vec<LetterSpacingUnitRecord> {
+    let items = &data.line_items[line.item_range.clone()];
+    let mut removed = line.removed_leading_source_ranges.clone();
+    removed.extend(line.removed_terminal_source_ranges.iter().cloned());
+    letter_spacing_units_from_visual_items(data, items, &removed)
+        .into_iter()
+        .map(|record| {
+            let (source, applied_advance) = match record.source {
+                LetterSpacingSource::Text {
+                    run_index,
+                    cluster_index,
+                } => {
+                    let cluster = &data.clusters[cluster_index];
+                    let run = &data.runs[run_index];
+                    (
+                        cluster.text_range(run),
+                        run.cluster_letter_spacing(cluster) - cluster.trimmed_letter_spacing,
+                    )
+                }
+                LetterSpacingSource::Atomic { box_index } => {
+                    let inline_box = &data.inline_boxes[box_index];
+                    (
+                        inline_box.index..inline_box.index,
+                        inline_box.advance() - inline_box.width(),
+                    )
+                }
+            };
+            LetterSpacingUnitRecord {
+                unit: record.value,
+                source_start: source.start,
+                source_end: source.end,
+                applied_advance,
+            }
+        })
+        .collect()
+}
+
+fn letter_spacing_units_from_visual_items<B: Brush>(
     data: &LayoutData<B>,
     items: &[LineItemData],
     removed: &[Range<usize>],
 ) -> Vec<VisualLetterSpacingUnit> {
-    let mut items = items.to_vec();
-    reorder_line_items(&mut items, &data.inline_boxes);
     let mut units = Vec::new();
-    for item in &items {
+    for item in items {
         if item.kind == LayoutItemKind::InlineBox {
             if let Some(spacing) = data.inline_boxes[item.index].letter_spacing() {
                 units.push(VisualLetterSpacingUnit {
                     source: LetterSpacingSource::Atomic {
                         box_index: item.index,
                     },
-                    value: LetterSpacingValue {
+                    value: LetterSpacingUnit {
                         spacing,
                         atomic: true,
                     },
@@ -2906,7 +2928,7 @@ fn visual_letter_spacing_units<B: Brush>(
                         run_index: item.index,
                         cluster_index,
                     },
-                    value: LetterSpacingValue {
+                    value: LetterSpacingUnit {
                         spacing: run.cluster_letter_spacing(cluster),
                         atomic: false,
                     },
@@ -3274,11 +3296,11 @@ mod tests {
                     edges.begin_item(index, levels[index], attachments[index]);
                     if attachments[index] == Independent {
                         edges.item_edges = Some(SpacingEdgePair {
-                            first: super::LetterSpacingValue {
+                            first: super::LetterSpacingUnit {
                                 spacing: index as f32,
                                 atomic: false,
                             },
-                            last: super::LetterSpacingValue {
+                            last: super::LetterSpacingUnit {
                                 spacing: index as f32,
                                 atomic: false,
                             },

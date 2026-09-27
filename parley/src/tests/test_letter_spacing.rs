@@ -721,3 +721,39 @@ fn breaking_the_layout_again_restores_the_trimmed_tracking_first() {
         "plain={plain}, kept={kept}"
     );
 }
+
+#[test]
+fn fragment_edges_retain_visual_units_source_ranges_and_trim_policy() {
+    let mut layout = configured_layout("Arimo", "\u{200b}אב\u{200b}", 10.0, |builder| {
+        builder.push(StyleProperty::LetterSpacing(30.0), 5..7);
+    });
+    let units: Vec<_> = layout
+        .lines()
+        .next()
+        .unwrap()
+        .letter_spacing_units()
+        .collect();
+    assert_eq!(units.len(), 2);
+    assert_eq!(units[0].unit().spacing(), 30.0);
+    assert_eq!(units[0].source_range(), 5..7);
+    assert_eq!(units[0].applied_advance(), 20.0);
+    assert_eq!(units[1].unit().spacing(), 10.0);
+    assert_eq!(units[1].source_range(), 3..5);
+    assert_eq!(units[1].applied_advance(), 0.0);
+    layout.set_line_end_letter_spacing_trim(false);
+    layout.break_all_lines(None);
+    let continued: Vec<_> = layout
+        .lines()
+        .next()
+        .unwrap()
+        .letter_spacing_units()
+        .collect();
+    assert_eq!(continued[0], units[0]);
+    assert_eq!(continued[1].unit(), units[1].unit());
+    assert_eq!(continued[1].applied_advance(), 10.0);
+    assert_eq!(
+        crate::layout::LetterSpacingUnit::atomic(5.0)
+            .interval_to(crate::layout::LetterSpacingUnit::atomic(25.0)),
+        0.0
+    );
+}

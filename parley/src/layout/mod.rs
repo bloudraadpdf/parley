@@ -10,6 +10,7 @@ mod bidi;
 mod cluster;
 mod glyph;
 mod inline_fragmentation;
+mod letter_spacing;
 mod line;
 mod line_break;
 mod run;
@@ -34,6 +35,7 @@ pub use data::{
 };
 pub use glyph::Glyph;
 pub use layout::Layout;
+pub use letter_spacing::{LetterSpacingUnit, LetterSpacingUnitRecord};
 pub use line::{
     GlyphRun, HangingWhitespace, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem,
 };

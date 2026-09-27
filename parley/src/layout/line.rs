@@ -42,6 +42,12 @@ impl<'a, B: Brush> Line<'a, B> {
         &self.data.metrics
     }
 
+    /// Returns retained typographic units in visual order, excluding removed
+    /// source text. Source records survive slicing without glyph inference.
+    pub fn letter_spacing_units(&self) -> impl Iterator<Item = super::LetterSpacingUnitRecord> {
+        super::line_break::line_letter_spacing_units(&self.layout.data, self.data).into_iter()
+    }
+
     pub fn break_reason(&self) -> BreakReason {
         self.data.break_reason
     }
