@@ -1805,6 +1805,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             .binary_search_by_key(&boundary.target(), |entry| entry.byte_index)
             .ok()
             .map(|index| self.layout.data.discretionary_breaks[index]);
+        let restored_normal = restored_normal && entry.is_none();
         if entry.is_some_and(|entry| !self.discretionary_break_allowed(entry, max_advance)) {
             return;
         }
