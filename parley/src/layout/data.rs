@@ -1984,7 +1984,7 @@ impl<B: Brush> LayoutData<B> {
 /// * `char_infos` - Character information from text analysis, indexed by cluster ID.
 /// * `char_indices_iter` - Iterator over (`byte_offset`, `char`) pairs from the source text.
 ///   Should be in logical order (forward for LTR, reverse for RTL).
-fn process_clusters<I: Iterator<Item = (usize, char)>>(
+fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
     direction: Direction,
     clusters: &mut Vec<ClusterData>,
     glyphs: &mut Vec<Glyph>,
@@ -2041,6 +2041,22 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
             Direction::Ltr => next_cluster - current_cluster,
             Direction::Rtl => last_cluster - current_cluster,
         };
+    let default_ignorable =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
+    // HarfRust can merge a visible character (including a space) with a
+    // following format control. Give the visible components the glyph's
+    // advance so an ignorable control cannot carry part of a trailing space
+    // across a line break or enlarge min-content width.
+    let component_advance =
+        |advance: f32, character: char, visible_components: usize, total_components: u32| {
+            if visible_components == 0 {
+                advance / total_components as f32
+            } else if default_ignorable.contains(character) {
+                0.0
+            } else {
+                advance / visible_components as f32
+            }
+        };
     let mut last_cluster_id: u32 = match direction {
         Direction::Ltr => 0,
         Direction::Rtl => char_infos.len() as u32,
@@ -2051,8 +2067,15 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
         if cluster_id != glyph_info.cluster {
             run_advance += cluster_advance;
             let num_components = num_components(glyph_info.cluster, cluster_id, last_cluster_id);
-            cluster_advance /= num_components as f32;
-            cluster_line_break_advance /= num_components as f32;
+            let visible_components = core::iter::once(cluster_start_char.1)
+                .chain(
+                    char_indices_iter
+                        .clone()
+                        .take(num_components as usize - 1)
+                        .map(|(_, ch)| ch),
+                )
+                .filter(|&ch| !default_ignorable.contains(ch))
+                .count();
             let is_newline = to_whitespace(cluster_start_char.1) == Whitespace::Newline;
             let cluster_type = if num_components > 1 {
                 debug_assert!(!is_newline);
@@ -2080,8 +2103,18 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                 char_infos[direction.component_index(cluster_id, num_components, 0)],
                 cluster_start_char,
                 cluster_glyph_offset,
-                cluster_advance,
-                cluster_line_break_advance,
+                component_advance(
+                    cluster_advance,
+                    cluster_start_char.1,
+                    visible_components,
+                    num_components,
+                ),
+                component_advance(
+                    cluster_line_break_advance,
+                    cluster_start_char.1,
+                    visible_components,
+                    num_components,
+                ),
                 total_glyphs,
                 cluster_type,
                 inline_glyph_id,
@@ -2102,8 +2135,18 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                         char_info_,
                         cluster_start_char,
                         cluster_glyph_offset,
-                        cluster_advance,
-                        cluster_line_break_advance,
+                        component_advance(
+                            cluster_advance,
+                            cluster_start_char.1,
+                            visible_components,
+                            num_components,
+                        ),
+                        component_advance(
+                            cluster_line_break_advance,
+                            cluster_start_char.1,
+                            visible_components,
+                            num_components,
+                        ),
                         total_glyphs,
                         ClusterType::LigatureComponent,
                         None,
@@ -2173,15 +2216,32 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                 glyphs.push(pending);
                 total_glyphs += 1;
             }
-            let ligature_advance = cluster_advance / num_components as f32;
-            let ligature_line_break_advance = cluster_line_break_advance / num_components as f32;
+            let visible_components = core::iter::once(cluster_start_char.1)
+                .chain(
+                    char_indices_iter
+                        .clone()
+                        .take(num_components as usize - 1)
+                        .map(|(_, ch)| ch),
+                )
+                .filter(|&ch| !default_ignorable.contains(ch))
+                .count();
             push_cluster(
                 clusters,
                 char_infos[direction.component_index(cluster_id, num_components, 0)],
                 cluster_start_char,
                 cluster_glyph_offset,
-                ligature_advance,
-                ligature_line_break_advance,
+                component_advance(
+                    cluster_advance,
+                    cluster_start_char.1,
+                    visible_components,
+                    num_components,
+                ),
+                component_advance(
+                    cluster_line_break_advance,
+                    cluster_start_char.1,
+                    visible_components,
+                    num_components,
+                ),
                 total_glyphs,
                 ClusterType::LigatureStart,
                 None,
@@ -2202,8 +2262,13 @@ fn process_clusters<I: Iterator<Item = (usize, char)>>(
                     component_char_info,
                     char,
                     cluster_glyph_offset,
-                    ligature_advance,
-                    ligature_line_break_advance,
+                    component_advance(cluster_advance, char.1, visible_components, num_components),
+                    component_advance(
+                        cluster_line_break_advance,
+                        char.1,
+                        visible_components,
+                        num_components,
+                    ),
                     total_glyphs,
                     ClusterType::LigatureComponent,
                     None,

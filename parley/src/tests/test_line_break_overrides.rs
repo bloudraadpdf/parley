@@ -77,6 +77,27 @@ fn full_width(text: &str) -> f32 {
 }
 
 #[test]
+fn join_controls_at_word_edges_preserve_intrinsic_word_breaks() {
+    let plain = configured_layout("This is a simple test", |_| {});
+    for joined in [
+        "\u{200d}This\u{200d} \u{200d}is\u{200d} \u{200d}a\u{200d} \u{200d}simple\u{200d} \u{200d}test\u{200d}",
+        "\u{200c}This\u{200c} \u{200c}is\u{200c} \u{200c}a\u{200c} \u{200c}simple\u{200c} \u{200c}test\u{200c}",
+    ] {
+        let joined = configured_layout(joined, |_| {});
+        let plain = plain.calculate_content_widths();
+        let joined = joined.calculate_content_widths();
+        assert!(
+            (joined.min - plain.min).abs() < 0.001,
+            "{joined:?} != {plain:?}"
+        );
+        assert!(
+            (joined.max - plain.max).abs() < 0.001,
+            "{joined:?} != {plain:?}"
+        );
+    }
+}
+
+#[test]
 fn rtl_ligatures_survive_transparent_inline_boundaries() {
     let glyphs = |text: &str, max_advance: Option<f32>, with_boundaries: bool| {
         let mut fcx = create_font_context();
