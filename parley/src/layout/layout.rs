@@ -30,6 +30,38 @@ pub struct DiscretionaryBreakShape<B: Brush> {
     layout: Arc<Layout<B>>,
 }
 
+/// A shaped string inserted at the start of a line only when wrapping
+/// selects the source boundary. The unbroken source remains unchanged.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FollowingBreakShape<B: Brush> {
+    pub(crate) byte_index: usize,
+    text: String,
+    layout: Arc<Layout<B>>,
+}
+
+impl<B: Brush> FollowingBreakShape<B> {
+    /// Retain a single-line shape for a source boundary.
+    pub fn new(byte_index: usize, text: String, layout: Layout<B>) -> Option<Self> {
+        if byte_index == 0
+            || layout.len() > 1
+            || (layout.len() == 0 && !text.is_empty())
+            || layout.data.text_len != text.len()
+            || !layout.inline_boxes().is_empty()
+            || !layout.full_width().is_finite()
+            || layout.full_width() < 0.0
+        {
+            return None;
+        }
+        Some(Self { byte_index, text, layout: Arc::new(layout) })
+    }
+
+    /// Text used to shape this line-start material.
+    pub fn text(&self) -> &str { &self.text }
+
+    /// Immutable glyph shape used for fitting and drawing.
+    pub fn layout(&self) -> &Layout<B> { &self.layout }
+}
+
 impl<B: Brush> DiscretionaryBreakShape<B> {
     /// Retain a single-line shape with its source text and break limit.
     pub fn new(
@@ -353,6 +385,22 @@ impl<B: Brush> Layout<B> {
             .binary_search_by_key(&byte_index, |shape| shape.byte_index)
             .ok()
             .map(|index| &self.data.discretionary_break_shapes[index])
+    }
+
+    /// Set shaped material shown on the following line when its boundary is selected.
+    pub fn set_following_break_shapes(&mut self, mut shapes: Vec<FollowingBreakShape<B>>) {
+        shapes.sort_by_key(|shape| shape.byte_index);
+        shapes.dedup_by_key(|shape| shape.byte_index);
+        shapes.retain(|shape| shape.byte_index < self.data.text_len);
+        self.data.following_break_shapes = shapes;
+    }
+
+    /// Shaped material at the start of a line beginning at this source boundary.
+    pub fn following_break_shape(&self, byte_index: usize) -> Option<&FollowingBreakShape<B>> {
+        self.data.following_break_shapes
+            .binary_search_by_key(&byte_index, |shape| shape.byte_index)
+            .ok()
+            .map(|index| &self.data.following_break_shapes[index])
     }
 
     /// Select whether subsequent line breaking restores overflow-only opportunities.

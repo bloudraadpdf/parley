@@ -139,6 +139,8 @@ struct LineState {
     /// Material charged only when the selected line ending is
     /// discretionary. It is absent from the unbroken flow.
     discretionary_advance: f32,
+    following_break_advance: f32,
+    starts_at_following_break: bool,
     discretionary_break: bool,
     source_end_contribution: SourceEndContribution,
     source_start_whitespace: SourceStartWhitespace,
@@ -844,6 +846,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.fragment_fit = FragmentFit::Fits;
         self.state.line.running_line_height = 0.;
         self.state.line.discretionary_advance = 0.;
+        self.state.line.following_break_advance = 0.;
+        self.state.line.starts_at_following_break = false;
         self.state.line.discretionary_break = false;
         self.state.line.source_end_contribution = SourceEndContribution::Empty;
         self.state.line.start_position = LineStartPosition::Start;
@@ -869,6 +873,18 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         };
 
         self.finish_line(self.lines.lines.len() - 1, line_height, &tab_advances);
+        // The selected source range is final only after finish_line has
+        // collected its items and applied line-end shaping.
+        if preceding_break != BreakReason::None {
+            let boundary = self.lines.lines.last().expect("committed line").text_range.end;
+            if let Some(shape) = self.layout.following_break_shape(boundary) {
+                let advance = shape.layout().full_width();
+                self.state.line.x += advance;
+                self.state.line.fit_x += advance;
+                self.state.line.following_break_advance = advance;
+                self.state.line.starts_at_following_break = true;
+            }
+        }
         if self.candidate_mutations.is_none() {
             if let Some(candidates) = &mut self.shape_candidates {
                 let line = self.lines.lines.last().expect("committed line");
@@ -2668,6 +2684,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 }
             }
         }
+        if line.starts_at_following_break {
+            if let Some(shape) = self.layout.following_break_shape(line.text_range.start) {
+                for run in shape.layout().runs() {
+                    let metrics = *run.metrics();
+                    line.metrics.ascent = line.metrics.ascent.max(metrics.ascent);
+                    line.metrics.descent = line.metrics.descent.max(metrics.descent);
+                    line.metrics.line_height = line.metrics.line_height.max(metrics.line_height);
+                    include_line_metric_extents(
+                        &mut line_extents,
+                        LineMetricExtents::from_run(metrics),
+                    );
+                    have_metrics = true;
+                }
+            }
+        }
 
         // Resolve the source-terminal sequence while line items are still in
         // logical source order. The immutable summary retains physical
@@ -3491,6 +3522,8 @@ fn try_commit_line<B: Brush>(
         indent: line_indent,
         tab_origin: state.tab_origin,
         discretionary_advance: state.discretionary_advance,
+        following_break_advance: state.following_break_advance,
+        starts_at_following_break: state.starts_at_following_break,
         selected_source_cluster_advance: state.selected_source_cluster_advance.clone(),
         removed_leading_source_ranges: state.removed_leading_source_ranges.clone(),
         ends_at_discretionary_break: state.discretionary_break,

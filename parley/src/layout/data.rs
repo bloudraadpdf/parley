@@ -1058,6 +1058,10 @@ pub(crate) struct LineData {
     /// Advance inserted only because this line ended at a discretionary
     /// break. Zero for ordinary and mandatory breaks.
     pub(crate) discretionary_advance: f32,
+    /// Material inserted at this line's selected source-start boundary.
+    pub(crate) following_break_advance: f32,
+    /// A selected boundary can insert a shape with zero advance.
+    pub(crate) starts_at_following_break: bool,
     /// Whether this line selected a registered discretionary boundary.
     /// Kept separately from the advance because valid inserted material may
     /// have zero width.
@@ -1237,6 +1241,7 @@ pub(crate) struct LayoutData<B: Brush> {
     /// Sorted discretionary break material, keyed by UTF-8 boundary.
     pub(crate) discretionary_breaks: Vec<DiscretionaryBreak>,
     pub(crate) discretionary_break_shapes: Vec<super::DiscretionaryBreakShape<B>>,
+    pub(crate) following_break_shapes: Vec<super::FollowingBreakShape<B>>,
     pub(crate) line_break_purpose: LineBreakPurpose,
     pub(crate) base_level: u8,
     pub(crate) text_len: usize,
@@ -1310,6 +1315,7 @@ impl<B: Brush> Default for LayoutData<B> {
             discretionary_fit_advances: Vec::new(),
             discretionary_breaks: Vec::new(),
             discretionary_break_shapes: Vec::new(),
+            following_break_shapes: Vec::new(),
             line_break_purpose: LineBreakPurpose::LineLayout,
             base_level: 0,
             text_len: 0,
@@ -1541,6 +1547,7 @@ impl<B: Brush> LayoutData<B> {
         self.source_cluster_fit_advances.clear();
         self.discretionary_breaks.clear();
         self.discretionary_break_shapes.clear();
+        self.following_break_shapes.clear();
         self.line_break_purpose = LineBreakPurpose::LineLayout;
         self.discretionary_fit_advances.clear();
         self.base_level = 0;

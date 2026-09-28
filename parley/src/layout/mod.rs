@@ -39,7 +39,7 @@ pub use data::{
 };
 pub use glyph::Glyph;
 pub use justification::{JustificationOpportunity, JustificationUnit};
-pub use layout::{DiscretionaryBreakShape, Layout};
+pub use layout::{DiscretionaryBreakShape, FollowingBreakShape, Layout};
 pub use letter_spacing::{LetterSpacingUnit, LetterSpacingUnitRecord};
 pub use line::{
     GlyphRun, HangingWhitespace, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem,

@@ -173,7 +173,7 @@ impl<'a, B: Brush> Line<'a, B> {
             line: self.clone(),
             item_index: 0,
             glyph_start: 0,
-            offset: 0.,
+            offset: self.data.following_break_advance,
             cluster_corrections: Vec::new(),
             next_cluster_correction: 0,
         }

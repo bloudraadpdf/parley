@@ -428,3 +428,41 @@ fn unused_discretionary_fallback_does_not_change_line_metrics() {
     assert_eq!(actual.line_height, expected.line_height);
     assert_eq!(actual.advance, expected.advance);
 }
+
+#[test]
+fn following_material_is_charged_and_positioned_only_after_a_selected_break() {
+    use crate::layout::{FollowingBreakShape, PositionedLayoutItem};
+
+    let text = "ab-cdef";
+    let boundary = "ab-".len();
+    let mut following = roboto_layout("-");
+    following.break_all_lines(None);
+    let following_width = unwrapped_advance("-");
+    let mut baseline = roboto_layout(text);
+    let width = unwrapped_advance("ab-") + 0.01;
+    baseline.break_all_lines(Some(width));
+    assert_eq!(baseline.get(0).unwrap().text_range().end, boundary);
+
+    let mut layout = roboto_layout(text);
+    layout.set_following_break_shapes(vec![
+        FollowingBreakShape::new(boundary, "-".into(), following).unwrap(),
+    ]);
+    layout.break_all_lines(Some(width));
+    let second = layout.get(1).unwrap();
+    let baseline_second = baseline.get(1).unwrap();
+    assert_eq!(second.text_range(), baseline_second.text_range());
+    assert!(
+        (second.metrics().advance - baseline_second.metrics().advance - following_width).abs() < 0.001,
+        "actual={} baseline={} inserted={}",
+        second.metrics().advance, baseline_second.metrics().advance, following_width,
+    );
+    let glyph_x = second.items().find_map(|item| match item {
+        PositionedLayoutItem::GlyphRun(run) => Some(run.offset()),
+        _ => None,
+    }).unwrap();
+    assert!((glyph_x - following_width).abs() < 0.001);
+
+    layout.break_all_lines(None);
+    assert_eq!(layout.lines().count(), 1);
+    assert!((layout.get(0).unwrap().metrics().advance - unwrapped_advance(text)).abs() < 0.001);
+}
