@@ -17,7 +17,7 @@ fn build_layout(
     build_layout_with_direction(text, inline_boxes, None)
 }
 
-pub(super) fn build_layout_with_direction(
+pub(crate) fn build_layout_with_direction(
     text: &str,
     inline_boxes: impl IntoIterator<Item = InlineBox>,
     direction: Option<BaseDirection>,

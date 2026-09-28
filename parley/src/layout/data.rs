@@ -63,7 +63,7 @@ pub(crate) enum TerminalWhitespaceDisposition {
 }
 
 /// A physical side in the native inline axis.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PhysicalLineEdge {
     /// The side with the lower inline coordinate.
     Left,
@@ -375,6 +375,13 @@ pub enum LineBreakPurpose {
     LineLayout,
     /// Measure intrinsic widths without restoring suppressed opportunities.
     IntrinsicSizing,
+}
+
+impl LineBreakPurpose {
+    pub(super) fn allows_emergency_wrap(self, overflow: OverflowWrap) -> bool {
+        overflow == OverflowWrap::Anywhere
+            || (self == Self::LineLayout && overflow == OverflowWrap::BreakWord)
+    }
 }
 
 /// A caller-supplied soft line-break decision at one UTF-8 byte boundary.
@@ -1248,8 +1255,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) items: Vec<LayoutItem>,
     pub(crate) clusters: Vec<ClusterData>,
     pub(crate) glyphs: Vec<Glyph>,
-    pub(crate) justification_shape_variants:
-        Option<crate::shape::justification::JustificationShapeVariants>,
+    pub(crate) line_shape_variants: Option<crate::shape::justification::LineShapeVariants>,
     pub(crate) shaping_source_text: Option<alloc::sync::Arc<str>>,
     pub(crate) deferred_justification_shapes:
         Vec<crate::shape::justification::DeferredJustificationShape>,
@@ -1319,7 +1325,7 @@ impl<B: Brush> Default for LayoutData<B> {
             clusters: Vec::new(),
             glyphs: Vec::new(),
             shaping_source_text: None,
-            justification_shape_variants: None,
+            line_shape_variants: None,
             deferred_justification_shapes: Vec::new(),
             inline_owner_shaping: Vec::new(),
             deferred_physical_shapes: Vec::new(),
@@ -1551,7 +1557,7 @@ impl<B: Brush> LayoutData<B> {
         self.clusters.clear();
         self.glyphs.clear();
         self.shaping_source_text = None;
-        self.justification_shape_variants = None;
+        self.line_shape_variants = None;
         self.deferred_justification_shapes.clear();
         self.inline_owner_shaping.clear();
         self.deferred_physical_shapes.clear();
@@ -1911,6 +1917,10 @@ impl<B: Brush> LayoutData<B> {
 
     pub(crate) fn finish(&mut self, grapheme_boundaries: impl Iterator<Item = usize>) {
         self.mark_grapheme_boundaries(grapheme_boundaries);
+        self.finish_advances();
+    }
+
+    pub(crate) fn finish_advances(&mut self) {
         for run in &self.runs {
             let word = run.word_spacing;
             let letter = run.letter_spacing;

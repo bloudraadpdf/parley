@@ -52,7 +52,7 @@ pub(crate) struct DeferredJustificationShape {
 }
 
 impl DeferredJustificationShape {
-    fn eligible_features(
+    pub(super) fn eligible_features(
         &self,
         run: &crate::layout::data::RunData,
         clusters: &[crate::layout::data::ClusterData],
@@ -134,10 +134,7 @@ impl<B: Brush> crate::LayoutContext<B> {
             .shaping_source_text
             .as_ref()
             .expect("retained shaping text");
-        let mut scratch = crate::layout::data::LayoutData::<B>::default();
-        scratch.styles.clone_from(&layout.data.styles);
-        scratch.font_metric_advance_quantization = layout.data.font_metric_advance_quantization;
-        scratch.nominal_font_metric_line_breaks = layout.data.nominal_font_metric_line_breaks;
+        let mut scratch = super::source::source_scratch(&layout.data);
         for index in 0..layout.data.deferred_justification_shapes.len() {
             let deferred = &layout.data.deferred_justification_shapes[index];
             let run = &layout.data.runs[deferred.source.run_index];
@@ -190,7 +187,7 @@ impl JustificationShapePolicy {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct JustificationShapeVariants {
+pub(crate) struct LineShapeVariants {
     pub(crate) original: Vec<crate::layout::data::ClusterData>,
     pub(crate) expanded: Vec<crate::layout::data::ClusterData>,
     pub(crate) original_glyph_len: usize,
@@ -202,8 +199,9 @@ impl<B: Brush> crate::Layout<B> {
     /// Returns the policy used by the active source shaping alternatives.
     pub fn justification_shape_policy(&self) -> Option<JustificationShapePolicy> {
         self.data
-            .justification_shape_variants
+            .line_shape_variants
             .as_ref()
+            .filter(|variants| variants.policy != JustificationShapePolicy::default())
             .map(|variants| variants.policy)
     }
 
@@ -227,34 +225,18 @@ impl<B: Brush> crate::Layout<B> {
                 continue;
             };
             let run = &self.data.runs[deferred.source.run_index];
-            let glyph_offset = self.data.glyphs.len() - run.glyph_start;
-            assert_eq!(
-                run.cluster_range.len(),
-                prepared.clusters.len(),
-                "retained source cluster count"
+            prepared.install_for_run(
+                run,
+                &mut expanded[run.cluster_range.clone()],
+                &mut self.data.glyphs,
             );
-            for (target, candidate) in expanded[run.cluster_range.clone()]
-                .iter_mut()
-                .zip(&prepared.clusters)
-            {
-                assert_eq!(
-                    (target.text_offset, target.text_len),
-                    (candidate.text_offset, candidate.text_len),
-                    "retained source cluster identity"
-                );
-                *target = *candidate;
-                if target.glyph_len != 0xFF {
-                    target.glyph_offset += glyph_offset as u32;
-                }
-            }
-            self.data.glyphs.extend_from_slice(&prepared.glyphs);
         }
         crate::layout::apply_source_fit_projection(
             &self.data.runs,
             &mut expanded,
             &self.data.source_cluster_fit_advances,
         );
-        self.data.justification_shape_variants = Some(JustificationShapeVariants {
+        self.data.line_shape_variants = Some(LineShapeVariants {
             original,
             expanded,
             original_glyph_len,
@@ -271,13 +253,9 @@ pub(crate) struct SourceSuffixShaper<B: Brush> {
 
 impl<B: Brush> SourceSuffixShaper<B> {
     pub(crate) fn new(data: &crate::layout::data::LayoutData<B>) -> Self {
-        let mut scratch = crate::layout::data::LayoutData::default();
-        scratch.styles.clone_from(&data.styles);
-        scratch.font_metric_advance_quantization = data.font_metric_advance_quantization;
-        scratch.nominal_font_metric_line_breaks = data.nominal_font_metric_line_breaks;
         Self {
             context: super::ShapeContext::default(),
-            scratch,
+            scratch: super::source::source_scratch(data),
         }
     }
 

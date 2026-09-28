@@ -36,5 +36,20 @@ limits for subsequent glyph selection. Optional-ligature expansion uses
 the same source record with its own feature policy. No policy changes
 the initial context limits.
 
-Boundary selection and source retention are available. The implementation does
-not select glyphs or fit lines with these inputs.
+`BreakLines` selects the visual boundaries before it checks the line advance.
+Each candidate keeps its source endpoint and glyph shapes together.
+Soft line boundaries split the shaped range but retain glyph context.
+Box edges and `push_shaping_boundary` end that context.
+
+Line selection retains the feature policy for character spacing.
+A new width or `BreakLines::revert` can change the selected glyphs.
+Each line retains the glyphs used for its advance.
+
+`safe_concat_boundaries` limits the source ranges that require new glyphs.
+`PhysicalShaper` stores these ranges for reuse. Other ranges retain their glyphs.
+
+`calculate_content_widths` uses the same glyph selection for minimum and maximum
+widths. The source layout does not change. Emergency breaks from `break-word`
+do not change the minimum width. Breaks from `anywhere` can decrease it.
+
+The consumer integration requires more work.

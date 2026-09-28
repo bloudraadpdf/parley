@@ -107,15 +107,36 @@ impl CandidateMutations {
 }
 
 pub(crate) struct LineShapeCandidate {
-    state: BreakerState,
-    line: LineData,
-    items: Vec<LineItemData>,
+    pub(super) state: BreakerState,
+    pub(super) line: LineData,
+    pub(super) items: Vec<LineItemData>,
     mutations: CandidateMutations,
     done: bool,
+    pub(super) physical_clusters: Option<Vec<ClusterData>>,
+}
+
+impl LineShapeCandidate {
+    pub(super) fn source_end<B: Brush>(
+        &self,
+        data: &LayoutData<B>,
+    ) -> super::source_probe::SourceCursor {
+        super::source_probe::SourceCursor::at(data, self.state.item_idx, self.state.cluster_idx)
+    }
 }
 
 impl<B: Brush> BreakLines<'_, B> {
     pub(crate) fn preview_shape_candidate(
+        &mut self,
+        max_advance: f32,
+        tab_origin: LineTabOrigin,
+    ) -> Option<LineShapeCandidate> {
+        if self.physical_shaper.is_some() && self.candidate_mutations.is_none() {
+            return self.preview_physical_candidate(max_advance, tab_origin);
+        }
+        self.preview_natural_candidate(max_advance, tab_origin)
+    }
+
+    pub(super) fn preview_natural_candidate(
         &mut self,
         max_advance: f32,
         tab_origin: LineTabOrigin,
@@ -125,7 +146,7 @@ impl<B: Brush> BreakLines<'_, B> {
         })
     }
 
-    fn preview_shape_candidate_with(
+    pub(super) fn preview_shape_candidate_with(
         &mut self,
         measure: impl FnOnce(&mut Self) -> Option<()>,
     ) -> Option<LineShapeCandidate> {
@@ -144,6 +165,7 @@ impl<B: Brush> BreakLines<'_, B> {
             items: self.lines.line_items.split_off(item_start),
             mutations,
             done: self.done,
+            physical_clusters: None,
         });
         self.lines.lines.truncate(line_start);
         self.lines.line_items.truncate(item_start);
@@ -154,8 +176,14 @@ impl<B: Brush> BreakLines<'_, B> {
         candidate
     }
 
-    pub(crate) fn commit_shape_candidate(&mut self, candidate: LineShapeCandidate) -> (f32, f32) {
+    pub(crate) fn commit_shape_candidate(
+        &mut self,
+        mut candidate: LineShapeCandidate,
+    ) -> (f32, f32) {
         self.prev_state = Some(self.state.clone());
+        if let Some(clusters) = candidate.physical_clusters.take() {
+            self.layout.data.clusters = clusters;
+        }
         candidate.mutations.apply(&mut self.layout.data);
         if let Some(candidates) = &mut self.shape_candidates {
             candidates.remember(&self.layout.data, &candidate.items);
@@ -176,7 +204,7 @@ impl<B: Brush> BreakLines<'_, B> {
 pub(super) struct ShapeCandidateBuffers<B: Brush> {
     other: Vec<ClusterData>,
     selected: Vec<ClusterData>,
-    expanded: bool,
+    pub(super) expanded: bool,
     active_suffix: Option<core::ops::Range<usize>>,
     suffixes: alloc::collections::BTreeMap<usize, Vec<ClusterData>>,
     suffix_shaper: Option<crate::shape::justification::SourceSuffixShaper<B>>,
@@ -184,7 +212,16 @@ pub(super) struct ShapeCandidateBuffers<B: Brush> {
 
 impl<B: Brush> ShapeCandidateBuffers<B> {
     pub(super) fn new(data: &mut LayoutData<B>) -> Option<Self> {
-        let variants = data.justification_shape_variants.as_ref()?;
+        if data.line_shape_variants.is_none() && !data.inline_owner_shaping.is_empty() {
+            data.line_shape_variants = Some(crate::shape::justification::LineShapeVariants {
+                original: data.clusters.clone(),
+                expanded: data.clusters.clone(),
+                original_glyph_len: data.glyphs.len(),
+                variant_glyph_len: data.glyphs.len(),
+                policy: crate::JustificationShapePolicy::default(),
+            });
+        }
+        let variants = data.line_shape_variants.as_ref()?;
         data.clusters.clone_from(&variants.original);
         data.glyphs.truncate(variants.variant_glyph_len);
         Some(Self {
@@ -211,7 +248,7 @@ impl<B: Brush> ShapeCandidateBuffers<B> {
         cluster_index: usize,
     ) {
         let variants = data
-            .justification_shape_variants
+            .line_shape_variants
             .as_ref()
             .expect("retained variants");
         if let Some(range) = self.active_suffix.take() {
@@ -289,20 +326,31 @@ impl<B: Brush> BreakLines<'_, B> {
 
     fn prepare_natural_shape(&mut self) {
         self.select_shape(false);
-        self.shape_candidates
-            .as_mut()
-            .expect("shape alternatives")
-            .prepare_source_start(
-                &mut self.layout.data,
-                self.state.item_idx,
-                self.state.cluster_idx,
-            );
+        if self.physical_shaper.is_none() {
+            self.shape_candidates
+                .as_mut()
+                .expect("shape alternatives")
+                .prepare_source_start(
+                    &mut self.layout.data,
+                    self.state.item_idx,
+                    self.state.cluster_idx,
+                );
+        }
     }
 
     pub(super) fn break_length_with_original_shape(&mut self, max_chars: u32) -> Option<()> {
         self.prepare_natural_shape();
-        let candidate =
+        let mut candidate =
             self.preview_shape_candidate_with(|breaker| breaker.break_next_with_length(max_chars))?;
+        if self.physical_shaper.is_some() {
+            let original = self.layout.data.clusters.clone();
+            self.shape_physical_prefix(&candidate, false);
+            candidate = self
+                .preview_shape_candidate_with(|breaker| breaker.break_next_with_length(max_chars))
+                .expect("same retained source count");
+            candidate.physical_clusters =
+                Some(core::mem::replace(&mut self.layout.data.clusters, original));
+        }
         self.commit_shape_candidate(candidate);
         Some(())
     }
@@ -317,7 +365,7 @@ impl<B: Brush> BreakLines<'_, B> {
         let policy = self
             .layout
             .data
-            .justification_shape_variants
+            .line_shape_variants
             .as_ref()
             .expect("shape policy")
             .policy;
@@ -329,7 +377,7 @@ impl<B: Brush> BreakLines<'_, B> {
         self.reject_terminal_candidate = !self
             .layout
             .data
-            .justification_shape_variants
+            .line_shape_variants
             .as_ref()
             .expect("shape policy")
             .policy
@@ -366,7 +414,7 @@ impl<B: Brush> BreakLines<'_, B> {
         let variants = self
             .layout
             .data
-            .justification_shape_variants
+            .line_shape_variants
             .as_ref()
             .expect("shape alternatives");
         let candidates = self.shape_candidates.as_mut().expect("shape candidates");

@@ -11,7 +11,7 @@ use crate::layout::{
 };
 use crate::{BaseDirection, InlineBox, InlineBoxBreakAffinity};
 
-fn owner(
+pub(super) fn owner(
     text: Range<usize>,
     side: PhysicalLineEdge,
     placement: ShapingEdgePlacement,

@@ -39,8 +39,11 @@ use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WordBreak};
 use core::ops::Range;
 
 mod justification;
+mod physical;
+mod source_probe;
 pub(crate) use justification::line_needs_justification_shape;
 use justification::{CandidateMutations, CommittedShape, ShapeCandidateBuffers};
+use source_probe::{ProbedBreak, SourceCursor, SourceProbe};
 
 #[derive(Default)]
 struct LineLayout {
@@ -765,6 +768,8 @@ pub struct BreakLines<'a, B: Brush> {
     shape_candidates: Option<ShapeCandidateBuffers<B>>,
     reject_terminal_candidate: bool,
     previous_shape_commit: Option<CommittedShape>,
+    source_probe: Option<SourceProbe>,
+    physical_shaper: Option<crate::shape::physical::PhysicalShaper<B>>,
 }
 
 macro_rules! commit_current_line {
@@ -797,6 +802,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) if edge.is_end())
         });
         let uniform_letter_spacing = uniform_letter_spacing(&layout.data);
+        let physical_shaper = (!layout.data.inline_owner_shaping.is_empty())
+            .then(|| crate::shape::physical::PhysicalShaper::new(&layout.data));
         Self {
             layout,
             lines,
@@ -811,6 +818,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             shape_candidates,
             reject_terminal_candidate: false,
             previous_shape_commit: None,
+            source_probe: None,
+            physical_shaper,
         }
     }
 
@@ -1017,22 +1026,43 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }};
         }
 
+        macro_rules! try_commit_emergency_candidate {
+            ($previous:expr) => {{
+                let previous = $previous;
+                self.state.line = previous.state;
+                if commit_current_line!(self, max_advance, line_indent, BreakReason::Emergency) {
+                    self.state.item_idx = previous.item_idx;
+                    self.state.run_idx = previous.run_idx;
+                    self.state.cluster_idx = previous.cluster_idx;
+                    true
+                } else {
+                    false
+                }
+            }};
+        }
+
+        macro_rules! commit_probed_candidate {
+            () => {
+                if let Some(candidate) = self.source_break_candidate() {
+                    let committed = match candidate {
+                        ProbedBreak::Regular(candidate) => try_commit_regular_candidate!(candidate),
+                        ProbedBreak::Emergency(previous) => {
+                            try_commit_emergency_candidate!(previous)
+                        }
+                    };
+                    if committed {
+                        return self.start_new_line();
+                    }
+                }
+            };
+        }
+
         macro_rules! commit_overflow_candidate {
             () => {{
                 if let Some(candidate) = self.state.take_overflow_candidate() {
                     try_commit_regular_candidate!(candidate)
                 } else if let Some(previous) = self.state.emergency_boundary.take() {
-                    let previous = previous.0;
-                    self.state.line = previous.state;
-                    if commit_current_line!(self, max_advance, line_indent, BreakReason::Emergency)
-                    {
-                        self.state.item_idx = previous.item_idx;
-                        self.state.run_idx = previous.run_idx;
-                        self.state.cluster_idx = previous.cluster_idx;
-                        true
-                    } else {
-                        false
-                    }
+                    try_commit_emergency_candidate!(previous.0)
                 } else {
                     false
                 }
@@ -1058,6 +1088,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Iterate over remaining runs in the Layout
         let item_count = self.layout.data.items.len();
         while self.state.item_idx < item_count {
+            if self.prefix_ends_at(SourceCursor::BeforeItem(self.state.item_idx)) {
+                return self.commit_source_prefix(max_advance, line_indent);
+            }
+            commit_probed_candidate!();
             let item = &self.layout.data.items[self.state.item_idx];
 
             // println!(
@@ -1175,6 +1209,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             {
                                 if let Some(width) = following_atomic_width {
                                     let contribution = edge_width + width;
+                                    if self.probes_current_break()
+                                        && self.state.line.has_content_advance()
+                                    {
+                                        self.state.mark_line_break_opportunity(
+                                            RegularBreakKind::Ordinary,
+                                        );
+                                        commit_probed_candidate!();
+                                    }
                                     if self.state.line.has_content_advance()
                                         && !self.advance_contribution_fits(
                                             contribution,
@@ -1242,6 +1284,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let height = inline_box.height();
                     if break_affinity.allows_break_before() {
                         finish_source_fragment!();
+                        if self.probes_current_break()
+                            && self.state.line.has_content_advance()
+                            && self.state.line.text_wrap_mode == TextWrapMode::Wrap
+                        {
+                            self.state
+                                .mark_line_break_opportunity(RegularBreakKind::Ordinary);
+                            commit_probed_candidate!();
+                        }
                     }
                     if break_affinity == InlineBoxBreakAffinity::SourceText
                         && self.state.line.text_wrap_mode == TextWrapMode::Wrap
@@ -1395,6 +1445,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Iterate over remaining clusters in the Run
                     while self.state.cluster_idx < cluster_end {
+                        if self.prefix_ends_at(SourceCursor::WithinText {
+                            item: self.state.item_idx,
+                            cluster: self.state.cluster_idx,
+                        }) {
+                            return self.commit_source_prefix(max_advance, line_indent);
+                        }
                         let cluster = run
                             .get(self.state.cluster_idx - run_data.cluster_range.start)
                             .unwrap();
@@ -1623,7 +1679,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             }
                         } else if
                         // This text can contribute "emergency" line breaks.
-                        style.overflow_wrap != OverflowWrap::Normal && !is_ligature_continuation
+                        self.layout.data.line_break_purpose.allows_emergency_wrap(style.overflow_wrap) && !is_ligature_continuation
                         && cluster.data.flags & ClusterData::GRAPHEME_START != 0
                         && text_wrap_mode == TextWrapMode::Wrap
                         // If we're at the start of the line, this particular cluster will never fit, so it's not a valid emergency break opportunity.
@@ -1632,6 +1688,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         {
                             self.state.mark_emergency_break_opportunity();
                         }
+
+                        commit_probed_candidate!();
 
                         // If current cluster is the start of a ligature, then advance state to include
                         // the remaining clusters that make up the ligature
@@ -1649,7 +1707,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             (advance, fit_advance),
                             self.layout.line_start_fit_advance(byte_index),
                         );
-                        if is_ligature_start {
+                        if is_ligature_start
+                            && !self.source_probe.is_some_and(SourceProbe::is_prefix)
+                        {
                             while let Some(cluster) = run
                                 .get(self.state.cluster_idx + 1 - run_data.cluster_range.start)
                                 .filter(|_| self.state.cluster_idx + 1 < cluster_end)
@@ -1827,7 +1887,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 }
                             }
                         }
-                        if style.overflow_wrap != OverflowWrap::Normal
+                        if self
+                            .layout
+                            .data
+                            .line_break_purpose
+                            .allows_emergency_wrap(style.overflow_wrap)
                             && text_wrap_mode == TextWrapMode::Wrap
                             && matches!(line_fit, LineFit::Fits)
                             && self

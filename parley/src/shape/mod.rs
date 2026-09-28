@@ -28,6 +28,7 @@ use fontique::{self, Query, QueryFamily, QueryFont};
 
 mod cache;
 pub(crate) mod justification;
+pub(crate) mod physical;
 mod segment;
 pub(crate) mod source;
 

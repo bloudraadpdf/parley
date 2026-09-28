@@ -130,6 +130,20 @@ fn office_layout_with_box(
     disable: bool,
     inline_box: Option<crate::InlineBox>,
 ) -> crate::Layout<ColorBrush> {
+    office_layout_configured(context, fonts, text, disable, |builder| {
+        if let Some(inline_box) = inline_box {
+            builder.push_inline_box(inline_box);
+        }
+    })
+}
+
+pub(super) fn office_layout_configured(
+    context: &mut LayoutContext<ColorBrush>,
+    fonts: &mut crate::FontContext,
+    text: &str,
+    disable: bool,
+    configure: impl FnOnce(&mut crate::RangedBuilder<'_, ColorBrush>),
+) -> crate::Layout<ColorBrush> {
     let features = [crate::FontFeature {
         tag: crate::setting::Tag::from_bytes(*b"liga"),
         value: 0,
@@ -143,9 +157,7 @@ fn office_layout_with_box(
     if disable {
         builder.push_default(StyleProperty::FontFeatures(features.as_slice().into()));
     }
-    if let Some(inline_box) = inline_box {
-        builder.push_inline_box(inline_box);
-    }
+    configure(&mut builder);
     builder.build(text)
 }
 
@@ -218,7 +230,7 @@ fn alternative_advances_choose_the_line_boundary() {
     assert_eq!(line_glyph_count(&layout, 1), 9);
 }
 
-fn prepare(
+pub(super) fn prepare(
     context: &mut LayoutContext<ColorBrush>,
     layout: &mut crate::Layout<ColorBrush>,
     boundaries: &[usize],

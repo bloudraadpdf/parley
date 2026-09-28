@@ -8,7 +8,7 @@ use super::{LayoutData, LayoutItemKind, Line, LineItemData, PhysicalLineEdge};
 use crate::Brush;
 
 /// The fragments on which a nonzero physical edge interrupts shaping.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShapingEdgePlacement {
     /// The outermost fragment on the owner's first line.
     FirstLine,
@@ -19,7 +19,7 @@ pub enum ShapingEdgePlacement {
 }
 
 /// A physical edge with at least one nonzero margin, border or padding component.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct InlineShapingEdge {
     /// Side of the visual fragment in the native inline axis.
     pub side: PhysicalLineEdge,
@@ -28,7 +28,7 @@ pub struct InlineShapingEdge {
 }
 
 /// Source membership and physical shaping edges of a non-atomic inline owner.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct InlineOwnerShaping {
     /// UTF-8 source range belonging to the owner and its descendants.
     pub text: Range<usize>,

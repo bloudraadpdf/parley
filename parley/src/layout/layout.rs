@@ -130,7 +130,7 @@ impl<B: Brush> Layout<B> {
     pub(crate) fn clear_justification_shape_selection(&mut self) {
         unjustify(&mut self.data);
         self.data.restore_line_end_letter_spacing();
-        if let Some(variants) = self.data.justification_shape_variants.take() {
+        if let Some(variants) = self.data.line_shape_variants.take() {
             self.data.clusters = variants.original;
             self.data.glyphs.truncate(variants.original_glyph_len);
         }
@@ -165,7 +165,7 @@ impl<B: Brush> Layout<B> {
     pub fn set_source_cluster_fit_advances(&mut self, mut advances: Vec<SourceClusterFitAdvance>) {
         let policy = self
             .data
-            .justification_shape_variants
+            .line_shape_variants
             .as_ref()
             .map(|variants| variants.policy);
         self.clear_justification_shape_selection();
@@ -382,6 +382,18 @@ impl<B: Brush> Layout<B> {
     /// This method currently may not return the correct results for
     /// mixed-direction text.
     pub fn calculate_content_widths(&self) -> ContentWidths {
+        if !self.data.inline_owner_shaping.is_empty() {
+            let mut measured = self.clone();
+            measured.clear_justification_shape_selection();
+            measured.set_line_break_purpose(super::LineBreakPurpose::IntrinsicSizing);
+            measured.break_all_lines(None);
+            let max = measured.width();
+            measured.break_all_lines(Some(0.0));
+            return ContentWidths {
+                min: measured.width(),
+                max,
+            };
+        }
         self.data.calculate_content_widths()
     }
 
