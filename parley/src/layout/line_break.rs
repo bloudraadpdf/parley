@@ -1549,6 +1549,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         let allows_fallback =
                             self.layout.data.line_break_purpose == LineBreakPurpose::LineLayout;
+                        let registered_discretionary = self
+                            .layout
+                            .data
+                            .discretionary_breaks
+                            .binary_search_by_key(&byte_index, |entry| entry.byte_index)
+                            .ok()
+                            .map(|index| self.layout.data.discretionary_breaks[index]);
                         let has_soft_break_opportunity = !is_newline && match boundary_override {
                             Some(LineBreakOverrideDisposition::Suppress) => false,
                             Some(LineBreakOverrideDisposition::OverflowOpportunity) => {
@@ -1564,19 +1571,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 ((soft_break_policy == SoftBreakPolicy::Anywhere
                                     && cluster.data.flags & ClusterData::GRAPHEME_START != 0)
                                     || boundary == Boundary::Line
+                                    || registered_discretionary.is_some()
                                     || preserved_space_after_zwsp)
                                     && !break_after_preserved_space_after_zwsp
                             }
                         };
                         let discretionary = has_soft_break_opportunity
-                            .then(|| {
-                                self.layout
-                                    .data
-                                    .discretionary_breaks
-                                    .binary_search_by_key(&byte_index, |entry| entry.byte_index)
-                                    .ok()
-                                    .map(|index| self.layout.data.discretionary_breaks[index])
-                            })
+                            .then_some(registered_discretionary)
                             .flatten();
                         let has_soft_break_opportunity = has_soft_break_opportunity
                             && (allows_fallback

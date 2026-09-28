@@ -500,3 +500,27 @@ fn source_omission_applies_only_at_a_selected_line_start() {
     assert!(retained.advance() > 0.0);
     assert!(retained.glyphs().count() > 0);
 }
+
+#[test]
+fn registered_discretionary_break_precedes_a_punctuation_cluster() {
+    use crate::layout::{DiscretionaryBreakShape, LineBreakOverride};
+
+    let text = "tú\u{00ad}’àn";
+    let boundary = "tú\u{00ad}".len();
+    let mut hyphen = roboto_layout("-");
+    hyphen.break_all_lines(None);
+    let mut layout = roboto_layout(text);
+    layout.set_discretionary_break_shapes(vec![
+        DiscretionaryBreakShape::new(boundary, None, "-".into(), hyphen).unwrap(),
+    ]);
+    layout.set_conditional_line_start_omissions(vec![boundary..boundary + "’".len()]);
+    let width = unwrapped_advance("tú-") + 0.01;
+    layout.break_all_lines(Some(width));
+    assert_eq!(layout.lines().count(), 2);
+    assert!(layout.get(0).unwrap().ends_at_discretionary_break());
+    assert_eq!(layout.get(1).unwrap().text_range().start, boundary);
+
+    layout.set_line_break_overrides(vec![LineBreakOverride::suppress(boundary)]);
+    layout.break_all_lines(Some(width));
+    assert_eq!(layout.lines().count(), 1);
+}
