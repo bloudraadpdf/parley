@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use crate::{
-    Brush, FontFeature, FontVariation,
+    Brush, FontFeature,
     analysis::CharInfo,
     resolve::{ResolveContext, ResolvedStyle},
 };
@@ -46,25 +46,9 @@ impl SourceFontFeatures {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DeferredJustificationShape {
-    pub(crate) run_index: usize,
-    pub(crate) prepared: Option<PreparedJustificationShape>,
-    pub(crate) context: Range<usize>,
-    pub(crate) script: icu_properties::props::Script,
-    pub(crate) language: Option<harfrust::Language>,
-    pub(crate) variations: Option<Vec<FontVariation>>,
-    pub(crate) features: Vec<harfrust::Feature>,
+    pub(crate) source: alloc::sync::Arc<super::source::DeferredSourceShape>,
+    pub(crate) prepared: Option<super::source::PreparedSourceShape>,
     pub(crate) alternatives: Vec<SourceFontFeatures>,
-    pub(crate) character_infos: Vec<(CharInfo, u16)>,
-    pub(crate) character_offsets: Vec<usize>,
-    pub(crate) safe_concat_boundaries: Vec<usize>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PreparedJustificationShape {
-    pub(crate) clusters: Vec<crate::layout::data::ClusterData>,
-    pub(crate) glyphs: Vec<crate::Glyph>,
-    pub(crate) source: Range<usize>,
-    pub(crate) safe_concat_boundaries: Vec<usize>,
 }
 
 impl DeferredJustificationShape {
@@ -74,7 +58,7 @@ impl DeferredJustificationShape {
         clusters: &[crate::layout::data::ClusterData],
         has_opportunity: impl Fn(Range<usize>) -> bool,
     ) -> Vec<harfrust::Feature> {
-        let mut features = self.features.clone();
+        let mut features = self.source.features.clone();
         let mut cursor = 0;
         while cursor < clusters.len() {
             let start = cursor;
@@ -113,10 +97,12 @@ impl DeferredJustificationShape {
                     continue;
                 }
                 let first = self
+                    .source
                     .character_offsets
                     .binary_search(&(start - run.text_range.start))
                     .expect("retained character boundary");
                 let last = self
+                    .source
                     .character_offsets
                     .binary_search(&(end - run.text_range.start))
                     .expect("retained character boundary");
@@ -145,7 +131,7 @@ impl<B: Brush> crate::LayoutContext<B> {
         }
         let source = layout
             .data
-            .justification_source_text
+            .shaping_source_text
             .as_ref()
             .expect("retained shaping text");
         let mut scratch = crate::layout::data::LayoutData::<B>::default();
@@ -154,7 +140,7 @@ impl<B: Brush> crate::LayoutContext<B> {
         scratch.nominal_font_metric_line_breaks = layout.data.nominal_font_metric_line_breaks;
         for index in 0..layout.data.deferred_justification_shapes.len() {
             let deferred = &layout.data.deferred_justification_shapes[index];
-            let run = &layout.data.runs[deferred.run_index];
+            let run = &layout.data.runs[deferred.source.run_index];
             let features = deferred.eligible_features(
                 run,
                 &layout.data.clusters[run.cluster_range.clone()],
@@ -167,13 +153,14 @@ impl<B: Brush> crate::LayoutContext<B> {
                         .is_some()
                 },
             );
-            let prepared = (features != deferred.features).then(|| {
-                deferred.shape_source_range(
+            let prepared = (features != deferred.source.features).then(|| {
+                deferred.source.shape_source_range(
                     &mut self.scx,
                     &mut scratch,
                     &layout.data,
                     source,
                     run.text_range.clone(),
+                    deferred.source.context.clone(),
                     &features,
                 )
             });
@@ -239,7 +226,7 @@ impl<B: Brush> crate::Layout<B> {
             let Some(prepared) = &deferred.prepared else {
                 continue;
             };
-            let run = &self.data.runs[deferred.run_index];
+            let run = &self.data.runs[deferred.source.run_index];
             let glyph_offset = self.data.glyphs.len() - run.glyph_start;
             assert_eq!(
                 run.cluster_range.len(),
@@ -277,115 +264,6 @@ impl<B: Brush> crate::Layout<B> {
     }
 }
 
-/// Safe source boundaries are valid only with `PRODUCE_UNSAFE_TO_CONCAT` enabled.
-pub(super) fn safe_concat_boundaries(
-    glyphs: &harfrust::GlyphBuffer,
-    text: &str,
-    source_start: usize,
-) -> Vec<usize> {
-    let offsets = text
-        .char_indices()
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-    let mut boundaries = glyphs
-        .glyph_infos()
-        .chunk_by(|left, right| left.cluster == right.cluster)
-        .filter(|group| {
-            group
-                .iter()
-                .all(|glyph| !glyph.flags().is_unsafe_to_concat())
-        })
-        .map(|group| source_start + offsets[group[0].cluster as usize])
-        .collect::<Vec<_>>();
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    boundaries
-}
-
-impl DeferredJustificationShape {
-    #[allow(clippy::too_many_arguments)]
-    fn shape_source_range<B: Brush>(
-        &self,
-        context: &mut super::ShapeContext,
-        scratch: &mut crate::layout::data::LayoutData<B>,
-        data: &crate::layout::data::LayoutData<B>,
-        source: &str,
-        range: Range<usize>,
-        features: &[harfrust::Feature],
-    ) -> PreparedJustificationShape {
-        let run = &data.runs[self.run_index];
-        let text = &source[range.clone()];
-        let first = self
-            .character_offsets
-            .binary_search(&(range.start - run.text_range.start))
-            .expect("source character");
-        let last = self
-            .character_offsets
-            .binary_search(&(range.end - run.text_range.start))
-            .expect("source character");
-        let infos = &self.character_infos[first..last];
-        let analysis = crate::analysis::AnalysisDataSources::new();
-        let script = crate::convert::script_to_fontique(self.script, &analysis);
-        let shaped = context.shape_segment(super::segment::SegmentShape {
-            font: data.fonts[run.font_index].clone(),
-            synthesis: run.synthesis,
-            variations: self.variations.as_deref(),
-            features,
-            size: run.font_size,
-            direction: if run.bidi_level & 1 == 0 {
-                harfrust::Direction::LeftToRight
-            } else {
-                harfrust::Direction::RightToLeft
-            },
-            script: crate::convert::script_to_harfrust(script),
-            language: self.language.clone(),
-            text,
-            before: &source[self.context.start..range.start],
-            after: &source[range.end..self.context.end],
-            produce_concat_boundaries: true,
-        });
-        scratch.push_run(
-            data.fonts[run.font_index].clone(),
-            run.font_size,
-            run.font_attrs,
-            run.synthesis,
-            &shaped.glyphs,
-            self.script,
-            run.bidi_level,
-            run.paragraph_level,
-            run.paragraph_has_strong_direction,
-            infos[0].1,
-            run.word_spacing,
-            run.letter_spacing,
-            text,
-            infos,
-            range.clone(),
-            &shaped.coords,
-            &[],
-        );
-        scratch.finish(
-            analysis
-                .grapheme_boundaries(text)
-                .map(|boundary| range.start + boundary),
-        );
-        let mut clusters = core::mem::take(&mut scratch.clusters);
-        for cluster in &mut clusters {
-            cluster.text_offset += range.start - run.text_range.start;
-        }
-        let result = PreparedJustificationShape {
-            clusters,
-            glyphs: core::mem::take(&mut scratch.glyphs),
-            source: range.clone(),
-            safe_concat_boundaries: safe_concat_boundaries(&shaped.glyphs, text, range.start),
-        };
-        scratch.runs.clear();
-        scratch.items.clear();
-        scratch.coords.clear();
-        context.unicode_buffer = Some(shaped.glyphs.clear());
-        result
-    }
-}
-
 pub(crate) struct SourceSuffixShaper<B: Brush> {
     context: super::ShapeContext,
     scratch: crate::layout::data::LayoutData<B>,
@@ -408,18 +286,18 @@ impl<B: Brush> SourceSuffixShaper<B> {
         data: &crate::layout::data::LayoutData<B>,
         run_index: usize,
         source_start: usize,
-    ) -> PreparedJustificationShape {
+    ) -> super::source::PreparedSourceShape {
         let index = data
             .deferred_justification_shapes
-            .binary_search_by_key(&run_index, |shape| shape.run_index)
+            .binary_search_by_key(&run_index, |shape| shape.source.run_index)
             .expect("retained optional shaping run");
         let deferred = &data.deferred_justification_shapes[index];
         let run = &data.runs[run_index];
         let source = data
-            .justification_source_text
+            .shaping_source_text
             .as_ref()
             .expect("retained shaping text");
-        let boundaries = &deferred.safe_concat_boundaries;
+        let boundaries = &deferred.source.safe_concat_boundaries;
         let first = boundaries.partition_point(|boundary| *boundary <= source_start);
         for offset in first..=boundaries.len() {
             let splice = boundaries
@@ -430,13 +308,14 @@ impl<B: Brush> SourceSuffixShaper<B> {
                 .get(offset + 1)
                 .copied()
                 .unwrap_or(run.text_range.end);
-            let mut shape = deferred.shape_source_range(
+            let mut shape = deferred.source.shape_source_range(
                 &mut self.context,
                 &mut self.scratch,
                 data,
                 source,
                 source_start..end,
-                &deferred.features,
+                deferred.source.context.clone(),
+                &deferred.source.features,
             );
             if splice == run.text_range.end
                 || shape.safe_concat_boundaries.binary_search(&splice).is_ok()

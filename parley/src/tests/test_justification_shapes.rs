@@ -38,10 +38,10 @@ fn alternative_features_retain_original_glyphs_and_source_ranges() {
     assert_eq!(glyphs, 4);
     assert_eq!(layout.data.deferred_justification_shapes.len(), 1);
     let candidate = &layout.data.deferred_justification_shapes[0];
-    assert_eq!(candidate.context, 0..text.len());
+    assert_eq!(candidate.source.context, 0..text.len());
     assert_eq!(candidate.alternatives.len(), 1);
     assert_eq!(candidate.alternatives[0].source, 2..4);
-    assert_eq!(candidate.character_infos.len(), text.chars().count());
+    assert_eq!(candidate.source.character_infos.len(), text.chars().count());
 }
 
 #[test]
@@ -684,6 +684,7 @@ fn internal_ligature_cut_reshapes_default_suffix_on_unexpanded_last_line() {
         });
         let baseline_glyphs = layout.data.glyphs.len();
         let boundary_limit = layout.data.deferred_justification_shapes[0]
+            .source
             .safe_concat_boundaries
             .iter()
             .copied()

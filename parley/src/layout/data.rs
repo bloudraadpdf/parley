@@ -62,9 +62,12 @@ pub(crate) enum TerminalWhitespaceDisposition {
     ConditionallyHanging,
 }
 
+/// A physical side in the native inline axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PhysicalLineEdge {
+pub enum PhysicalLineEdge {
+    /// The side with the lower inline coordinate.
     Left,
+    /// The side with the higher inline coordinate.
     Right,
 }
 
@@ -1247,9 +1250,12 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) glyphs: Vec<Glyph>,
     pub(crate) justification_shape_variants:
         Option<crate::shape::justification::JustificationShapeVariants>,
-    pub(crate) justification_source_text: Option<alloc::sync::Arc<str>>,
+    pub(crate) shaping_source_text: Option<alloc::sync::Arc<str>>,
     pub(crate) deferred_justification_shapes:
         Vec<crate::shape::justification::DeferredJustificationShape>,
+    pub(crate) inline_owner_shaping: Vec<super::InlineOwnerShaping>,
+    pub(crate) deferred_physical_shapes:
+        Vec<alloc::sync::Arc<crate::shape::source::DeferredSourceShape>>,
 
     // Output of line breaking
     pub(crate) lines: Vec<LineData>,
@@ -1312,9 +1318,11 @@ impl<B: Brush> Default for LayoutData<B> {
             items: Vec::new(),
             clusters: Vec::new(),
             glyphs: Vec::new(),
-            justification_source_text: None,
+            shaping_source_text: None,
             justification_shape_variants: None,
             deferred_justification_shapes: Vec::new(),
+            inline_owner_shaping: Vec::new(),
+            deferred_physical_shapes: Vec::new(),
             lines: Vec::new(),
             line_items: Vec::new(),
             alignment: None,
@@ -1542,9 +1550,11 @@ impl<B: Brush> LayoutData<B> {
         self.items.clear();
         self.clusters.clear();
         self.glyphs.clear();
-        self.justification_source_text = None;
+        self.shaping_source_text = None;
         self.justification_shape_variants = None;
         self.deferred_justification_shapes.clear();
+        self.inline_owner_shaping.clear();
+        self.deferred_physical_shapes.clear();
         self.lines.clear();
         self.line_items.clear();
         self.is_aligned_justified = false;

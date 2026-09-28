@@ -14,6 +14,7 @@ mod justification;
 mod letter_spacing;
 mod line;
 mod line_break;
+mod physical_shaping;
 mod run;
 
 // TODO - Add to allowed lint set?
@@ -34,7 +35,7 @@ pub use cluster::{Affinity, Cluster, ClusterPath, ClusterSide};
 pub use data::{
     BreakReason, DiscretionaryBreak, DiscretionaryBreakCondition, DiscretionaryFitAdvance,
     LineBreakOverride, LineBreakPurpose, LineStartFitAdvance, NormalSoftWrapSelection,
-    SourceClusterFitAdvance,
+    PhysicalLineEdge, SourceClusterFitAdvance,
 };
 pub use glyph::Glyph;
 pub use justification::{JustificationOpportunity, JustificationUnit};
@@ -44,6 +45,7 @@ pub use line::{
     GlyphRun, HangingWhitespace, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem,
 };
 pub use line_break::{BreakLines, CommittedLine, LineTabOrigin};
+pub use physical_shaping::{InlineOwnerShaping, InlineShapingEdge, ShapingEdgePlacement};
 pub use run::{Run, RunMetrics};
 
 pub(crate) use data::{LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData};

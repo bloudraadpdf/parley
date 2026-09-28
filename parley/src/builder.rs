@@ -60,6 +60,11 @@ impl<B: Brush> RangedBuilder<'_, B> {
         self.lcx.shaping_boundaries.push(byte_offset);
     }
 
+    /// Retains source shaping for a physical inline owner's fragment edges.
+    pub fn push_inline_owner_shaping(&mut self, owner: crate::layout::InlineOwnerShaping) {
+        self.lcx.inline_owner_shaping.push(owner);
+    }
+
     pub fn build_into(self, layout: &mut Layout<B>, text: impl AsRef<str>) {
         // Apply RangedStyleBuilder styles directly to style-table/style-run state.
         self.lcx
@@ -285,7 +290,9 @@ fn build_into_layout<B: Brush>(
 
     crate::analysis::analyze_text(lcx, text);
     assert!(
-        lcx.shaping_boundaries.iter().all(|offset| text.is_char_boundary(*offset)),
+        lcx.shaping_boundaries
+            .iter()
+            .all(|offset| text.is_char_boundary(*offset)),
         "shaping boundaries must be UTF-8 positions in the source text"
     );
 
@@ -296,6 +303,25 @@ fn build_into_layout<B: Brush>(
     layout.data.nominal_font_metric_line_breaks = lcx.nominal_font_metric_line_breaks;
     layout.data.base_level = lcx.bidi.base_level();
     layout.data.text_len = text.len();
+    for owner in &lcx.inline_owner_shaping {
+        assert!(
+            owner.text.start <= owner.text.end
+                && text.is_char_boundary(owner.text.start)
+                && text.is_char_boundary(owner.text.end),
+            "inline owners must use UTF-8 source ranges"
+        );
+        assert!(
+            owner
+                .inline_boxes
+                .iter()
+                .all(|id| lcx.inline_boxes.iter().any(|inline| inline.id == *id)),
+            "inline owner boxes must occur in the source layout"
+        );
+    }
+    layout
+        .data
+        .inline_owner_shaping
+        .clone_from(&lcx.inline_owner_shaping);
 
     let mut char_index = 0;
     for style_run in &lcx.style_runs {

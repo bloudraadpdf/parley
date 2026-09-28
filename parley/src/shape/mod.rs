@@ -29,6 +29,7 @@ use fontique::{self, Query, QueryFamily, QueryFont};
 mod cache;
 pub(crate) mod justification;
 mod segment;
+pub(crate) mod source;
 
 pub(crate) struct ShapeContext {
     shape_data_cache: LruCache<cache::ShapeDataKey, harfrust::ShaperData>,
@@ -142,8 +143,11 @@ pub(crate) fn shape_text<'a, B: Brush>(
     let mut joining_barriers = shaping_boundaries.to_vec();
     joining_barriers.extend(inline_boxes.iter().filter_map(|inline_box| {
         (text.is_char_boundary(inline_box.index)
-            && matches!(inline_box.shaping_participation(), InlineBoxShapingParticipation::InterveningInlineAdvance))
-            .then_some(inline_box.index)
+            && matches!(
+                inline_box.shaping_participation(),
+                InlineBoxShapingParticipation::InterveningInlineAdvance
+            ))
+        .then_some(inline_box.index)
     }));
     joining_barriers.sort_unstable();
     joining_barriers.dedup();
@@ -387,10 +391,12 @@ fn shape_item<'a, B: Brush>(
     let item_text = &text[text_range.clone()];
     let item_infos = &infos[char_range.start..char_range.end]; // Only process current item
     let first_style_index = item_infos[0].1;
-    let produce_concat_boundaries = item_infos.iter().any(|(_, index)| {
-        rcx.features(styles[usize::from(*index)].font_features_for_justification)
-            .is_some_and(|features| !features.is_empty())
-    });
+    let retain_physical_shapes = !layout.data.inline_owner_shaping.is_empty();
+    let produce_concat_boundaries = retain_physical_shapes
+        || item_infos.iter().any(|(_, index)| {
+            rcx.features(styles[usize::from(*index)].font_features_for_justification)
+                .is_some_and(|features| !features.is_empty())
+        });
     let fb_script = convert::script_to_fontique(item.script, analysis_data_sources);
     let mut font_selector =
         FontSelector::new(fq, rcx, styles, first_style_index, fb_script, item.locale);
@@ -569,48 +575,60 @@ fn shape_item<'a, B: Brush>(
             segment_inline_boxes,
         );
 
-        if layout.data.runs.get(run_index).is_some_and(|run| {
+        let alternatives = if layout.data.runs.get(run_index).is_some_and(|run| {
             layout.data.clusters[run.cluster_range.clone()]
                 .iter()
                 .any(|cluster| cluster.is_ligature_start())
         }) {
-            let alternatives = justification::SourceFontFeatures::for_segment(
+            justification::SourceFontFeatures::for_segment(
                 rcx,
                 styles,
                 segment_text,
                 segment_text_range.start,
                 segment_infos,
-            );
+            )
+        } else {
+            Vec::new()
+        };
+        if layout.data.runs.get(run_index).is_some()
+            && (retain_physical_shapes || !alternatives.is_empty())
+        {
+            layout
+                .data
+                .shaping_source_text
+                .get_or_insert_with(|| alloc::sync::Arc::from(text));
+            let source = alloc::sync::Arc::new(source::DeferredSourceShape {
+                run_index,
+                context: context_start..context_end,
+                script: item.script,
+                language,
+                variations: rcx
+                    .variations(item.variations)
+                    .map(<[FontVariation]>::to_vec),
+                features: scx.features.clone(),
+                character_infos: segment_infos.to_vec(),
+                character_offsets: segment_text
+                    .char_indices()
+                    .map(|(offset, _)| offset)
+                    .chain(core::iter::once(segment_text.len()))
+                    .collect(),
+                safe_concat_boundaries: source::safe_concat_boundaries(
+                    &shaped.glyphs,
+                    segment_text,
+                    segment_text_range.start,
+                ),
+            });
             if !alternatives.is_empty() {
-                layout
-                    .data
-                    .justification_source_text
-                    .get_or_insert_with(|| alloc::sync::Arc::from(text));
                 layout.data.deferred_justification_shapes.push(
                     justification::DeferredJustificationShape {
-                        run_index,
+                        source: source.clone(),
                         prepared: None,
-                        context: context_start..context_end,
-                        script: item.script,
-                        language,
-                        variations: rcx
-                            .variations(item.variations)
-                            .map(<[FontVariation]>::to_vec),
-                        features: scx.features.clone(),
                         alternatives,
-                        character_infos: segment_infos.to_vec(),
-                        character_offsets: segment_text
-                            .char_indices()
-                            .map(|(offset, _)| offset)
-                            .chain(core::iter::once(segment_text.len()))
-                            .collect(),
-                        safe_concat_boundaries: justification::safe_concat_boundaries(
-                            &shaped.glyphs,
-                            segment_text,
-                            segment_text_range.start,
-                        ),
                     },
                 );
+            }
+            if retain_physical_shapes {
+                layout.data.deferred_physical_shapes.push(source);
             }
         }
 
