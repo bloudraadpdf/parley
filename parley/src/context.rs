@@ -49,6 +49,7 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     pub(crate) style_table: Vec<ResolvedStyle<B>>,
     pub(crate) style_runs: Vec<StyleRun>,
     pub(crate) inline_boxes: Vec<InlineBox>,
+    pub(crate) shaping_boundaries: Vec<usize>,
     pub(crate) bidi: BidiResolver,
     pub(crate) direction: BaseDirection,
 
@@ -77,6 +78,7 @@ impl<B: Brush> LayoutContext<B> {
             style_table: vec![],
             style_runs: vec![],
             inline_boxes: vec![],
+            shaping_boundaries: vec![],
             bidi: BidiResolver::new(),
             direction: BaseDirection::default(),
             ranged_style_builder: RangedStyleBuilder::default(),
@@ -240,6 +242,7 @@ impl<B: Brush> LayoutContext<B> {
         self.style_table.clear();
         self.style_runs.clear();
         self.inline_boxes.clear();
+        self.shaping_boundaries.clear();
         self.info.clear();
         self.bidi.clear();
         self.direction = BaseDirection::default();

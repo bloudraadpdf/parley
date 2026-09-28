@@ -8,7 +8,7 @@ use crate::{FontFamily, InlineBox, LayoutContext, StyleProperty};
 use alloc::{sync::Arc, vec::Vec};
 
 fn naskh_glyph_ids(text: &str, enlarged: Option<core::ops::Range<usize>>) -> Vec<u32> {
-    naskh_glyph_ids_with(text, enlarged, None)
+    naskh_glyph_ids_with(text, enlarged, None, &[])
 }
 
 #[test]
@@ -18,7 +18,7 @@ fn an_inline_box_with_advance_stops_the_joining_context() {
     let text = "ععع";
     let mut expected = naskh_glyph_ids("ع", None);
     expected.extend(naskh_glyph_ids("عع", None));
-    let mut boxed = naskh_glyph_ids_with(text, None, Some('ع'.len_utf8()));
+    let mut boxed = naskh_glyph_ids_with(text, None, Some('ع'.len_utf8()), &[]);
     expected.sort_unstable();
     boxed.sort_unstable();
 
@@ -33,6 +33,7 @@ fn naskh_glyph_ids_with(
     text: &str,
     enlarged: Option<core::ops::Range<usize>>,
     inline_box_at: Option<usize>,
+    shaping_boundaries: &[usize],
 ) -> Vec<u32> {
     let mut font_context = create_font_context();
     font_context.collection.register_fonts(
@@ -56,6 +57,9 @@ fn naskh_glyph_ids_with(
     if let Some(index) = inline_box_at {
         builder.push_inline_box(InlineBox::new(1, index, 6.0, 0.0));
     }
+    for boundary in shaping_boundaries {
+        builder.push_shaping_boundary(*boundary);
+    }
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
     layout
@@ -67,6 +71,47 @@ fn naskh_glyph_ids_with(
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+#[test]
+fn explicit_boundaries_stop_arabic_joining_without_layout_boxes() {
+    let mut expected = naskh_glyph_ids("ع", None);
+    expected.extend(naskh_glyph_ids("عع", None));
+    let mut actual = naskh_glyph_ids_with("ععع", None, None, &["ع".len()]);
+    expected.sort_unstable();
+    actual.sort_unstable();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn explicit_boundaries_split_ligatures_without_line_breaks_or_context_leaks() {
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    for (boundaries, glyph_count) in [(&[1, 1][..], 2), (&[][..], 1)] {
+        let mut builder = context.ranged_builder(&mut fonts, "fi", 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(24.0));
+        for boundary in boundaries {
+            builder.push_shaping_boundary(*boundary);
+        }
+        let mut layout = builder.build("fi");
+        layout.break_all_lines(Some(1.0));
+        assert!(layout.data.inline_boxes.is_empty());
+        assert_eq!(layout.lines().count(), 1);
+        assert_eq!(layout.lines().flat_map(|line| line.runs().collect::<Vec<_>>())
+            .map(|run| run.clusters().map(|cluster| cluster.glyphs().count()).sum::<usize>())
+            .sum::<usize>(), glyph_count);
+    }
+}
+
+#[test]
+#[should_panic(expected = "shaping boundaries must be UTF-8 positions")]
+fn explicit_boundaries_reject_an_offset_inside_a_codepoint() {
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, "ع", 1.0, false);
+    builder.push_shaping_boundary(1);
+    let _ = builder.build("ع");
 }
 
 #[test]

@@ -54,6 +54,12 @@ impl<B: Brush> RangedBuilder<'_, B> {
         self.lcx.inline_boxes.push(inline_box);
     }
 
+    /// Breaks shaping and joining context at a UTF-8 byte boundary.
+    /// Does not add a layout item or a line-break opportunity.
+    pub fn push_shaping_boundary(&mut self, byte_offset: usize) {
+        self.lcx.shaping_boundaries.push(byte_offset);
+    }
+
     pub fn build_into(self, layout: &mut Layout<B>, text: impl AsRef<str>) {
         // Apply RangedStyleBuilder styles directly to style-table/style-run state.
         self.lcx
@@ -278,6 +284,10 @@ fn build_into_layout<B: Brush>(
     );
 
     crate::analysis::analyze_text(lcx, text);
+    assert!(
+        lcx.shaping_boundaries.iter().all(|offset| text.is_char_boundary(*offset)),
+        "shaping boundaries must be UTF-8 positions in the source text"
+    );
 
     layout.data.clear();
     layout.data.scale = scale;
@@ -312,6 +322,7 @@ fn build_into_layout<B: Brush>(
             query,
             &lcx.style_table,
             &lcx.inline_boxes,
+            &lcx.shaping_boundaries,
             &lcx.info,
             lcx.bidi.levels(),
             &lcx.bidi,

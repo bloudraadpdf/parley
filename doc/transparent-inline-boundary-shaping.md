@@ -22,3 +22,6 @@ An empty paragraph is not an exception: transparent anchors at its sole source
 boundary still produce positioned line items. They contribute no glyphs,
 inline advance, or block extent, but their topology remains available to
 downstream placement.
+
+[Explicit shaping boundaries](explicit-shaping-boundaries.md) separate glyph
+context without a layout item.

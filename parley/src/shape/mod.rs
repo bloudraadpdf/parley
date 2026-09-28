@@ -86,6 +86,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
     mut fq: Query<'a>,
     styles: &'a [ResolvedStyle<B>],
     inline_boxes: &[InlineBox],
+    shaping_boundaries: &[usize],
     infos: &[(CharInfo, u16)],
     levels: &[u8],
     bidi: &crate::bidi::BidiResolver,
@@ -138,15 +139,21 @@ pub(crate) fn shape_text<'a, B: Brush>(
     let mut inline_box_iter = inline_boxes.iter().enumerate();
     let mut current_box = inline_box_iter.next();
     let mut transparent_boxes = Vec::new();
-    // Byte offsets where an inline box with advance separates the text;
-    // joining context never crosses them (CSS Text 4 §8.3).
-    let mut joining_barriers = Vec::new();
+    let mut joining_barriers = shaping_boundaries.to_vec();
+    joining_barriers.extend(inline_boxes.iter().filter_map(|inline_box| {
+        (text.is_char_boundary(inline_box.index)
+            && matches!(inline_box.shaping_participation(), InlineBoxShapingParticipation::InterveningInlineAdvance))
+            .then_some(inline_box.index)
+    }));
+    joining_barriers.sort_unstable();
+    joining_barriers.dedup();
+    let mut boundaries = joining_barriers.iter().copied().peekable();
 
     // Iterate over characters in the text
     for ((char_index, (byte_index, ch)), (info, style_index)) in
         text.char_indices().enumerate().zip(infos)
     {
-        let mut break_run = false;
+        let mut break_run = boundaries.next_if_eq(&byte_index).is_some();
         let mut script = info.script;
         if !real_script(script) {
             script = item.script;
@@ -221,7 +228,6 @@ pub(crate) fn shape_text<'a, B: Brush>(
             if boundary_has_inline_advance {
                 break_run = true;
                 deferred_boxes = Some(boundary_boxes);
-                joining_barriers.push(byte_index);
             } else {
                 transparent_boxes.extend(boundary_boxes.map(|box_idx| {
                     (
