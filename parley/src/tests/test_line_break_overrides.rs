@@ -746,6 +746,47 @@ fn tabs_observe_the_half_zero_advance_threshold() {
 }
 
 #[test]
+fn resolved_tabs_keep_their_minimum_independent_of_the_shaping_font() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let following_advance = full_width("P");
+    let interval = 80.0;
+    let minimum = full_width("0");
+    let text = "\tP";
+
+    for (remaining_fraction, stop_count, scale) in [
+        (0.75, 2.0, 1.0),
+        (1.0, 1.0, 1.0),
+        (1.25, 1.0, 1.0),
+        (0.75, 2.0, 2.0),
+        (1.0, 1.0, 2.0),
+    ] {
+        let mut builder = lcx.ranged_builder(&mut fcx, text, scale, false);
+        set_roboto(&mut builder);
+        builder.push_default(StyleProperty::TabSize(TabSize::Resolved {
+            interval,
+            minimum_advance: minimum,
+        }));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        builder.push_inline_box(InlineBox::new(
+            1,
+            0,
+            (interval - minimum * remaining_fraction) * scale,
+            0.0,
+        ));
+        let mut layout = builder.build(text);
+        for _ in 0..2 {
+            layout.break_all_lines(None);
+            assert!(
+                (layout.full_width() - (interval * stop_count + following_advance) * scale).abs() < 0.01
+            );
+        }
+    }
+}
+
+#[test]
 fn text_indent_moves_the_tab_cursor_but_alignment_does_not() {
     let layout = || {
         configured_layout("X\tX", |builder| {

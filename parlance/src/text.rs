@@ -63,6 +63,13 @@ pub enum TabSize {
     Spaces(f32),
     /// Absolute length in layout units (CSS `tab-size: <length>`).
     Length(f32),
+    /// Tab metrics resolved independently of the selected shaping font.
+    Resolved {
+        /// Distance between consecutive tab stops.
+        interval: f32,
+        /// Minimum advance before moving to the subsequent stop.
+        minimum_advance: f32,
+    },
 }
 
 impl Default for TabSize {
@@ -77,16 +84,33 @@ impl TabSize {
         match self {
             Self::Spaces(n) => n * space_advance,
             Self::Length(l) => l,
+            Self::Resolved { interval, .. } => interval,
+        }
+    }
+
+    /// Resolve the minimum advance from explicit metrics or the shaping font.
+    pub fn minimum_advance(self, zero_advance: f32) -> f32 {
+        match self {
+            Self::Resolved {
+                minimum_advance, ..
+            } => minimum_advance,
+            Self::Spaces(_) | Self::Length(_) => zero_advance * 0.5,
         }
     }
 
     /// Scale the tab size by the given factor.
     ///
-    /// Only the `Length` variant is affected; `Spaces` is relative to the
-    /// font's space advance and does not need scaling.
+    /// Absolute lengths scale. Space counts remain relative to font metrics.
     pub fn scale(self, scale: f32) -> Self {
         match self {
             Self::Length(value) => Self::Length(value * scale),
+            Self::Resolved {
+                interval,
+                minimum_advance,
+            } => Self::Resolved {
+                interval: interval * scale,
+                minimum_advance: minimum_advance * scale,
+            },
             value => value,
         }
     }
@@ -97,6 +121,16 @@ impl TabSize {
             (Self::Spaces(a), Self::Spaces(b)) | (Self::Length(a), Self::Length(b)) => {
                 (a - b).abs() < f32::EPSILON
             }
+            (
+                Self::Resolved {
+                    interval: a,
+                    minimum_advance: a_min,
+                },
+                Self::Resolved {
+                    interval: b,
+                    minimum_advance: b_min,
+                },
+            ) => (a - b).abs() < f32::EPSILON && (a_min - b_min).abs() < f32::EPSILON,
             _ => false,
         }
     }

@@ -1685,7 +1685,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             let tab_interval =
                                 style.tab_size.interval(run_data.metrics.space_advance);
                             if tab_interval > 0.0 {
-                                let minimum = run_data.metrics.zero_advance * 0.5;
+                                let minimum = style
+                                    .tab_size
+                                    .minimum_advance(run_data.metrics.zero_advance);
                                 advance = tab_advance(
                                     self.state.line.tab_origin + self.state.line.x
                                         - before_tab_adjustment,
@@ -2411,7 +2413,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     LayoutItemKind::TextRun => {
                         let run = &self.layout.data.runs[line_item.index];
                         let space_advance = run.metrics.space_advance;
-                        let minimum_tab_advance = run.metrics.zero_advance * 0.5;
                         let glyph_start = run.glyph_start;
                         let tab_size = self
                             .layout
@@ -2421,6 +2422,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             .map(|c| self.layout.data.styles[c.style_index as usize].tab_size)
                             .unwrap_or_default();
                         let tab_interval = tab_size.interval(space_advance);
+                        let minimum_tab_advance =
+                            tab_size.minimum_advance(run.metrics.zero_advance);
                         let cluster_range = line_item.cluster_range.clone();
 
                         for (offset, cluster) in self.layout.data.clusters[cluster_range.clone()]
