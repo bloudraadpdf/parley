@@ -962,6 +962,10 @@ impl RunData {
     /// Glyph receiving a component's spacing. Synthetic ligature components
     /// keep separate layout advances but share the start cluster's glyphs.
     pub(crate) fn spacing_glyph(&self, clusters: &[ClusterData], index: usize) -> Option<usize> {
+        self.cluster_glyph_range(clusters, index)?.last()
+    }
+
+    fn cluster_glyph_range(&self, clusters: &[ClusterData], index: usize) -> Option<Range<usize>> {
         let mut cluster = &clusters[index];
         if cluster.is_ligature_component() {
             cluster = if self.bidi_level & 1 == 0 {
@@ -978,7 +982,8 @@ impl RunData {
         if cluster.glyph_len == 0 || cluster.glyph_len == 0xFF {
             return None;
         }
-        Some(self.glyph_start + cluster.glyph_offset as usize + cluster.glyph_len as usize - 1)
+        let start = self.glyph_start + cluster.glyph_offset as usize;
+        Some(start..start + cluster.glyph_len as usize)
     }
 
     /// The letter spacing applied after `cluster`: none for default-ignorable
@@ -1907,6 +1912,11 @@ impl<B: Brush> LayoutData<B> {
                 let mut spacing = run.cluster_letter_spacing(cluster);
                 if !nearly_zero(word) && cluster.info.whitespace().is_space_or_nbsp() {
                     spacing += word;
+                    if let Some(range) = run.cluster_glyph_range(&self.clusters, index) {
+                        for glyph in &mut self.glyphs[range] {
+                            glyph.x += word / 2.0;
+                        }
+                    }
                 }
                 if !nearly_zero(spacing) {
                     let glyph_index = run.spacing_glyph(&self.clusters, index);

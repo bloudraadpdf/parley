@@ -225,7 +225,11 @@ impl<'a, B: Brush> Cluster<'a, B> {
             GlyphIter::Single(Some(Glyph {
                 id: self.data.glyph_offset,
                 style_index: self.data.style_index,
-                x: 0.,
+                x: if self.is_space_or_nbsp() {
+                    self.run.data.word_spacing / 2.0
+                } else {
+                    0.0
+                },
                 y: 0.,
                 advance: self.advance(),
             }))

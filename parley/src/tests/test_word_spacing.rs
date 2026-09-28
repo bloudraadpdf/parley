@@ -17,12 +17,16 @@ fn word_spacing_preserves_spaces_in_mark_clusters() {
         None,
     );
     let mut context: LayoutContext<ColorBrush> = LayoutContext::new();
-    for text in [
-        "A \u{0301}",
-        "A \u{0301}A",
-        "א \u{0301}",
-        "א \u{0301}א",
-        "א \u{0301}\u{0300}א",
+    for (text, space_origin) in [
+        (" ", 0.0),
+        (" \u{0301}", 0.0),
+        ("A A", 100.0),
+        ("א א", 100.0),
+        ("A \u{0301}", 100.0),
+        ("A \u{0301}A", 100.0),
+        ("א \u{0301}", 0.0),
+        ("א \u{0301}א", 100.0),
+        ("א \u{0301}\u{0300}א", 100.0),
     ] {
         for word_spacing in [0.0, 100.0, -50.0] {
             let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
@@ -77,6 +81,11 @@ fn word_spacing_preserves_spaces_in_mark_clusters() {
                 .find(|(id, _)| *id == 1)
                 .expect("the space glyph")
                 .1;
+            assert_eq!(
+                space,
+                space_origin + word_spacing / 2.0,
+                "half-side word spacing: {text:?}, spacing={word_spacing}"
+            );
             for (_, mark) in glyphs.iter().filter(|(id, _)| matches!(id, 3 | 4)) {
                 assert_eq!(*mark, space, "{text:?}, spacing={word_spacing}");
             }
