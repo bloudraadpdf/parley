@@ -52,14 +52,22 @@ impl<B: Brush> FollowingBreakShape<B> {
         {
             return None;
         }
-        Some(Self { byte_index, text, layout: Arc::new(layout) })
+        Some(Self {
+            byte_index,
+            text,
+            layout: Arc::new(layout),
+        })
     }
 
     /// Text used to shape this line-start material.
-    pub fn text(&self) -> &str { &self.text }
+    pub fn text(&self) -> &str {
+        &self.text
+    }
 
     /// Immutable glyph shape used for fitting and drawing.
-    pub fn layout(&self) -> &Layout<B> { &self.layout }
+    pub fn layout(&self) -> &Layout<B> {
+        &self.layout
+    }
 }
 
 impl<B: Brush> DiscretionaryBreakShape<B> {
@@ -397,10 +405,34 @@ impl<B: Brush> Layout<B> {
 
     /// Shaped material at the start of a line beginning at this source boundary.
     pub fn following_break_shape(&self, byte_index: usize) -> Option<&FollowingBreakShape<B>> {
-        self.data.following_break_shapes
+        self.data
+            .following_break_shapes
             .binary_search_by_key(&byte_index, |shape| shape.byte_index)
             .ok()
             .map(|index| &self.data.following_break_shapes[index])
+    }
+
+    /// Omit source ranges only when a selected line begins at their start.
+    /// The source remains present in unbroken text and in line text ranges.
+    pub fn set_conditional_line_start_omissions(
+        &mut self,
+        mut ranges: Vec<core::ops::Range<usize>>,
+    ) {
+        ranges.sort_by_key(|range| range.start);
+        ranges.dedup_by_key(|range| range.start);
+        ranges.retain(|range| range.start < range.end && range.end <= self.data.text_len);
+        self.data.conditional_line_start_omissions = ranges;
+    }
+
+    pub(crate) fn conditional_line_start_omission(
+        &self,
+        byte_index: usize,
+    ) -> Option<&core::ops::Range<usize>> {
+        self.data
+            .conditional_line_start_omissions
+            .binary_search_by_key(&byte_index, |range| range.start)
+            .ok()
+            .map(|index| &self.data.conditional_line_start_omissions[index])
     }
 
     /// Select whether subsequent line breaking restores overflow-only opportunities.

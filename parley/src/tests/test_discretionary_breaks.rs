@@ -452,17 +452,51 @@ fn following_material_is_charged_and_positioned_only_after_a_selected_break() {
     let baseline_second = baseline.get(1).unwrap();
     assert_eq!(second.text_range(), baseline_second.text_range());
     assert!(
-        (second.metrics().advance - baseline_second.metrics().advance - following_width).abs() < 0.001,
+        (second.metrics().advance - baseline_second.metrics().advance - following_width).abs()
+            < 0.001,
         "actual={} baseline={} inserted={}",
-        second.metrics().advance, baseline_second.metrics().advance, following_width,
+        second.metrics().advance,
+        baseline_second.metrics().advance,
+        following_width,
     );
-    let glyph_x = second.items().find_map(|item| match item {
-        PositionedLayoutItem::GlyphRun(run) => Some(run.offset()),
-        _ => None,
-    }).unwrap();
+    let glyph_x = second
+        .items()
+        .find_map(|item| match item {
+            PositionedLayoutItem::GlyphRun(run) => Some(run.offset()),
+            _ => None,
+        })
+        .unwrap();
     assert!((glyph_x - following_width).abs() < 0.001);
 
     layout.break_all_lines(None);
     assert_eq!(layout.lines().count(), 1);
     assert!((layout.get(0).unwrap().metrics().advance - unwrapped_advance(text)).abs() < 0.001);
+}
+
+#[test]
+fn source_omission_applies_only_at_a_selected_line_start() {
+    let text = "ab-cd";
+    let boundary = "ab-".len();
+    let mut layout = roboto_layout(text);
+    layout.set_conditional_line_start_omissions(vec![boundary..boundary + 1]);
+    layout.break_all_lines(Some(unwrapped_advance("ab-") + 0.01));
+    let second = layout.get(1).expect("break after hyphen");
+    assert_eq!(second.text_range().start, boundary);
+    let second_run = second.runs().next().unwrap();
+    let omitted = second_run
+        .clusters()
+        .find(|cluster| cluster.text_range().start == boundary)
+        .unwrap();
+    assert_eq!(omitted.advance(), 0.0);
+    assert_eq!(omitted.glyphs().count(), 0);
+
+    layout.break_all_lines(None);
+    let unbroken = layout.lines().next().unwrap();
+    let unbroken_run = unbroken.runs().next().unwrap();
+    let retained = unbroken_run
+        .clusters()
+        .find(|cluster| cluster.text_range().start == boundary)
+        .unwrap();
+    assert!(retained.advance() > 0.0);
+    assert!(retained.glyphs().count() > 0);
 }

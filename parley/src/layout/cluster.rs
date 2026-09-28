@@ -221,6 +221,12 @@ impl<'a, B: Brush> Cluster<'a, B> {
 
     /// Returns an iterator over the glyphs in the cluster.
     pub fn glyphs(&self) -> impl Iterator<Item = Glyph> + 'a + Clone {
+        if self.run.layout.data.lines.get(self.path.line_index as usize)
+            .and_then(|line| line.conditional_line_start_omission.as_ref())
+            .is_some_and(|range| range.contains(&self.text_range().start))
+        {
+            return GlyphIter::Single(None);
+        }
         if self.data.glyph_len == 0xFF {
             GlyphIter::Single(Some(Glyph {
                 id: self.data.glyph_offset,

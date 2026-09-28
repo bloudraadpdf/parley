@@ -1051,6 +1051,8 @@ pub(crate) struct LineData {
     pub(crate) removed_terminal_source_ranges: Vec<Range<usize>>,
     /// Collapsible leading source clusters removed on this materialised line.
     pub(crate) removed_leading_source_ranges: Vec<Range<usize>>,
+    /// Source omitted only when its registered boundary starts this line.
+    pub(crate) conditional_line_start_omission: Option<Range<usize>>,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
     /// Inline position of the local line origin on the block tab grid.
@@ -1242,6 +1244,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) discretionary_breaks: Vec<DiscretionaryBreak>,
     pub(crate) discretionary_break_shapes: Vec<super::DiscretionaryBreakShape<B>>,
     pub(crate) following_break_shapes: Vec<super::FollowingBreakShape<B>>,
+    pub(crate) conditional_line_start_omissions: Vec<Range<usize>>,
     pub(crate) line_break_purpose: LineBreakPurpose,
     pub(crate) base_level: u8,
     pub(crate) text_len: usize,
@@ -1316,6 +1319,7 @@ impl<B: Brush> Default for LayoutData<B> {
             discretionary_breaks: Vec::new(),
             discretionary_break_shapes: Vec::new(),
             following_break_shapes: Vec::new(),
+            conditional_line_start_omissions: Vec::new(),
             line_break_purpose: LineBreakPurpose::LineLayout,
             base_level: 0,
             text_len: 0,
@@ -1548,6 +1552,7 @@ impl<B: Brush> LayoutData<B> {
         self.discretionary_breaks.clear();
         self.discretionary_break_shapes.clear();
         self.following_break_shapes.clear();
+        self.conditional_line_start_omissions.clear();
         self.line_break_purpose = LineBreakPurpose::LineLayout;
         self.discretionary_fit_advances.clear();
         self.base_level = 0;

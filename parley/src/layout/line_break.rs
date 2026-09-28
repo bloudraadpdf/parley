@@ -145,6 +145,7 @@ struct LineState {
     source_end_contribution: SourceEndContribution,
     source_start_whitespace: SourceStartWhitespace,
     removed_leading_source_ranges: Vec<Range<usize>>,
+    conditional_line_start_omission: Option<Range<usize>>,
     tab_advances: Vec<SelectedTabAdvance>,
 }
 
@@ -221,6 +222,9 @@ impl LineState {
         mut advances: (f32, f32),
         inside_line_advance: Option<f32>,
     ) -> (f32, f32) {
+        if self.removes_leading_source_at(source_range.start) {
+            return (0.0, 0.0);
+        }
         if !self.source_start_whitespace.removes_collapsible_space(
             whitespace,
             is_default_ignorable,
@@ -854,6 +858,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.source_start_whitespace =
             SourceStartWhitespace::following_break(preceding_break);
         self.state.line.removed_leading_source_ranges.clear();
+        self.state.line.conditional_line_start_omission = None;
         self.state.prev_boundary = None; // Added by Nico
         self.state.restored_normal_boundary = None;
         self.state.overflow_discretionary_boundary = None;
@@ -876,7 +881,20 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // The selected source range is final only after finish_line has
         // collected its items and applied line-end shaping.
         if preceding_break != BreakReason::None {
-            let boundary = self.lines.lines.last().expect("committed line").text_range.end;
+            let boundary = self
+                .lines
+                .lines
+                .last()
+                .expect("committed line")
+                .text_range
+                .end;
+            if let Some(range) = self.layout.conditional_line_start_omission(boundary) {
+                self.state.line.conditional_line_start_omission = Some(range.clone());
+                self.state
+                    .line
+                    .removed_leading_source_ranges
+                    .push(range.clone());
+            }
             if let Some(shape) = self.layout.following_break_shape(boundary) {
                 let advance = shape.layout().full_width();
                 self.state.line.x += advance;
@@ -3526,6 +3544,7 @@ fn try_commit_line<B: Brush>(
         starts_at_following_break: state.starts_at_following_break,
         selected_source_cluster_advance: state.selected_source_cluster_advance.clone(),
         removed_leading_source_ranges: state.removed_leading_source_ranges.clone(),
+        conditional_line_start_omission: state.conditional_line_start_omission.clone(),
         ends_at_discretionary_break: state.discretionary_break,
         metrics: LineMetrics {
             advance: state.x + state.cloned_owners.end_advance(),
