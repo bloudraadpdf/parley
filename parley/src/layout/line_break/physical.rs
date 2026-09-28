@@ -15,6 +15,8 @@ impl<B: Brush> BreakLines<'_, B> {
             &prefix.items,
             &self.layout.data.inline_owner_shaping,
         );
+        let soft_boundaries = (!prefix.line.text_range.is_empty())
+            .then_some([prefix.line.text_range.start, prefix.line.text_range.end]);
         let shape = self
             .physical_shaper
             .as_mut()
@@ -22,7 +24,9 @@ impl<B: Brush> BreakLines<'_, B> {
             .shape_line(
                 &self.layout.data,
                 &boundaries,
-                &[prefix.line.text_range.start, prefix.line.text_range.end],
+                soft_boundaries
+                    .as_ref()
+                    .map_or(&[], |range| range.as_slice()),
                 expanded,
             );
         shape.install(&mut self.layout.data);

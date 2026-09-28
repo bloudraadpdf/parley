@@ -167,6 +167,62 @@ fn intrinsic_maximum_uses_physical_glyphs_without_changing_the_layout() {
 }
 
 #[test]
+fn zero_advance_owner_edges_keep_intrinsic_physical_boundaries() {
+    let text = "السلامعليكم";
+    let mut fonts = naskh_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut build = |physical| {
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.set_direction(BaseDirection::Ltr);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+            "Noto Naskh Arabic",
+        )));
+        builder.push_default(StyleProperty::FontSize(24.0));
+        builder.push_inline_box(
+            crate::InlineBox::inline_start_edge(
+                41,
+                0,
+                0.0,
+                0.0,
+                crate::InlineBoxBreakAffinity::ToNext,
+            )
+            .with_continuous_shaping(),
+        );
+        builder.push_inline_box(
+            crate::InlineBox::inline_end_edge(
+                42,
+                12,
+                0.0,
+                0.0,
+                crate::InlineBoxBreakAffinity::ToPrevious,
+            )
+            .with_continuous_shaping(),
+        );
+        if physical {
+            let mut owner = owner(
+                0..12,
+                PhysicalLineEdge::Left,
+                ShapingEdgePlacement::LastLine,
+            );
+            owner.inline_boxes = alloc::vec![41, 42];
+            builder.push_inline_owner_shaping(owner);
+        } else {
+            builder.push_shaping_boundary(12);
+        }
+        builder.build(text)
+    };
+    let mut actual = build(true);
+    let mut reference = build(false);
+    assert_eq!(
+        actual.calculate_content_widths().max,
+        reference.calculate_content_widths().max
+    );
+    actual.break_all_lines(None);
+    reference.break_all_lines(None);
+    assert_eq!(glyphs(&actual), glyphs(&reference));
+}
+
+#[test]
 fn physical_intrinsics_distinguish_anywhere_from_break_word() {
     use super::test_justification_shapes::office_layout_configured;
     let mut fonts = naskh_font_context();
