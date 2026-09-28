@@ -802,8 +802,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) if edge.is_end())
         });
         let uniform_letter_spacing = uniform_letter_spacing(&layout.data);
-        let physical_shaper = (!layout.data.inline_owner_shaping.is_empty())
-            .then(|| crate::shape::physical::PhysicalShaper::new(&layout.data));
+        let physical_shaper = (!layout.data.inline_owner_shaping.is_empty()
+            && !layout.data.deferred_physical_shapes.is_empty())
+        .then(|| crate::shape::physical::PhysicalShaper::new(&layout.data));
         Self {
             layout,
             lines,

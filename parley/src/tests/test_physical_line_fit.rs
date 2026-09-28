@@ -223,6 +223,42 @@ fn zero_advance_owner_edges_keep_intrinsic_physical_boundaries() {
 }
 
 #[test]
+fn geometry_only_owner_has_no_text_to_reshape() {
+    let mut fonts = naskh_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut build = |physical| {
+        let mut builder = context.ranged_builder(&mut fonts, "", 1.0, false);
+        builder.push_inline_box(crate::InlineBox::inline_start_edge(
+            41,
+            0,
+            10.0,
+            0.0,
+            crate::InlineBoxBreakAffinity::ToNext,
+        ));
+        if physical {
+            let mut owner = owner(
+                0..0,
+                PhysicalLineEdge::Left,
+                ShapingEdgePlacement::FirstLine,
+            );
+            owner.inline_boxes = alloc::vec![41];
+            builder.push_inline_owner_shaping(owner);
+        }
+        builder.build("")
+    };
+    let mut actual = build(true);
+    let mut reference = build(false);
+    let actual_widths = actual.calculate_content_widths();
+    let reference_widths = reference.calculate_content_widths();
+    assert_eq!(actual_widths.min, reference_widths.min);
+    assert_eq!(actual_widths.max, reference_widths.max);
+    actual.break_all_lines(None);
+    reference.break_all_lines(None);
+    assert_eq!(actual.width(), reference.width());
+    assert_eq!(actual.len(), reference.len());
+}
+
+#[test]
 fn physical_intrinsics_distinguish_anywhere_from_break_word() {
     use super::test_justification_shapes::office_layout_configured;
     let mut fonts = naskh_font_context();
