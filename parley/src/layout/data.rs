@@ -2382,9 +2382,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
                 // Skip characters until we reach the current cluster
                 for i in 1..num_components {
                     cluster_start_char = char_indices_iter.next().unwrap();
-                    if to_whitespace(cluster_start_char.1) == Whitespace::Space {
-                        break;
-                    }
                     let char_info_ =
                         char_infos[direction.component_index(cluster_id, num_components, i)];
                     push_cluster(
@@ -2509,9 +2506,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
             // Create ligature component clusters for the remaining characters
             let mut i = 1;
             for char in char_indices_iter {
-                if to_whitespace(char.1) == Whitespace::Space {
-                    break;
-                }
                 let component_char_info =
                     char_infos[direction.component_index(cluster_id, num_components, i)];
                 push_cluster(

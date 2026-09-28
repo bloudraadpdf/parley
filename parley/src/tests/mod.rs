@@ -16,4 +16,5 @@ mod test_line_break_overrides;
 mod test_line_metrics;
 mod test_no_break_space;
 mod test_shaping_context;
+mod test_word_spacing;
 mod utils;
