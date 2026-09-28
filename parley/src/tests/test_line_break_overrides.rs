@@ -70,6 +70,109 @@ fn configured_layout(
     builder.build(text)
 }
 
+#[test]
+fn source_justification_positions_the_next_styled_run_from_cluster_advance() {
+    use crate::{
+        JustificationOpportunity::BetweenUnits, JustificationUnit::Text, PositionedLayoutItem,
+    };
+
+    let mut layout = configured_layout("AB", |builder| {
+        builder.push(StyleProperty::FontSize(15.0), 1..2);
+    });
+    layout.break_all_lines(None);
+    let natural = layout.lines().next().unwrap().measured_advance();
+    layout.set_justification_opportunities(vec![BetweenUnits {
+        before: Text(0..1),
+        after: Text(1..2),
+    }]);
+    let width = natural + 8.0;
+    layout.break_all_lines(Some(width));
+    let plain_offsets = layout
+        .lines()
+        .next()
+        .unwrap()
+        .items()
+        .filter_map(|item| match item {
+            PositionedLayoutItem::GlyphRun(run) => Some(run.offset()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        plain_offsets.len(),
+        2,
+        "the styled letters must occupy separate runs"
+    );
+    layout.align(
+        Some(width),
+        Alignment::Justify,
+        AlignmentOptions {
+            justification_mode: crate::JustificationMode::SourceOpportunities,
+            last_line_alignment: Some(Alignment::Justify),
+            ..Default::default()
+        },
+    );
+    let justified_offsets = layout
+        .lines()
+        .next()
+        .unwrap()
+        .items()
+        .filter_map(|item| match item {
+            PositionedLayoutItem::GlyphRun(run) => Some(run.offset()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!((justified_offsets[0] - plain_offsets[0]).abs() < 0.001);
+    assert!(
+        (justified_offsets[1] - plain_offsets[1] - 8.0).abs() < 0.001,
+        "plain={plain_offsets:?} justified={justified_offsets:?}"
+    );
+}
+
+#[test]
+fn source_justification_positions_glyphs_within_one_shaping_run() {
+    use crate::{
+        JustificationOpportunity::BetweenUnits, JustificationUnit::Text, PositionedLayoutItem,
+    };
+
+    let mut layout = configured_layout("AB", |_| {});
+    layout.break_all_lines(None);
+    let width = layout.lines().next().unwrap().measured_advance() + 8.0;
+    layout.set_justification_opportunities(vec![BetweenUnits {
+        before: Text(0..1),
+        after: Text(1..2),
+    }]);
+    layout.break_all_lines(Some(width));
+    let positions = |layout: &Layout<ColorBrush>| {
+        layout
+            .lines()
+            .next()
+            .unwrap()
+            .items()
+            .flat_map(|item| match item {
+                PositionedLayoutItem::GlyphRun(run) => run
+                    .positioned_glyphs()
+                    .map(|glyph| glyph.x)
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>()
+    };
+    let plain = positions(&layout);
+    layout.align(
+        Some(width),
+        Alignment::Justify,
+        AlignmentOptions {
+            justification_mode: crate::JustificationMode::SourceOpportunities,
+            last_line_alignment: Some(Alignment::Justify),
+            ..Default::default()
+        },
+    );
+    let justified = positions(&layout);
+    assert_eq!(plain.len(), 2);
+    assert!((justified[0] - plain[0]).abs() < 0.001);
+    assert!((justified[1] - plain[1] - 8.0).abs() < 0.001);
+}
+
 fn full_width(text: &str) -> f32 {
     let mut layout = roboto_layout(text, None);
     layout.break_all_lines(None);

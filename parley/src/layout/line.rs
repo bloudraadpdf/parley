@@ -9,6 +9,7 @@ use crate::layout::glyph::Glyph;
 use crate::layout::layout::Layout;
 use crate::layout::run::Run;
 use crate::style::Brush;
+use alloc::vec::Vec;
 use core::ops::Range;
 
 /// Line in a text layout.
@@ -173,6 +174,8 @@ impl<'a, B: Brush> Line<'a, B> {
             item_index: 0,
             glyph_start: 0,
             offset: 0.,
+            cluster_corrections: Vec::new(),
+            next_cluster_correction: 0,
         }
     }
 }
@@ -311,6 +314,7 @@ pub struct GlyphRun<'a, B: Brush> {
     offset: f32,
     baseline: f32,
     advance: f32,
+    cluster_corrections: Vec<(usize, f32)>,
 }
 
 impl<'a, B: Brush> GlyphRun<'a, B> {
@@ -352,10 +356,19 @@ impl<'a, B: Brush> GlyphRun<'a, B> {
     pub fn positioned_glyphs(&'a self) -> impl Iterator<Item = Glyph> + 'a + Clone {
         let mut offset = self.offset;
         let baseline = self.baseline;
+        let mut glyph_index = 0;
+        let mut corrections = self.cluster_corrections.iter().peekable();
         self.glyphs().map(move |mut g| {
+            while corrections
+                .peek()
+                .is_some_and(|(index, _)| *index <= glyph_index)
+            {
+                offset += corrections.next().unwrap().1;
+            }
             g.x += offset;
             g.y += baseline;
             offset += g.advance;
+            glyph_index += 1;
             g
         })
     }
@@ -367,6 +380,10 @@ struct GlyphRunIter<'a, B: Brush> {
     item_index: usize,
     glyph_start: usize,
     offset: f32,
+    // The difference between selected cluster advances and font glyph advances.
+    // A glyphless continuation can own a justification opportunity.
+    cluster_corrections: Vec<(usize, f32)>,
+    next_cluster_correction: usize,
 }
 
 impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
@@ -385,6 +402,8 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
 
                     self.item_index += 1;
                     self.glyph_start = 0;
+                    self.cluster_corrections.clear();
+                    self.next_cluster_correction = 0;
                     self.offset += item_data.advance;
                     return Some(PositionedLayoutItem::InlineBox(PositionedInlineBox {
                         x,
@@ -395,6 +414,29 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                     }));
                 }
                 LineItem::Run(run) => {
+                    if self.glyph_start == 0 {
+                        self.cluster_corrections.clear();
+                        self.next_cluster_correction = 0;
+                        let mut glyph_count = 0;
+                        for cluster in run.visual_clusters() {
+                            let glyphs = cluster.glyphs();
+                            let glyph_advance: f32 =
+                                glyphs.clone().map(|glyph| glyph.advance).sum();
+                            glyph_count += glyphs.count();
+                            let correction = cluster.advance() - glyph_advance;
+                            if correction != 0.0 {
+                                self.cluster_corrections.push((glyph_count, correction));
+                            }
+                        }
+                        while self
+                            .cluster_corrections
+                            .get(self.next_cluster_correction)
+                            .is_some_and(|(count, _)| *count == 0)
+                        {
+                            self.offset += self.cluster_corrections[self.next_cluster_correction].1;
+                            self.next_cluster_correction += 1;
+                        }
+                    }
                     let mut iter = run
                         .visual_clusters()
                         .flat_map(|c| c.glyphs())
@@ -412,6 +454,17 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                         let glyph_start = self.glyph_start;
                         self.glyph_start += glyph_count;
                         let offset = self.offset;
+                        let mut corrections = Vec::new();
+                        while let Some(&(count, correction)) =
+                            self.cluster_corrections.get(self.next_cluster_correction)
+                        {
+                            if count > self.glyph_start {
+                                break;
+                            }
+                            corrections.push((count - glyph_start, correction));
+                            advance += correction;
+                            self.next_cluster_correction += 1;
+                        }
                         self.offset += advance;
                         return Some(PositionedLayoutItem::GlyphRun(GlyphRun {
                             run,
@@ -421,10 +474,13 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                             offset: offset + self.line.data.metrics.offset,
                             baseline: self.line.data.metrics.baseline,
                             advance,
+                            cluster_corrections: corrections,
                         }));
                     }
                     self.item_index += 1;
                     self.glyph_start = 0;
+                    self.cluster_corrections.clear();
+                    self.next_cluster_correction = 0;
                 }
             }
         }
