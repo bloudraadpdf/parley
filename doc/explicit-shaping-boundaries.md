@@ -10,3 +10,11 @@ to joining scripts. Deferred line shaping keeps the same context limits.
 
 The layout context clears these offsets before each builder. A later layout
 does not inherit the previous layout's boundaries.
+
+`InlineBox::with_continuous_shaping` preserves glyph context at the box's
+source position while retaining its advance and line-break participation.
+Use it when physical box placement separates text at a different source
+boundary. Supply that boundary with `push_shaping_boundary`.
+
+Continuous context is distinct from a transparent zero-width anchor.
+Width-based and character-count line breaking retain nonzero box advances.

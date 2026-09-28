@@ -79,7 +79,7 @@ impl SourceEndContribution {
     }
 
     fn include_inline_box(&mut self, participation: InlineBoxShapingParticipation) {
-        if participation == InlineBoxShapingParticipation::InterveningInlineAdvance {
+        if participation.has_inline_advance() {
             *self = Self::Content;
         }
     }
@@ -166,7 +166,7 @@ impl SourceStartWhitespace {
     }
 
     fn include_inline_box(&mut self, participation: InlineBoxShapingParticipation) {
-        if participation == InlineBoxShapingParticipation::InterveningInlineAdvance {
+        if participation.has_inline_advance() {
             *self = Self::Retain;
         }
     }
@@ -570,7 +570,7 @@ impl BreakerState {
         self.line
             .source_start_whitespace
             .include_inline_box(participation);
-        if participation == InlineBoxShapingParticipation::InterveningInlineAdvance {
+        if participation.has_inline_advance() {
             self.line.start_position = LineStartPosition::Interior;
         }
         // Would like to add:

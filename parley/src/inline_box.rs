@@ -88,7 +88,14 @@ pub(crate) enum InlineBoxLineBreakParticipation {
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub(crate) enum InlineBoxShapingParticipation {
     InterveningInlineAdvance,
+    NonInterveningInlineAdvance,
     TransparentBoundary,
+}
+
+impl InlineBoxShapingParticipation {
+    pub(crate) const fn has_inline_advance(self) -> bool {
+        !matches!(self, Self::TransparentBoundary)
+    }
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -218,6 +225,7 @@ pub struct InlineBox {
     pub index: usize,
     /// The box's closed layout participation.
     participation: InlineBoxParticipation,
+    preserves_shaping_context: bool,
     bidi_attachment: InlineBoxBidiAttachment,
     cloned_owner: Option<ClonedInlineOwner>,
     letter_spacing: f32,
@@ -225,6 +233,13 @@ pub struct InlineBox {
 }
 
 impl InlineBox {
+    /// Preserves glyph context across this box's source position.
+    /// The box retains its advance and line-break participation.
+    pub fn with_continuous_shaping(mut self) -> Self {
+        self.preserves_shaping_context = true;
+        self
+    }
+
     /// Sets the computed tracking of an atomic inline's typographic unit.
     /// Consecutive atomic inlines receive spacing only at their outer edges.
     pub fn with_letter_spacing(mut self, spacing: f32) -> Self {
@@ -264,6 +279,7 @@ impl InlineBox {
             },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
+            preserves_shaping_context: false,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -277,6 +293,7 @@ impl InlineBox {
             participation: InlineBoxParticipation::TransparentAnchor,
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
+            preserves_shaping_context: false,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -300,6 +317,7 @@ impl InlineBox {
             },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
+            preserves_shaping_context: false,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -315,6 +333,7 @@ impl InlineBox {
             participation: InlineBoxParticipation::ContextualSpacing { width, height },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
+            preserves_shaping_context: false,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -334,6 +353,7 @@ impl InlineBox {
             participation: InlineBoxParticipation::LogicalOwnerStart { width, height },
             bidi_attachment: InlineBoxBidiAttachment::ToNext,
             cloned_owner: None,
+            preserves_shaping_context: false,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -377,6 +397,7 @@ impl InlineBox {
             },
             bidi_attachment: InlineBoxBidiAttachment::ToPrevious,
             cloned_owner: None,
+            preserves_shaping_context: false,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -443,7 +464,12 @@ impl InlineBox {
     }
 
     pub(crate) const fn shaping_participation(&self) -> InlineBoxShapingParticipation {
-        self.participation.shaping_participation()
+        match self.participation.shaping_participation() {
+            InlineBoxShapingParticipation::InterveningInlineAdvance if self.preserves_shaping_context => {
+                InlineBoxShapingParticipation::NonInterveningInlineAdvance
+            }
+            participation => participation,
+        }
     }
 
     pub(crate) const fn line_metric_participation(&self) -> InlineBoxLineMetricParticipation {
