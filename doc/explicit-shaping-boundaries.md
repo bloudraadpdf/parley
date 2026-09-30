@@ -44,7 +44,10 @@ Box edges and `push_shaping_boundary` end that context.
 The first candidate is the terminal line: the source up to the next forced
 break. Its glyphs give a natural break at the line width. The candidates end
 at the first regular break after that natural break, which is the end of the
-first word that overflows. Longer lines are not candidates.
+first word that overflows. Longer lines are not candidates. To find that
+break, `BreakLines` probes each source position after the natural break. A
+probe can end a line only at its position, so it stops when it passes that
+position.
 
 Line selection retains the feature policy for character spacing.
 A new width or `BreakLines::revert` can change the selected glyphs.

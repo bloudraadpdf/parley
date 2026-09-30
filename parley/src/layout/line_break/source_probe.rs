@@ -57,17 +57,29 @@ impl SourceCursor {
         }
     }
 
+    fn normalized<B: Brush>(self, data: &crate::layout::LayoutData<B>) -> Self {
+        match self {
+            Self::WithinText { item, cluster } => Self::at(data, item, cluster),
+            cursor => cursor,
+        }
+    }
+
     fn matches<B: Brush>(
         self,
         data: &crate::layout::LayoutData<B>,
         item: usize,
         cluster: usize,
     ) -> bool {
-        let expected = match self {
-            Self::WithinText { item, cluster } => Self::at(data, item, cluster),
-            cursor => cursor,
-        };
-        expected == Self::at(data, item, cluster)
+        self.normalized(data) == Self::at(data, item, cluster)
+    }
+
+    fn precedes<B: Brush>(
+        self,
+        data: &crate::layout::LayoutData<B>,
+        item: usize,
+        cluster: usize,
+    ) -> bool {
+        self.normalized(data).key() < Self::at(data, item, cluster).key()
     }
 }
 
@@ -86,6 +98,7 @@ impl SourceProbe {
 pub(super) enum ProbedBreak {
     Regular(super::RegularBreakCandidate),
     Emergency(super::BoundarySnapshot),
+    PassedEnd,
 }
 
 impl<B: Brush> BreakLines<'_, B> {
@@ -166,6 +179,14 @@ impl<B: Brush> BreakLines<'_, B> {
                 )
             })
             .map(|candidate| ProbedBreak::Emergency(candidate.0.clone()))
+            .or_else(|| {
+                end.precedes(
+                    &self.layout.data,
+                    self.state.item_idx,
+                    self.state.cluster_idx,
+                )
+                .then_some(ProbedBreak::PassedEnd)
+            })
     }
 
     pub(super) fn commit_source_prefix(&mut self, measure: f32, indent: f32) -> Option<(f32, f32)> {
@@ -282,6 +303,23 @@ mod tests {
                 .is_none()
         );
         assert!(breaker.lines.lines.is_empty());
+    }
+
+    #[test]
+    fn a_legal_break_probe_stops_at_its_endpoint() {
+        let visited = |words: usize| {
+            let text = "word ".repeat(words);
+            let mut layout = build_layout_with_direction(&text, [], Some(BaseDirection::Ltr));
+            let end = cursor_at(&layout, 2);
+            let mut breaker = layout.break_lines();
+            assert!(
+                breaker
+                    .preview_source_break(end, f32::MAX, LineTabOrigin::ZERO)
+                    .is_none()
+            );
+            breaker.visited_clusters
+        };
+        assert_eq!(visited(100), visited(200));
     }
 
     #[test]

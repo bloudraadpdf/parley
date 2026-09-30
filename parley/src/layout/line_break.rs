@@ -776,6 +776,8 @@ pub struct BreakLines<'a, B: Brush> {
     previous_shape_commit: Option<CommittedShape>,
     source_probe: Option<SourceProbe>,
     physical_shaper: Option<crate::shape::physical::PhysicalShaper<B>>,
+    #[cfg(test)]
+    visited_clusters: usize,
 }
 
 macro_rules! commit_current_line {
@@ -827,6 +829,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             previous_shape_commit: None,
             source_probe: None,
             physical_shaper,
+            #[cfg(test)]
+            visited_clusters: 0,
         }
     }
 
@@ -1084,6 +1088,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         ProbedBreak::Emergency(previous) => {
                             try_commit_emergency_candidate!(previous)
                         }
+                        ProbedBreak::PassedEnd => return None,
                     };
                     if committed {
                         return self.start_new_line();
@@ -1480,6 +1485,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Iterate over remaining clusters in the Run
                     while self.state.cluster_idx < cluster_end {
+                        #[cfg(test)]
+                        {
+                            self.visited_clusters += 1;
+                        }
                         if self.prefix_ends_at(SourceCursor::WithinText {
                             item: self.state.item_idx,
                             cluster: self.state.cluster_idx,
