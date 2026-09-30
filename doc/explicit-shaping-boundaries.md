@@ -41,12 +41,19 @@ Each candidate keeps its source endpoint and glyph shapes together.
 Soft line boundaries split the shaped range but retain glyph context.
 Box edges and `push_shaping_boundary` end that context.
 
+The first candidate is the terminal line: the source up to the next forced
+break. Its glyphs give a natural break at the line width. The candidates end
+at the first regular break after that natural break, which is the end of the
+first word that overflows. Longer lines are not candidates.
+
 Line selection retains the feature policy for character spacing.
 A new width or `BreakLines::revert` can change the selected glyphs.
 Each line retains the glyphs used for its advance.
 
 `safe_concat_boundaries` limits the source ranges that require new glyphs.
 `PhysicalShaper` stores these ranges for reuse. Other ranges retain their glyphs.
+A committed line removes the stored ranges that contain a soft line boundary.
+The ranges without one stay for later lines.
 
 `calculate_content_widths` uses the same glyph selection for minimum and maximum
 widths. The source layout does not change. Emergency breaks from `break-word`

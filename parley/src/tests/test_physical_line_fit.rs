@@ -1,14 +1,17 @@
 // Copyright 2026 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use alloc::vec::Vec;
+use alloc::{collections::BTreeSet, vec, vec::Vec};
 
 use super::utils::visual_glyphs as glyphs;
 use super::{
-    test_physical_shaping::owner, test_shaping_context::naskh_font_context, utils::ColorBrush,
+    test_builders::create_font_context, test_physical_shaping::owner,
+    test_shaping_context::naskh_font_context, utils::ColorBrush,
 };
-use crate::layout::{PhysicalLineEdge, ShapingEdgePlacement};
-use crate::{BaseDirection, FontFamily, Layout, LayoutContext, StyleProperty};
+use crate::layout::{
+    InlineOwnerShaping, InlineShapingEdge, PhysicalLineEdge, ShapingEdgePlacement,
+};
+use crate::{BaseDirection, FontFamily, Layout, LayoutContext, LineTabOrigin, StyleProperty};
 
 fn arabic_layout(physical: bool, explicit: bool) -> Layout<ColorBrush> {
     let text = "السلامعليكم";
@@ -86,11 +89,7 @@ fn a_reverted_physical_line_can_be_refitted_at_a_new_width() {
     let mut reference = arabic_layout(false, true);
     reference.break_all_lines(None);
     let mut breaker = layout.break_lines();
-    assert!(
-        breaker
-            .break_next(100.0, crate::LineTabOrigin::ZERO)
-            .is_some()
-    );
+    assert!(breaker.break_next(100.0, LineTabOrigin::ZERO).is_some());
     assert!(breaker.revert());
     breaker.break_remaining(f32::MAX);
     assert_eq!(glyphs(&layout), glyphs(&reference));
@@ -289,4 +288,69 @@ fn physical_intrinsics_distinguish_anywhere_from_break_word() {
         laid_out.break_all_lines(Some(0.0));
         assert_eq!(laid_out.width(), expected.min, "{wrap:?}");
     }
+}
+
+const EDGED_WORD: &str = "word ";
+const EDGED_WORDS: usize = 40;
+
+fn edged_words() -> Layout<ColorBrush> {
+    let text = EDGED_WORD.repeat(EDGED_WORDS);
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    for start in (0..text.len()).step_by(EDGED_WORD.len()) {
+        builder.push_inline_owner_shaping(InlineOwnerShaping {
+            text: start..start + EDGED_WORD.trim_end().len(),
+            inline_boxes: Vec::new(),
+            edges: vec![
+                InlineShapingEdge {
+                    side: PhysicalLineEdge::Left,
+                    placement: ShapingEdgePlacement::FirstLine,
+                },
+                InlineShapingEdge {
+                    side: PhysicalLineEdge::Right,
+                    placement: ShapingEdgePlacement::LastLine,
+                },
+            ],
+        });
+    }
+    builder.build(&text)
+}
+
+fn four_edged_words_measure() -> f32 {
+    let mut layout = edged_words();
+    layout.break_all_lines(None);
+    layout.width() * 4.5 / EDGED_WORDS as f32
+}
+
+#[test]
+fn a_physical_line_fit_shapes_no_end_after_the_first_overflowing_word() {
+    let measure = four_edged_words_measure();
+    let mut reference = edged_words();
+    reference.break_all_lines(Some(measure));
+    let first_line_end = reference.lines().next().unwrap().text_range().end;
+    let overflowing_word_end = first_line_end + EDGED_WORD.len();
+    let mut layout = edged_words();
+    let mut breaker = layout.break_lines();
+    assert!(
+        breaker
+            .preview_shape_candidate(measure, LineTabOrigin::ZERO)
+            .is_some()
+    );
+    let shaped = breaker.shaped_line_boundaries();
+    assert!(
+        shaped.iter().all(|end| *end <= overflowing_word_end),
+        "{shaped:?} after {overflowing_word_end}"
+    );
+}
+
+#[test]
+fn a_committed_physical_line_keeps_no_soft_boundary_window() {
+    let measure = four_edged_words_measure();
+    let mut layout = edged_words();
+    let mut breaker = layout.break_lines();
+    assert!(breaker.break_next(measure, LineTabOrigin::ZERO).is_some());
+    assert_eq!(breaker.shaped_line_boundaries(), BTreeSet::new());
 }

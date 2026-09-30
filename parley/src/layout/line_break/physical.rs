@@ -1,10 +1,23 @@
 // Copyright 2026 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use super::{BreakLines, LineTabOrigin, justification::LineShapeCandidate};
-use crate::{Brush, layout::physical_shaping::physical_shaping_boundaries};
+use super::{
+    BreakLines, LineTabOrigin, justification::LineShapeCandidate, source_probe::SourceCursor,
+};
+use crate::{
+    Brush,
+    layout::{BreakReason, physical_shaping::physical_shaping_boundaries},
+};
 
 impl<B: Brush> BreakLines<'_, B> {
+    #[cfg(test)]
+    pub(crate) fn shaped_line_boundaries(&self) -> alloc::collections::BTreeSet<usize> {
+        self.physical_shaper
+            .as_ref()
+            .expect("physical source shaper")
+            .line_boundaries()
+    }
+
     pub(super) fn shape_physical_prefix(
         &mut self,
         prefix: &LineShapeCandidate,
@@ -48,7 +61,11 @@ impl<B: Brush> BreakLines<'_, B> {
             .as_ref()
             .is_some_and(|shapes| shapes.expanded);
         let mut fallback = None;
-        for end in endpoints.into_iter().rev() {
+        let mut bound = None;
+        for end in endpoints.iter().copied().rev() {
+            if bound.is_some_and(|bound: SourceCursor| end.key() > bound.key()) {
+                continue;
+            }
             self.layout.data.clusters.clone_from(&original);
             self.layout.data.glyphs.truncate(retained_glyphs);
             let Some(prefix) = self.preview_source_prefix(end, tab_origin) else {
@@ -59,6 +76,9 @@ impl<B: Brush> BreakLines<'_, B> {
                 .preview_natural_candidate(measure, tab_origin)
                 .expect("retained source prefix");
             let normal_end = normal.source_end(&self.layout.data);
+            bound.get_or_insert_with(|| {
+                self.first_regular_break_after(&endpoints, normal_end, tab_origin)
+            });
             let candidate = match normal_end.key().cmp(&end.key()) {
                 core::cmp::Ordering::Less => None,
                 core::cmp::Ordering::Equal => Some(normal),
@@ -95,5 +115,23 @@ impl<B: Brush> BreakLines<'_, B> {
         self.layout.data.glyphs.truncate(retained_glyphs);
         self.letter_spacing_edges.clear();
         Some(fallback.expect("retained source has a terminal or unavoidable break"))
+    }
+
+    fn first_regular_break_after(
+        &mut self,
+        endpoints: &[SourceCursor],
+        natural_end: SourceCursor,
+        tab_origin: LineTabOrigin,
+    ) -> SourceCursor {
+        let terminal = *endpoints.last().expect("terminal endpoint");
+        endpoints
+            .iter()
+            .copied()
+            .filter(|end| end.key() > natural_end.key())
+            .find(|end| {
+                self.preview_source_break(*end, f32::MAX, tab_origin)
+                    .is_some_and(|candidate| candidate.line.break_reason == BreakReason::Regular)
+            })
+            .unwrap_or(terminal)
     }
 }

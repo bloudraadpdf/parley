@@ -24,6 +24,15 @@ struct WindowKey {
     expanded: bool,
 }
 
+impl WindowKey {
+    fn line_boundaries(&self) -> impl Iterator<Item = usize> + '_ {
+        self.segments
+            .iter()
+            .copied()
+            .filter(|segment| self.boundaries.binary_search(segment).is_err())
+    }
+}
+
 pub(crate) struct PhysicalShaper<B: Brush> {
     context: ShapeContext,
     scratch: LayoutData<B>,
@@ -111,6 +120,19 @@ impl<B: Brush> PhysicalShaper<B> {
             expanded,
             windows: BTreeMap::new(),
         }
+    }
+
+    pub(crate) fn release_line_windows(&mut self) {
+        self.windows
+            .retain(|key, _| key.line_boundaries().next().is_none());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn line_boundaries(&self) -> alloc::collections::BTreeSet<usize> {
+        self.windows
+            .keys()
+            .flat_map(WindowKey::line_boundaries)
+            .collect()
     }
 
     pub(crate) fn shape_line(

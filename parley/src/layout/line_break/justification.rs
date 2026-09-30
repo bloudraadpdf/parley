@@ -192,6 +192,9 @@ impl<B: Brush> BreakLines<'_, B> {
                 mutations: candidate.mutations,
             });
         }
+        if let Some(shaper) = &mut self.physical_shaper {
+            shaper.release_line_windows();
+        }
         self.state = candidate.state;
         self.done = candidate.done;
         let measured = (candidate.line.metrics.advance, candidate.line.size());
