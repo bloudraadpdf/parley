@@ -6,7 +6,7 @@ use core::ops::Range;
 
 use super::{
     ShapeContext,
-    source::{DeferredSourceShape, PreparedSourceShape, SourceShapePlan},
+    source::{DeferredSourceShape, PreparedSourceShape},
 };
 use crate::{
     Brush,
@@ -14,70 +14,68 @@ use crate::{
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct WindowKey {
+struct SegmentKey {
     run: usize,
-    start: usize,
-    end: usize,
+    source: (usize, usize),
     context: (usize, usize),
-    boundaries: Vec<usize>,
-    segments: Vec<usize>,
-    expanded: bool,
+    features: Vec<(harfrust::Tag, u32, u32, u32)>,
 }
 
-impl WindowKey {
-    fn line_boundaries(&self) -> impl Iterator<Item = usize> + '_ {
-        self.segments
-            .iter()
-            .copied()
-            .filter(|segment| self.boundaries.binary_search(segment).is_err())
-    }
+struct StoredSegment {
+    shape: Arc<PreparedSourceShape>,
+    line_boundaries: Vec<usize>,
 }
 
 pub(crate) struct PhysicalShaper<B: Brush> {
     context: ShapeContext,
     scratch: LayoutData<B>,
-    original: Arc<Vec<ClusterData>>,
-    expanded: Arc<Vec<ClusterData>>,
-    windows: BTreeMap<WindowKey, Arc<PreparedSourceShape>>,
+    owner_edges: Vec<usize>,
+    segments: BTreeMap<SegmentKey, StoredSegment>,
+    #[cfg(test)]
+    work: PhysicalWork,
 }
 
-struct PhysicalWindow {
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct PhysicalWork {
+    pub(crate) shaped_source: usize,
+    pub(crate) installed_clusters: usize,
+}
+
+struct PhysicalSegment {
     run: usize,
     clusters: Range<usize>,
     shape: Arc<PreparedSourceShape>,
 }
 
 pub(crate) struct PhysicalShape {
-    baseline: Arc<Vec<ClusterData>>,
-    windows: Vec<PhysicalWindow>,
+    segments: Vec<PhysicalSegment>,
+    end: Option<usize>,
 }
 
 impl PhysicalShape {
-    pub(crate) fn install<B: Brush>(&self, data: &mut LayoutData<B>) {
-        data.clusters.clone_from(&self.baseline);
-        for window in &self.windows {
-            window.shape.install_for_run(
-                &data.runs[window.run],
-                &mut data.clusters[window.clusters.clone()],
-                &mut data.glyphs,
-            );
-        }
-        crate::layout::apply_source_fit_projection(
-            &data.runs,
-            &mut data.clusters,
-            &data.source_cluster_fit_advances,
-        );
+    /// The shape gives the glyphs of the line up to `offset`.
+    pub(crate) fn covers(&self, offset: usize) -> bool {
+        self.end.is_none_or(|end| offset <= end)
     }
 }
 
+/// The clusters that an installed shape replaced.
+pub(crate) struct InstalledShape {
+    clusters: Vec<(usize, Vec<ClusterData>)>,
+    glyphs: usize,
+}
+
+/// The source ranges that need new glyphs for `points`, each from the safe boundary before a point to the safe
+/// boundary after it, with the last point in each range.
 fn affected_windows(
     range: &Range<usize>,
     safe: &[usize],
     mut points: Vec<usize>,
-) -> Vec<Range<usize>> {
+) -> Vec<(Range<usize>, usize)> {
     points.sort_unstable();
     points.dedup();
-    let mut windows: Vec<Range<usize>> = Vec::new();
+    let mut windows: Vec<(Range<usize>, usize)> = Vec::new();
     for point in points {
         let before = safe.partition_point(|boundary| *boundary <= point);
         let start = before
@@ -90,10 +88,14 @@ fn affected_windows(
         if start >= end {
             continue;
         }
-        if let Some(previous) = windows.last_mut().filter(|previous| previous.end >= start) {
+        if let Some((previous, last)) = windows
+            .last_mut()
+            .filter(|(previous, _)| previous.end >= start)
+        {
             previous.end = previous.end.max(end);
+            *last = point;
         } else {
-            windows.push(start..end);
+            windows.push((start..end, point));
         }
     }
     windows
@@ -101,45 +103,52 @@ fn affected_windows(
 
 impl<B: Brush> PhysicalShaper<B> {
     pub(crate) fn new(data: &LayoutData<B>) -> Self {
-        let original = Arc::new(data.line_shape_variants.as_ref().map_or_else(
-            || data.clusters.clone(),
-            |variants| variants.original.clone(),
-        ));
-        let expanded = data
-            .line_shape_variants
-            .as_ref()
-            .filter(|variants| variants.policy != crate::JustificationShapePolicy::default())
-            .map_or_else(
-                || Arc::clone(&original),
-                |variants| Arc::new(variants.expanded.clone()),
-            );
+        let mut owner_edges = data
+            .inline_owner_shaping
+            .iter()
+            .filter(|owner| !owner.edges.is_empty())
+            .flat_map(|owner| [owner.text.start, owner.text.end])
+            .collect::<Vec<_>>();
+        owner_edges.sort_unstable();
+        owner_edges.dedup();
         Self {
             context: ShapeContext::default(),
             scratch: super::source::source_scratch(data),
-            original,
-            expanded,
-            windows: BTreeMap::new(),
+            owner_edges,
+            segments: BTreeMap::new(),
+            #[cfg(test)]
+            work: PhysicalWork::default(),
         }
     }
 
-    pub(crate) fn release_line_windows(&mut self) {
-        self.windows
-            .retain(|key, _| key.line_boundaries().next().is_none());
+    pub(crate) fn release_line_segments(&mut self) {
+        self.segments
+            .retain(|_, segment| segment.line_boundaries.is_empty());
     }
 
     #[cfg(test)]
     pub(crate) fn line_boundaries(&self) -> alloc::collections::BTreeSet<usize> {
-        self.windows
-            .keys()
-            .flat_map(WindowKey::line_boundaries)
+        self.segments
+            .values()
+            .flat_map(|segment| segment.line_boundaries.iter().copied())
             .collect()
     }
 
+    #[cfg(test)]
+    pub(crate) fn work(&self) -> PhysicalWork {
+        self.work
+    }
+
+    /// The segments of a line from `line_start`: each window of `affected_windows` from the line start to the next
+    /// owner edge after its last point, and not after the first boundary at or after `limit`, split at the boundaries
+    /// and the soft line boundaries.
     pub(crate) fn shape_line(
         &mut self,
         data: &LayoutData<B>,
         boundaries: &[usize],
         soft_boundaries: &[usize],
+        line_start: usize,
+        limit: Option<usize>,
         expanded: bool,
     ) -> PhysicalShape {
         let source = data
@@ -156,7 +165,12 @@ impl<B: Brush> PhysicalShaper<B> {
         let mut boundaries = boundaries.to_vec();
         boundaries.sort_unstable();
         boundaries.dedup();
-        let mut windows = Vec::new();
+        let end = limit.and_then(|limit| {
+            boundaries[boundaries.partition_point(|boundary| *boundary < limit)..]
+                .first()
+                .copied()
+        });
+        let mut segments = Vec::new();
         for deferred in &data.deferred_physical_shapes {
             let run = &data.runs[deferred.run_index];
             let alternative = expanded
@@ -189,105 +203,211 @@ impl<B: Brush> PhysicalShaper<B> {
                     *boundary > run.text_range.start && *boundary < run.text_range.end
                 }))
                 .collect();
-            for range in affected_windows(&run.text_range, &safe, points) {
-                let context = (
-                    if safe.binary_search(&range.start).is_ok() {
-                        range.start
-                    } else {
-                        deferred.context.start
-                    },
-                    if safe.binary_search(&range.end).is_ok() {
-                        range.end
-                    } else {
-                        deferred.context.end
-                    },
-                );
+            for (range, last) in affected_windows(&run.text_range, &safe, points) {
+                let context = (if safe.binary_search(&range.start).is_ok() {
+                    range.start
+                } else {
+                    deferred.context.start
+                })..(if safe.binary_search(&range.end).is_ok() {
+                    range.end
+                } else {
+                    deferred.context.end
+                });
+                let next_edge = self.owner_edges
+                    [self.owner_edges.partition_point(|edge| *edge <= last)..]
+                    .first()
+                    .copied()
+                    .unwrap_or(range.end);
+                let install = range.start.max(line_start)
+                    ..range.end.min(next_edge).min(end.unwrap_or(range.end));
+                if install.is_empty() {
+                    continue;
+                }
                 let relevant = boundaries
                     .iter()
                     .copied()
-                    .filter(|boundary| *boundary > context.0 && *boundary < context.1)
+                    .filter(|boundary| *boundary > context.start && *boundary < context.end)
                     .collect::<Vec<_>>();
-                let mut segments = relevant.clone();
-                segments.extend(
+                let mut cuts = relevant.clone();
+                cuts.extend(
                     soft_boundaries
                         .iter()
                         .copied()
                         .filter(|boundary| range.contains(boundary)),
                 );
-                segments.sort_unstable();
-                segments.dedup();
-                let key = WindowKey {
-                    run: deferred.run_index,
-                    start: range.start,
-                    end: range.end,
-                    context,
-                    boundaries: relevant,
-                    segments,
-                    expanded,
-                };
-                if !self.windows.contains_key(&key) {
-                    let natural =
-                        self.prepare_window(data, source, deferred, &key, &deferred.features);
-                    let prepared = if let Some(alternative) = alternative {
-                        let features =
-                            alternative.eligible_features(run, &natural.clusters, |range| {
-                                data.justification_opportunities
-                                    .text_boundaries(range)
-                                    .next()
-                                    .is_some()
-                            });
-                        if features == deferred.features {
-                            natural
-                        } else {
-                            self.prepare_window(data, source, deferred, &key, &features)
+                cuts.sort_unstable();
+                cuts.dedup();
+                let mut start = install.start;
+                for end in cuts
+                    .iter()
+                    .copied()
+                    .filter(|cut| *cut > install.start && *cut < install.end)
+                    .chain(core::iter::once(install.end))
+                {
+                    let before = relevant.partition_point(|boundary| *boundary <= start);
+                    let after = relevant.partition_point(|boundary| *boundary < end);
+                    let segment_context = relevant[..before]
+                        .last()
+                        .copied()
+                        .unwrap_or(context.start)
+                        .max(context.start)
+                        ..relevant
+                            .get(after)
+                            .copied()
+                            .unwrap_or(context.end)
+                            .min(context.end);
+                    let line_boundaries = [start, end]
+                        .into_iter()
+                        .filter(|edge| {
+                            range.contains(edge)
+                                && soft_boundaries.contains(edge)
+                                && boundaries.binary_search(edge).is_err()
+                        })
+                        .collect::<Vec<_>>();
+                    let natural = self.segment(
+                        data,
+                        deferred,
+                        start..end,
+                        segment_context.clone(),
+                        &deferred.features,
+                        &line_boundaries,
+                    );
+                    let shape = match alternative {
+                        Some(alternative) => {
+                            let features =
+                                alternative.eligible_features(run, &natural.clusters, |range| {
+                                    data.justification_opportunities
+                                        .text_boundaries(range)
+                                        .next()
+                                        .is_some()
+                                });
+                            if features == deferred.features {
+                                natural
+                            } else {
+                                self.segment(
+                                    data,
+                                    deferred,
+                                    start..end,
+                                    segment_context,
+                                    &features,
+                                    &line_boundaries,
+                                )
+                            }
                         }
-                    } else {
-                        natural
+                        None => natural,
                     };
-                    self.windows.insert(key.clone(), Arc::new(prepared));
+                    let clusters = &data.clusters[run.cluster_range.clone()];
+                    let first =
+                        clusters.partition_point(|cluster| cluster.text_range(run).start < start);
+                    let last =
+                        clusters.partition_point(|cluster| cluster.text_range(run).start < end);
+                    segments.push(PhysicalSegment {
+                        run: deferred.run_index,
+                        clusters: run.cluster_range.start + first..run.cluster_range.start + last,
+                        shape,
+                    });
+                    start = end;
                 }
-                let original = &self.original[run.cluster_range.clone()];
-                let first =
-                    original.partition_point(|cluster| cluster.text_range(run).start < range.start);
-                let last =
-                    original.partition_point(|cluster| cluster.text_range(run).start < range.end);
-                windows.push(PhysicalWindow {
-                    run: deferred.run_index,
-                    clusters: run.cluster_range.start + first..run.cluster_range.start + last,
-                    shape: Arc::clone(&self.windows[&key]),
-                });
             }
         }
-        PhysicalShape {
-            baseline: Arc::clone(if expanded {
-                &self.expanded
-            } else {
-                &self.original
-            }),
-            windows,
+        PhysicalShape { segments, end }
+    }
+
+    fn segment(
+        &mut self,
+        data: &LayoutData<B>,
+        deferred: &DeferredSourceShape,
+        range: Range<usize>,
+        context: Range<usize>,
+        features: &[harfrust::Feature],
+        line_boundaries: &[usize],
+    ) -> Arc<PreparedSourceShape> {
+        let key = SegmentKey {
+            run: deferred.run_index,
+            source: (range.start, range.end),
+            context: (context.start, context.end),
+            features: deferred
+                .range_features(&data.runs[deferred.run_index], &range, features)
+                .into_iter()
+                .map(|feature| (feature.tag, feature.value, feature.start, feature.end))
+                .collect(),
+        };
+        if let Some(stored) = self.segments.get(&key) {
+            return Arc::clone(&stored.shape);
+        }
+        #[cfg(test)]
+        {
+            self.work.shaped_source += range.len();
+        }
+        let shape = Arc::new(
+            deferred.shape_source_range(
+                &mut self.context,
+                &mut self.scratch,
+                data,
+                data.shaping_source_text
+                    .as_deref()
+                    .expect("retained physical shaping source"),
+                range,
+                context,
+                features,
+            ),
+        );
+        self.segments.insert(
+            key,
+            StoredSegment {
+                shape: Arc::clone(&shape),
+                line_boundaries: line_boundaries.to_vec(),
+            },
+        );
+        shape
+    }
+
+    /// Keeps the clusters that `shape` replaces, then installs it.
+    pub(crate) fn install(
+        &mut self,
+        data: &mut LayoutData<B>,
+        shape: &PhysicalShape,
+    ) -> InstalledShape {
+        let installed = InstalledShape {
+            clusters: shape
+                .segments
+                .iter()
+                .map(|segment| {
+                    (
+                        segment.clusters.start,
+                        data.clusters[segment.clusters.clone()].to_vec(),
+                    )
+                })
+                .collect(),
+            glyphs: data.glyphs.len(),
+        };
+        self.keep(data, shape);
+        installed
+    }
+
+    /// Replaces the clusters of each segment of `shape` and appends its glyphs.
+    pub(crate) fn keep(&mut self, data: &mut LayoutData<B>, shape: &PhysicalShape) {
+        for segment in &shape.segments {
+            let run = &data.runs[segment.run];
+            let target = &mut data.clusters[segment.clusters.clone()];
+            segment.shape.install_for_run(run, target, &mut data.glyphs);
+            crate::layout::project_source_fit(run, target, &data.source_cluster_fit_advances);
+            #[cfg(test)]
+            {
+                self.work.installed_clusters += target.len();
+            }
         }
     }
 
-    fn prepare_window(
-        &mut self,
-        data: &LayoutData<B>,
-        source: &str,
-        deferred: &DeferredSourceShape,
-        key: &WindowKey,
-        features: &[harfrust::Feature],
-    ) -> PreparedSourceShape {
-        deferred.shape_with_boundaries(
-            &mut self.context,
-            &mut self.scratch,
-            data,
-            source,
-            SourceShapePlan {
-                source: key.start..key.end,
-                context: key.context.0..key.context.1,
-                context_boundaries: &key.boundaries,
-                segment_boundaries: &key.segments,
-                features,
-            },
-        )
+    /// Gives back the clusters that `installed` replaced and removes its glyphs.
+    pub(crate) fn remove(&mut self, data: &mut LayoutData<B>, installed: InstalledShape) {
+        for (start, clusters) in installed.clusters.into_iter().rev() {
+            #[cfg(test)]
+            {
+                self.work.installed_clusters += clusters.len();
+            }
+            data.clusters[start..start + clusters.len()].copy_from_slice(&clusters);
+        }
+        data.glyphs.truncate(installed.glyphs);
     }
 }

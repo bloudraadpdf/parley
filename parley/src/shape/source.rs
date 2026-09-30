@@ -36,14 +36,6 @@ pub(crate) struct PreparedSourceShape {
     pub(crate) safe_concat_boundaries: Vec<usize>,
 }
 
-pub(super) struct SourceShapePlan<'a> {
-    pub source: Range<usize>,
-    pub context: Range<usize>,
-    pub context_boundaries: &'a [usize],
-    pub segment_boundaries: &'a [usize],
-    pub features: &'a [harfrust::Feature],
-}
-
 impl PreparedSourceShape {
     pub(crate) fn install_for_run(
         &self,
@@ -69,19 +61,6 @@ impl PreparedSourceShape {
             }
         }
         glyphs.extend_from_slice(&self.glyphs);
-    }
-
-    fn append(&mut self, mut suffix: Self) {
-        let offset = self.glyphs.len() as u32;
-        for cluster in &mut suffix.clusters {
-            if cluster.glyph_len != 0xFF {
-                cluster.glyph_offset += offset;
-            }
-        }
-        self.clusters.extend(suffix.clusters);
-        self.glyphs.extend(suffix.glyphs);
-        self.safe_concat_boundaries
-            .extend(suffix.safe_concat_boundaries);
     }
 }
 
@@ -111,61 +90,36 @@ pub(super) fn safe_concat_boundaries(
 }
 
 impl DeferredSourceShape {
-    pub(super) fn shape_with_boundaries<B: Brush>(
-        &self,
-        context: &mut super::ShapeContext,
-        scratch: &mut crate::layout::data::LayoutData<B>,
-        data: &crate::layout::data::LayoutData<B>,
-        source: &str,
-        plan: SourceShapePlan<'_>,
-    ) -> PreparedSourceShape {
-        let SourceShapePlan {
-            source: range,
-            context: source_context,
-            context_boundaries: boundaries,
-            segment_boundaries: segments,
-            features,
-        } = plan;
-        let first = segments.partition_point(|boundary| *boundary <= range.start);
-        let last = segments.partition_point(|boundary| *boundary < range.end);
-        let mut prepared = PreparedSourceShape {
-            clusters: Vec::new(),
-            glyphs: Vec::new(),
-            source: range.clone(),
-            safe_concat_boundaries: Vec::new(),
+    fn characters(&self, run: &crate::layout::data::RunData, range: &Range<usize>) -> Range<usize> {
+        let character = |offset: usize| {
+            self.character_offsets
+                .binary_search(&(offset - run.text_range.start))
+                .expect("source character")
         };
-        let mut start = range.start;
-        for end in segments[first..last]
+        character(range.start)..character(range.end)
+    }
+
+    /// The parts of `features` on the characters of `range`, from its first character.
+    pub(crate) fn range_features(
+        &self,
+        run: &crate::layout::data::RunData,
+        range: &Range<usize>,
+        features: &[harfrust::Feature],
+    ) -> Vec<harfrust::Feature> {
+        let characters = self.characters(run, range);
+        features
             .iter()
-            .copied()
-            .chain(core::iter::once(range.end))
-        {
-            let before = boundaries.partition_point(|boundary| *boundary <= start);
-            let after = boundaries.partition_point(|boundary| *boundary < end);
-            let context_start = boundaries[..before]
-                .last()
-                .copied()
-                .unwrap_or(source_context.start)
-                .max(source_context.start);
-            let context_end = boundaries
-                .get(after)
-                .copied()
-                .unwrap_or(source_context.end)
-                .min(source_context.end);
-            prepared.append(self.shape_source_range(
-                context,
-                scratch,
-                data,
-                source,
-                start..end,
-                context_start..context_end,
-                features,
-            ));
-            start = end;
-        }
-        prepared.safe_concat_boundaries.sort_unstable();
-        prepared.safe_concat_boundaries.dedup();
-        prepared
+            .filter_map(|feature| {
+                let start = (feature.start as usize).max(characters.start);
+                let end = (feature.end as usize).min(characters.end);
+                (start < end).then(|| harfrust::Feature {
+                    tag: feature.tag,
+                    value: feature.value,
+                    start: (start - characters.start) as u32,
+                    end: (end - characters.start) as u32,
+                })
+            })
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -181,28 +135,8 @@ impl DeferredSourceShape {
     ) -> PreparedSourceShape {
         let run = &data.runs[self.run_index];
         let text = &source[range.clone()];
-        let first = self
-            .character_offsets
-            .binary_search(&(range.start - run.text_range.start))
-            .expect("source character");
-        let last = self
-            .character_offsets
-            .binary_search(&(range.end - run.text_range.start))
-            .expect("source character");
-        let infos = &self.character_infos[first..last];
-        let features = features
-            .iter()
-            .filter_map(|feature| {
-                let start = (feature.start as usize).max(first);
-                let end = (feature.end as usize).min(last);
-                (start < end).then(|| harfrust::Feature {
-                    tag: feature.tag,
-                    value: feature.value,
-                    start: (start - first) as u32,
-                    end: (end - first) as u32,
-                })
-            })
-            .collect::<Vec<_>>();
+        let infos = &self.character_infos[self.characters(run, &range)];
+        let features = self.range_features(run, &range, features);
         let analysis = crate::analysis::AnalysisDataSources::new();
         let script = crate::convert::script_to_fontique(self.script, &analysis);
         let shaped = context.shape_segment(super::segment::SegmentShape {

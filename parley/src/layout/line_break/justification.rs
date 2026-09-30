@@ -112,7 +112,7 @@ pub(crate) struct LineShapeCandidate {
     pub(super) items: Vec<LineItemData>,
     mutations: CandidateMutations,
     done: bool,
-    pub(super) physical_clusters: Option<Vec<ClusterData>>,
+    pub(super) physical_shape: Option<crate::shape::physical::PhysicalShape>,
 }
 
 impl LineShapeCandidate {
@@ -165,7 +165,7 @@ impl<B: Brush> BreakLines<'_, B> {
             items: self.lines.line_items.split_off(item_start),
             mutations,
             done: self.done,
-            physical_clusters: None,
+            physical_shape: None,
         });
         self.lines.lines.truncate(line_start);
         self.lines.line_items.truncate(item_start);
@@ -181,8 +181,11 @@ impl<B: Brush> BreakLines<'_, B> {
         mut candidate: LineShapeCandidate,
     ) -> (f32, f32) {
         self.prev_state = Some(self.state.clone());
-        if let Some(clusters) = candidate.physical_clusters.take() {
-            self.layout.data.clusters = clusters;
+        if let Some(shape) = candidate.physical_shape.take() {
+            self.physical_shaper
+                .as_mut()
+                .expect("physical source shaper")
+                .keep(&mut self.layout.data, &shape);
         }
         candidate.mutations.apply(&mut self.layout.data);
         if let Some(candidates) = &mut self.shape_candidates {
@@ -193,7 +196,7 @@ impl<B: Brush> BreakLines<'_, B> {
             });
         }
         if let Some(shaper) = &mut self.physical_shaper {
-            shaper.release_line_windows();
+            shaper.release_line_segments();
         }
         self.state = candidate.state;
         self.done = candidate.done;
@@ -346,13 +349,13 @@ impl<B: Brush> BreakLines<'_, B> {
         let mut candidate =
             self.preview_shape_candidate_with(|breaker| breaker.break_next_with_length(max_chars))?;
         if self.physical_shaper.is_some() {
-            let original = self.layout.data.clusters.clone();
-            self.shape_physical_prefix(&candidate, false);
+            let (shape, _) = self.physical_prefix_shape(&candidate, None, false);
+            let installed = self.install_physical_shape(&shape);
             candidate = self
                 .preview_shape_candidate_with(|breaker| breaker.break_next_with_length(max_chars))
                 .expect("same retained source count");
-            candidate.physical_clusters =
-                Some(core::mem::replace(&mut self.layout.data.clusters, original));
+            self.remove_physical_shape(installed);
+            candidate.physical_shape = Some(shape);
         }
         self.commit_shape_candidate(candidate);
         Some(())

@@ -31,6 +31,25 @@ impl SourceCursor {
         Self::BeforeItem(item)
     }
 
+    pub(super) fn source_offset<B: Brush>(self, data: &crate::layout::LayoutData<B>) -> usize {
+        let (item, cluster) = match self {
+            Self::BeforeItem(item) => (item, None),
+            Self::WithinText { item, cluster } => (item, Some(cluster)),
+        };
+        let Some(source) = data.items.get(item) else {
+            return data.text_len;
+        };
+        match (source.kind, cluster) {
+            (LayoutItemKind::TextRun, Some(cluster)) => {
+                data.clusters[cluster]
+                    .text_range(&data.runs[source.index])
+                    .start
+            }
+            (LayoutItemKind::TextRun, None) => source.text_range.start,
+            (LayoutItemKind::InlineBox, _) => data.inline_boxes[source.index].index,
+        }
+    }
+
     pub(super) fn key(self) -> (usize, Option<usize>) {
         match self {
             Self::BeforeItem(item) => (item, None),

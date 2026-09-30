@@ -50,10 +50,20 @@ Line selection retains the feature policy for character spacing.
 A new width or `BreakLines::revert` can change the selected glyphs.
 Each line retains the glyphs used for its advance.
 
-`safe_concat_boundaries` limits the source ranges that require new glyphs.
-`PhysicalShaper` stores these ranges for reuse. Other ranges retain their glyphs.
-A committed line removes the stored ranges that contain a soft line boundary.
-The ranges without one stay for later lines.
+A candidate gets new glyphs from its line start to the next
+`safe_concat_boundaries` position or owner edge after its last boundary. Other
+ranges retain their glyphs. No candidate reads the source before its line
+start, and each line keeps the glyphs of its commit. Soft line boundaries and
+box edges split a range into segments. Each segment gets its glyphs alone,
+with the glyph context of its context limits. `PhysicalShaper` stores each
+segment for reuse. A committed line removes the stored segments that start or
+end at a soft line boundary. The other segments stay for later lines.
+
+A candidate installs its segments on the glyphs of the previous lines and
+removes them after its measurement. The candidate keeps its segments, and its
+commit installs them again. The terminal candidate gets new glyphs only up to
+the first boundary after twice its natural line. It measures again with a
+wider limit when its first overflowing word ends after that boundary.
 
 `calculate_content_widths` uses the same glyph selection for minimum and maximum
 widths. The source layout does not change. Emergency breaks from `break-word`

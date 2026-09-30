@@ -294,11 +294,15 @@ const EDGED_WORD: &str = "word ";
 const EDGED_WORDS: usize = 40;
 
 fn edged_words() -> Layout<ColorBrush> {
-    let text = EDGED_WORD.repeat(EDGED_WORDS);
+    edged_words_in("Roboto", EDGED_WORDS)
+}
+
+fn edged_words_in(family: &str, words: usize) -> Layout<ColorBrush> {
+    let text = EDGED_WORD.repeat(words);
     let mut fonts = create_font_context();
     let mut context = LayoutContext::<ColorBrush>::new();
     let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
-    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named(family)));
     builder.push_default(StyleProperty::FontSize(10.0));
     for start in (0..text.len()).step_by(EDGED_WORD.len()) {
         builder.push_inline_owner_shaping(InlineOwnerShaping {
@@ -320,9 +324,41 @@ fn edged_words() -> Layout<ColorBrush> {
 }
 
 fn four_edged_words_measure() -> f32 {
-    let mut layout = edged_words();
+    four_edged_words_measure_in("Roboto", EDGED_WORDS)
+}
+
+fn four_edged_words_measure_in(family: &str, words: usize) -> f32 {
+    let mut layout = edged_words_in(family, words);
     layout.break_all_lines(None);
-    layout.width() * 4.5 / EDGED_WORDS as f32
+    layout.width() * 4.5 / words as f32
+}
+
+fn physical_line_fit_work(family: &str, words: usize) -> crate::shape::physical::PhysicalWork {
+    let measure = four_edged_words_measure_in(family, words);
+    let mut layout = edged_words_in(family, words);
+    let mut breaker = layout.break_lines();
+    while breaker.break_next(measure, LineTabOrigin::ZERO).is_some() {}
+    breaker.physical_work()
+}
+
+#[test]
+fn a_physical_line_fit_shapes_source_in_proportion_to_its_lines() {
+    let short = physical_line_fit_work("Roboto Flex", 80);
+    let long = physical_line_fit_work("Roboto Flex", 160);
+    assert!(
+        long.shaped_source * 10 <= short.shaped_source * 22,
+        "{short:?} to {long:?}"
+    );
+}
+
+#[test]
+fn a_physical_line_fit_installs_clusters_in_proportion_to_its_lines() {
+    let short = physical_line_fit_work("Roboto Flex", 80);
+    let long = physical_line_fit_work("Roboto Flex", 160);
+    assert!(
+        long.installed_clusters * 10 <= short.installed_clusters * 22,
+        "{short:?} to {long:?}"
+    );
 }
 
 #[test]

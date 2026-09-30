@@ -7,6 +7,7 @@ use super::{
 use crate::{
     Brush,
     layout::{BreakReason, physical_shaping::physical_shaping_boundaries},
+    shape::physical::PhysicalShape,
 };
 
 impl<B: Brush> BreakLines<'_, B> {
@@ -18,11 +19,20 @@ impl<B: Brush> BreakLines<'_, B> {
             .line_boundaries()
     }
 
-    pub(super) fn shape_physical_prefix(
+    #[cfg(test)]
+    pub(crate) fn physical_work(&self) -> crate::shape::physical::PhysicalWork {
+        self.physical_shaper
+            .as_ref()
+            .expect("physical source shaper")
+            .work()
+    }
+
+    pub(super) fn physical_prefix_shape(
         &mut self,
         prefix: &LineShapeCandidate,
+        limit: Option<usize>,
         expanded: bool,
-    ) -> alloc::vec::Vec<usize> {
+    ) -> (PhysicalShape, alloc::vec::Vec<usize>) {
         let boundaries = physical_shaping_boundaries(
             &self.layout.data,
             &prefix.items,
@@ -40,11 +50,35 @@ impl<B: Brush> BreakLines<'_, B> {
                 soft_boundaries
                     .as_ref()
                     .map_or(&[], |range| range.as_slice()),
+                prefix.line.text_range.start,
+                limit,
                 expanded,
             );
-        shape.install(&mut self.layout.data);
+        (shape, boundaries)
+    }
+
+    pub(super) fn install_physical_shape(
+        &mut self,
+        shape: &PhysicalShape,
+    ) -> crate::shape::physical::InstalledShape {
+        let installed = self
+            .physical_shaper
+            .as_mut()
+            .expect("physical source shaper")
+            .install(&mut self.layout.data, shape);
         self.letter_spacing_edges.clear();
-        boundaries
+        installed
+    }
+
+    pub(super) fn remove_physical_shape(
+        &mut self,
+        installed: crate::shape::physical::InstalledShape,
+    ) {
+        self.physical_shaper
+            .as_mut()
+            .expect("physical source shaper")
+            .remove(&mut self.layout.data, installed);
+        self.letter_spacing_edges.clear();
     }
 
     pub(super) fn preview_physical_candidate(
@@ -54,48 +88,63 @@ impl<B: Brush> BreakLines<'_, B> {
     ) -> Option<LineShapeCandidate> {
         let terminal = self.preview_natural_candidate(f32::MAX, tab_origin)?;
         let endpoints = self.source_endpoints(terminal.source_end(&self.layout.data));
-        let original = self.layout.data.clusters.clone();
-        let mut retained_glyphs = self.layout.data.glyphs.len();
         let expanded = self
             .shape_candidates
             .as_ref()
             .is_some_and(|shapes| shapes.expanded);
+        let mut limit = self
+            .preview_natural_candidate(measure, tab_origin)
+            .map(|natural| natural.line.text_range.end + natural.line.text_range.len());
         let mut fallback = None;
         let mut bound = None;
         for end in endpoints.iter().copied().rev() {
             if bound.is_some_and(|bound: SourceCursor| end.key() > bound.key()) {
                 continue;
             }
-            self.layout.data.clusters.clone_from(&original);
-            self.layout.data.glyphs.truncate(retained_glyphs);
             let Some(prefix) = self.preview_source_prefix(end, tab_origin) else {
                 continue;
             };
-            let boundaries = self.shape_physical_prefix(&prefix, expanded);
-            let normal = self
-                .preview_natural_candidate(measure, tab_origin)
-                .expect("retained source prefix");
-            let normal_end = normal.source_end(&self.layout.data);
-            bound.get_or_insert_with(|| {
-                self.first_regular_break_after(&endpoints, normal_end, tab_origin)
-            });
-            let candidate = match normal_end.key().cmp(&end.key()) {
-                core::cmp::Ordering::Less => None,
-                core::cmp::Ordering::Equal => Some(normal),
-                core::cmp::Ordering::Greater => self.preview_source_break(end, measure, tab_origin),
+            let (shape, candidate) = loop {
+                let (shape, boundaries) = self.physical_prefix_shape(
+                    &prefix,
+                    limit.filter(|_| bound.is_none()),
+                    expanded,
+                );
+                let installed = self.install_physical_shape(&shape);
+                let normal = self
+                    .preview_natural_candidate(measure, tab_origin)
+                    .expect("retained source prefix");
+                let normal_end = normal.source_end(&self.layout.data);
+                let line_bound = bound.unwrap_or_else(|| {
+                    self.first_regular_break_after(&endpoints, normal_end, tab_origin)
+                });
+                if !shape.covers(line_bound.source_offset(&self.layout.data)) {
+                    self.remove_physical_shape(installed);
+                    let line_start = prefix.line.text_range.start;
+                    limit = limit.map(|limit| limit + (limit - line_start).max(1));
+                    continue;
+                }
+                bound = Some(line_bound);
+                let candidate = match normal_end.key().cmp(&end.key()) {
+                    core::cmp::Ordering::Less => None,
+                    core::cmp::Ordering::Equal => Some(normal),
+                    core::cmp::Ordering::Greater => {
+                        self.preview_source_break(end, measure, tab_origin)
+                    }
+                }
+                .filter(|candidate| {
+                    physical_shaping_boundaries(
+                        &self.layout.data,
+                        &candidate.items,
+                        &self.layout.data.inline_owner_shaping,
+                    ) == boundaries
+                });
+                self.remove_physical_shape(installed);
+                break (shape, candidate);
             };
             let Some(mut candidate) = candidate else {
                 continue;
             };
-            if physical_shaping_boundaries(
-                &self.layout.data,
-                &candidate.items,
-                &self.layout.data.inline_owner_shaping,
-            ) != boundaries
-            {
-                continue;
-            }
-            candidate.physical_clusters = Some(self.layout.data.clusters.clone());
             let fits = super::line_advance_fits(
                 candidate.line.fitting_advance(),
                 candidate.line.max_advance,
@@ -105,15 +154,12 @@ impl<B: Brush> BreakLines<'_, B> {
                     .map(|item| item.cluster_range.len() + 1)
                     .sum(),
             );
-            retained_glyphs = self.layout.data.glyphs.len();
+            candidate.physical_shape = Some(shape);
             fallback = Some(candidate);
             if fits {
                 break;
             }
         }
-        self.layout.data.clusters = original;
-        self.layout.data.glyphs.truncate(retained_glyphs);
-        self.letter_spacing_edges.clear();
         Some(fallback.expect("retained source has a terminal or unavoidable break"))
     }
 

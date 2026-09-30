@@ -23,7 +23,7 @@ mod run;
     reason = "Private inner module for code organisation"
 )]
 mod layout;
-pub(crate) use layout::apply_source_fit_projection;
+pub(crate) use layout::{apply_source_fit_projection, project_source_fit};
 
 pub(crate) mod data;
 

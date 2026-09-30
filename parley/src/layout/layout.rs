@@ -693,12 +693,20 @@ pub(crate) fn apply_source_fit_projection(
         return;
     }
     for run in runs {
-        for cluster in &mut clusters[run.cluster_range.clone()] {
-            let byte_index = cluster.text_range(run).start;
-            if let Ok(index) = advances.binary_search_by_key(&byte_index, |entry| entry.byte_index)
-            {
-                cluster.line_break_advance = advances[index].advance;
-            }
+        project_source_fit(run, &mut clusters[run.cluster_range.clone()], advances);
+    }
+}
+
+/// Sets the line-break advance of each cluster of `run` in `clusters` that `advances` gives.
+pub(crate) fn project_source_fit(
+    run: &super::data::RunData,
+    clusters: &mut [super::data::ClusterData],
+    advances: &[SourceClusterFitAdvance],
+) {
+    for cluster in clusters {
+        let byte_index = cluster.text_range(run).start;
+        if let Ok(index) = advances.binary_search_by_key(&byte_index, |entry| entry.byte_index) {
+            cluster.line_break_advance = advances[index].advance;
         }
     }
 }
