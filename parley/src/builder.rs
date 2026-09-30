@@ -11,6 +11,7 @@ use super::layout::Layout;
 
 use alloc::string::String;
 use core::ops::{Bound, Range, RangeBounds};
+use hashbrown::HashSet;
 
 use crate::inline_box::InlineBox;
 use crate::resolve::{ResolvedStyle, StyleRun, tree::ItemKind};
@@ -303,20 +304,38 @@ fn build_into_layout<B: Brush>(
     layout.data.nominal_font_metric_line_breaks = lcx.nominal_font_metric_line_breaks;
     layout.data.base_level = lcx.bidi.base_level();
     layout.data.text_len = text.len();
-    for owner in &lcx.inline_owner_shaping {
-        assert!(
-            owner.text.start <= owner.text.end
-                && text.is_char_boundary(owner.text.start)
-                && text.is_char_boundary(owner.text.end),
-            "inline owners must use UTF-8 source ranges"
-        );
-        assert!(
-            owner
-                .inline_boxes
-                .iter()
-                .all(|id| lcx.inline_boxes.iter().any(|inline| inline.id == *id)),
-            "inline owner boxes must occur in the source layout"
-        );
+    if !lcx.inline_owner_shaping.is_empty() {
+        #[cfg(test)]
+        let reads = core::cell::Cell::new(0);
+        let box_ids = lcx
+            .inline_boxes
+            .iter()
+            .map(|inline| {
+                #[cfg(test)]
+                reads.set(reads.get() + 1);
+                inline.id
+            })
+            .collect::<HashSet<_>>();
+        for owner in &lcx.inline_owner_shaping {
+            assert!(
+                owner.text.start <= owner.text.end
+                    && text.is_char_boundary(owner.text.start)
+                    && text.is_char_boundary(owner.text.end),
+                "inline owners must use UTF-8 source ranges"
+            );
+            assert!(
+                owner.inline_boxes.iter().all(|id| {
+                    #[cfg(test)]
+                    reads.set(reads.get() + 1);
+                    box_ids.contains(id)
+                }),
+                "inline owner boxes must occur in the source layout"
+            );
+        }
+        #[cfg(test)]
+        {
+            lcx.owner_box_reads += reads.get();
+        }
     }
     layout
         .data

@@ -264,3 +264,42 @@ fn physical_owner_membership_rejects_an_unknown_atomic() {
     builder.push_inline_owner_shaping(owned);
     let _ = builder.build("a");
 }
+
+#[test]
+fn owner_box_membership_reads_each_box_in_proportion_to_the_owners() {
+    let reads = |owners: usize| {
+        let text = "a".repeat(owners);
+        let mut fonts = create_font_context();
+        let mut context = crate::LayoutContext::<ColorBrush>::new();
+        let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
+        for index in 0..owners {
+            let id = 2 * index as u64;
+            builder.push_inline_box(InlineBox::inline_start_edge(
+                id,
+                index,
+                1.0,
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            ));
+            builder.push_inline_box(InlineBox::inline_end_edge(
+                id + 1,
+                index + 1,
+                1.0,
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ));
+            let mut owned = owner(
+                index..index + 1,
+                PhysicalLineEdge::Left,
+                ShapingEdgePlacement::FirstLine,
+            );
+            owned.inline_boxes.extend([id, id + 1]);
+            builder.push_inline_owner_shaping(owned);
+        }
+        let _ = builder.build(&text);
+        context.owner_box_reads
+    };
+    let short = reads(80);
+    let long = reads(160);
+    assert!(long * 10 <= short * 22, "{short} to {long}");
+}

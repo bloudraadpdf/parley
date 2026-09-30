@@ -70,6 +70,8 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     // Whether line fit uses nominal font metrics while glyph positioning and
     // emitted advances retain shaping adjustments such as kerning.
     pub(crate) nominal_font_metric_line_breaks: bool,
+    #[cfg(test)]
+    pub(crate) owner_box_reads: usize,
 }
 
 impl<B: Brush> LayoutContext<B> {
@@ -90,6 +92,8 @@ impl<B: Brush> LayoutContext<B> {
             scx: ShapeContext::default(),
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
+            #[cfg(test)]
+            owner_box_reads: 0,
         }
     }
 
