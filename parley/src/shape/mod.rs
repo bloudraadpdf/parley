@@ -39,6 +39,8 @@ pub(crate) struct ShapeContext {
     unicode_buffer: Option<harfrust::UnicodeBuffer>,
     features: Vec<harfrust::Feature>,
     char_cluster: CharCluster,
+    #[cfg(test)]
+    pub(crate) box_level_bytes: usize,
 }
 
 impl Default for ShapeContext {
@@ -51,6 +53,8 @@ impl Default for ShapeContext {
             unicode_buffer: Some(harfrust::UnicodeBuffer::new()),
             features: Vec::new(),
             char_cluster: CharCluster::default(),
+            #[cfg(test)]
+            box_level_bytes: 0,
         }
     }
 }
@@ -70,15 +74,37 @@ struct Item {
     letter_spacing: f32,
 }
 
-fn inline_box_bidi_level(
-    bidi: &crate::bidi::BidiResolver,
-    text: &str,
-    inline_box: &InlineBox,
-) -> u8 {
-    if inline_box.line_break_participation() == InlineBoxLineBreakParticipation::ContextualSpacing {
-        bidi.level_at_contextual_spacing_boundary(text, inline_box.index)
-    } else {
-        bidi.level_at_byte_boundary(text, inline_box.index)
+impl ShapeContext {
+    /// The bidi level of each inline box. The boxes are in source order.
+    fn inline_box_bidi_levels(
+        &mut self,
+        bidi: &crate::bidi::BidiResolver,
+        text: &str,
+        inline_boxes: &[InlineBox],
+    ) -> Vec<u8> {
+        let mut byte = 0;
+        let mut characters = 0;
+        inline_boxes
+            .iter()
+            .map(|inline_box| {
+                let source = text
+                    .get(byte..inline_box.index)
+                    .expect("inline boxes must address UTF-8 source boundaries");
+                #[cfg(test)]
+                {
+                    self.box_level_bytes += source.len();
+                }
+                characters += source.chars().count();
+                byte = inline_box.index;
+                if inline_box.line_break_participation()
+                    == InlineBoxLineBreakParticipation::ContextualSpacing
+                {
+                    bidi.level_at_contextual_spacing_boundary(characters)
+                } else {
+                    bidi.level_at_char_boundary(characters)
+                }
+            })
+            .collect()
     }
 }
 
@@ -102,14 +128,13 @@ pub(crate) fn shape_text<'a, B: Brush>(
     if text.is_empty() && inline_boxes.is_empty() {
         text = " ";
     }
+    let box_levels = scx.inline_box_bidi_levels(bidi, text, inline_boxes);
     // Do nothing if there is no text or styles (there should always be a default style)
     if text.is_empty() || styles.is_empty() {
         // Process any remaining inline boxes whose index is greater than the length of the text
-        for (box_idx, inline_box) in inline_boxes.iter().enumerate() {
+        for (box_idx, level) in box_levels.into_iter().enumerate() {
             // Push the box to the list of items
-            layout
-                .data
-                .push_inline_box(box_idx, inline_box_bidi_level(bidi, text, inline_box));
+            layout.data.push_inline_box(box_idx, level);
         }
         return;
     }
@@ -234,13 +259,10 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 break_run = true;
                 deferred_boxes = Some(boundary_boxes);
             } else {
-                transparent_boxes.extend(boundary_boxes.map(|box_idx| {
-                    (
-                        box_idx,
-                        inline_box_bidi_level(bidi, text, &inline_boxes[box_idx]),
-                        inline_boxes[box_idx].index,
-                    )
-                }));
+                transparent_boxes
+                    .extend(boundary_boxes.map(|box_idx| {
+                        (box_idx, box_levels[box_idx], inline_boxes[box_idx].index)
+                    }));
             }
         }
 
@@ -281,10 +303,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
         if let Some(deferred_boxes) = deferred_boxes {
             for box_idx in deferred_boxes {
-                layout.data.push_inline_box(
-                    box_idx,
-                    inline_box_bidi_level(bidi, text, &inline_boxes[box_idx]),
-                );
+                layout.data.push_inline_box(box_idx, box_levels[box_idx]);
             }
         }
 
@@ -312,16 +331,10 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
     // Process any remaining inline boxes whose index is greater than the length of the text
     if let Some((box_idx, _inline_box)) = current_box {
-        layout.data.push_inline_box(
-            box_idx,
-            inline_box_bidi_level(bidi, text, &inline_boxes[box_idx]),
-        );
+        layout.data.push_inline_box(box_idx, box_levels[box_idx]);
     }
     for (box_idx, _inline_box) in inline_box_iter {
-        layout.data.push_inline_box(
-            box_idx,
-            inline_box_bidi_level(bidi, text, &inline_boxes[box_idx]),
-        );
+        layout.data.push_inline_box(box_idx, box_levels[box_idx]);
     }
 }
 

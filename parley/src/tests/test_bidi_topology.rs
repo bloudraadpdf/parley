@@ -37,6 +37,24 @@ pub(crate) fn build_layout_with_direction(
 }
 
 #[test]
+fn inline_box_levels_read_the_source_once() {
+    let bytes = |words: usize| {
+        let text = "word ".repeat(words);
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::<ColorBrush>::new();
+        let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
+        for word in 0..words {
+            builder.push_inline_box(InlineBox::new(word as u64, 5 * word, 4.0, 4.0));
+        }
+        let _ = builder.build(&text);
+        context.scx.box_level_bytes
+    };
+    let short = bytes(80);
+    let long = bytes(160);
+    assert!(long * 10 <= short * 22, "{short} to {long}");
+}
+
+#[test]
 fn source_start_atomic_uses_the_rtl_paragraph_level_before_ltr_text() {
     let layout = build_layout_with_direction(
         "foo",

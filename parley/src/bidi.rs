@@ -72,12 +72,7 @@ impl BidiResolver {
             .unwrap_or(false)
     }
 
-    pub(crate) fn level_at_byte_boundary(&self, text: &str, boundary: usize) -> BidiLevel {
-        let char_boundary = text
-            .get(..boundary)
-            .expect("inline boxes must address UTF-8 source boundaries")
-            .chars()
-            .count();
+    pub(crate) fn level_at_char_boundary(&self, char_boundary: usize) -> BidiLevel {
         if self.levels.is_empty() {
             return self.base_level;
         }
@@ -112,17 +107,8 @@ impl BidiResolver {
     /// Unlike an atomic box, spacing does not acquire the following character's
     /// bidi level: doing so moves a gap at the start of an RTL run to its far
     /// side when the run is reversed.
-    pub(crate) fn level_at_contextual_spacing_boundary(
-        &self,
-        text: &str,
-        boundary: usize,
-    ) -> BidiLevel {
-        let following = self.level_at_byte_boundary(text, boundary);
-        let char_boundary = text
-            .get(..boundary)
-            .expect("inline boxes must address UTF-8 source boundaries")
-            .chars()
-            .count();
+    pub(crate) fn level_at_contextual_spacing_boundary(&self, char_boundary: usize) -> BidiLevel {
+        let following = self.level_at_char_boundary(char_boundary);
         if char_boundary == 0
             || char_boundary >= self.levels.len()
             || self.initial_types[char_boundary - 1] == BidiClass::ParagraphSeparator
