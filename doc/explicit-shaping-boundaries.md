@@ -66,7 +66,9 @@ A candidate installs its segments on the glyphs of the previous lines and
 removes them after its measurement. The candidate keeps its segments, and its
 commit installs them again. The terminal candidate gets new glyphs only up to
 the first boundary after twice its natural line. It measures again with a
-wider limit when its first overflowing word ends after that boundary.
+wider limit when its first overflowing word ends after that boundary. The limit
+grows from the source position where the line starts, because a line of inline
+boxes only has no text range.
 
 `calculate_content_widths` uses the same glyph selection for minimum and maximum
 widths. The source layout does not change. Emergency breaks from `break-word`

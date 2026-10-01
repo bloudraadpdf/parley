@@ -92,6 +92,12 @@ impl<B: Brush> BreakLines<'_, B> {
             .shape_candidates
             .as_ref()
             .is_some_and(|shapes| shapes.expanded);
+        let line_start = SourceCursor::at(
+            &self.layout.data,
+            self.state.item_idx,
+            self.state.cluster_idx,
+        )
+        .source_offset(&self.layout.data);
         let mut limit = self
             .preview_natural_candidate(measure, tab_origin)
             .map(|natural| natural.line.text_range.end + natural.line.text_range.len());
@@ -120,8 +126,9 @@ impl<B: Brush> BreakLines<'_, B> {
                 });
                 if !shape.covers(line_bound.source_offset(&self.layout.data)) {
                     self.remove_physical_shape(installed);
-                    let line_start = prefix.line.text_range.start;
-                    limit = limit.map(|limit| limit + (limit - line_start).max(1));
+                    limit = limit.map(|limit| {
+                        limit.max(line_start) + limit.saturating_sub(line_start).max(1)
+                    });
                     continue;
                 }
                 bound = Some(line_bound);

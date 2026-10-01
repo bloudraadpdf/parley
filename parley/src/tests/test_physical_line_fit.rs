@@ -222,6 +222,64 @@ fn zero_advance_owner_edges_keep_intrinsic_physical_boundaries() {
 }
 
 #[test]
+fn a_line_of_only_an_owner_edge_fits_without_a_text_start() {
+    let text = "\u{56fd}\u{56fd}XX\u{56fd}";
+    for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::<ColorBrush>::new();
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.set_direction(direction);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push_inline_box(
+            crate::InlineBox::inline_start_edge(
+                41,
+                6,
+                5.0,
+                0.0,
+                crate::InlineBoxBreakAffinity::ToNext,
+            )
+            .with_continuous_shaping(),
+        );
+        builder.push_inline_box(
+            crate::InlineBox::inline_end_edge(
+                42,
+                8,
+                5.0,
+                0.0,
+                crate::InlineBoxBreakAffinity::ToPrevious,
+            )
+            .with_continuous_shaping(),
+        );
+        builder.push_inline_owner_shaping(InlineOwnerShaping {
+            text: 6..8,
+            inline_boxes: vec![41, 42],
+            edges: vec![
+                InlineShapingEdge {
+                    side: PhysicalLineEdge::Left,
+                    placement: ShapingEdgePlacement::FirstLine,
+                },
+                InlineShapingEdge {
+                    side: PhysicalLineEdge::Right,
+                    placement: ShapingEdgePlacement::LastLine,
+                },
+            ],
+        });
+        let mut layout = builder.build(text);
+        layout.calculate_content_widths();
+        layout.break_all_lines(Some(0.0));
+        let ranges = || layout.lines().map(|line| line.text_range());
+        assert_eq!(
+            (
+                ranges().map(|range| range.start).min(),
+                ranges().map(|range| range.end).max()
+            ),
+            (Some(0), Some(text.len()))
+        );
+    }
+}
+
+#[test]
 fn geometry_only_owner_has_no_text_to_reshape() {
     let mut fonts = naskh_font_context();
     let mut context = LayoutContext::<ColorBrush>::new();
