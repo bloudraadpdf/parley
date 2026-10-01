@@ -475,6 +475,16 @@ fn physical_boundaries_visit_owners_in_proportion_to_the_line() {
 }
 
 #[test]
+fn a_physical_line_fit_visits_clusters_in_proportion_to_its_lines() {
+    let short = physical_line_fit_work("Roboto", 80, WordOwner::Milestone);
+    let long = physical_line_fit_work("Roboto", 160, WordOwner::Milestone);
+    assert!(
+        long.visited_clusters * 10 <= short.visited_clusters * 22,
+        "{short:?} to {long:?}"
+    );
+}
+
+#[test]
 fn a_physical_line_fit_shapes_no_end_after_the_first_overflowing_word() {
     let measure = four_edged_words_measure();
     let mut reference = edged_words();

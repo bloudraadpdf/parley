@@ -39,7 +39,7 @@ pub struct InlineOwnerShaping {
 }
 
 /// A position among the source items: a layout item, with a byte of a text item.
-type SourceKey = (usize, Option<usize>);
+pub(crate) type SourceKey = (usize, Option<usize>);
 
 #[derive(Clone, Copy)]
 struct SourceEndpoint {
@@ -135,6 +135,8 @@ struct IndexedOwner {
     text: Range<usize>,
     edges: Vec<InlineShapingEdge>,
     endpoints: [SourceEndpoint; 2],
+    /// A last-line edge on the start side of the first source item.
+    last_line_start: bool,
 }
 
 impl IndexedOwner {
@@ -248,6 +250,8 @@ impl IndexedOwner {
 /// line only when a line item is between its endpoints or is a cloned edge that it owns.
 pub(crate) struct OwnerIndex {
     owners: Vec<IndexedOwner>,
+    /// All runs have one bidi level, which is their paragraph level.
+    uniform_level: bool,
     /// A segment tree over `owners`: the last endpoint that the owners of each node reach.
     reach: Vec<SourceKey>,
     /// The owned inline-box identities, with their owners.
@@ -277,10 +281,18 @@ impl OwnerIndex {
             .filter(|owner| !owner.edges.is_empty())
             .filter_map(|owner| {
                 let endpoints = owner.source_endpoints(data, &text_items, &box_items)?;
+                let start = if data.items[endpoints[0].item].bidi_level & 1 == 0 {
+                    PhysicalLineEdge::Left
+                } else {
+                    PhysicalLineEdge::Right
+                };
                 let indexed = IndexedOwner {
                     text: owner.text.clone(),
                     edges: owner.edges.clone(),
                     endpoints,
+                    last_line_start: owner.edges.iter().any(|edge| {
+                        edge.placement == ShapingEdgePlacement::LastLine && edge.side == start
+                    }),
                 };
                 Some((indexed, &owner.inline_boxes))
             })
@@ -307,11 +319,33 @@ impl OwnerIndex {
         }
         Self {
             owners,
+            uniform_level: data.runs.first().is_some_and(|first| {
+                data.runs.iter().all(|run| {
+                    run.bidi_level == first.paragraph_level
+                        && run.paragraph_level == first.paragraph_level
+                })
+            }),
             reach,
             boxes,
             #[cfg(test)]
             visits: core::cell::Cell::new(0),
         }
+    }
+
+    /// Whether a line that ends at `cut`, the source position `offset`, has the boundaries of each longer line before
+    /// `offset`. The items of a longer line keep their visual order before `cut` when all runs have one bidi level.
+    /// An owner across `cut` changes only its fragment at `cut`, when its text reaches `offset` and it has no
+    /// last-line edge on the start side.
+    pub(crate) fn keeps_boundaries_before(&self, cut: SourceKey, offset: usize) -> bool {
+        if !self.uniform_level {
+            return false;
+        }
+        let mut across = Vec::new();
+        self.reaching([cut, cut], 1, 0..self.reach.len() / 2, &mut across);
+        across.into_iter().all(|index| {
+            let owner = &self.owners[index];
+            owner.endpoints[0].key() == cut || (owner.text.end >= offset && !owner.last_line_start)
+        })
     }
 
     #[cfg(test)]

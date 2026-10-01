@@ -70,6 +70,23 @@ wider limit when its first overflowing word ends after that boundary. The limit
 grows from the source position where the line starts, because a line of inline
 boxes only has no text range.
 
+A shorter terminal line can give the same glyphs, natural break and bound.
+`BreakLines` first uses the natural line at four times the line width as the
+terminal line, and doubles that width until the result is the same as that of
+the terminal line to the forced break. The result is the same when all these
+conditions are true:
+
+- All runs have one bidi level, which is their paragraph level. The items
+  before the end of the shorter line then keep their visual order.
+- Each owner across that end has text to that end and no last-line edge on
+  the start side. Such an owner then changes only its fragment at that end.
+- The terminal candidate gets new glyphs up to a boundary before that end.
+- The natural break is before that end, and a regular break follows it at or
+  before that end.
+
+When a condition is false, `BreakLines` uses the next width. The last terminal
+line goes to the forced break.
+
 `calculate_content_widths` uses the same glyph selection for minimum and maximum
 widths. The source layout does not change. Emergency breaks from `break-word`
 do not change the minimum width. Breaks from `anywhere` can decrease it.

@@ -17,10 +17,14 @@ impl<B: Brush> BreakLines<'_, B> {
 
     #[cfg(test)]
     pub(crate) fn physical_work(&self) -> crate::shape::physical::PhysicalWork {
-        self.physical_shaper
-            .as_ref()
-            .expect("physical source shaper")
-            .work()
+        crate::shape::physical::PhysicalWork {
+            visited_clusters: self.visited_clusters,
+            ..self
+                .physical_shaper
+                .as_ref()
+                .expect("physical source shaper")
+                .work()
+        }
     }
 
     pub(super) fn physical_prefix_shape(
@@ -77,53 +81,112 @@ impl<B: Brush> BreakLines<'_, B> {
         self.letter_spacing_edges.clear();
     }
 
+    /// The fitting candidate of the line with physical glyphs. The first terminal line is the natural line at four
+    /// times the measure, and each next one doubles that width, until a terminal line gives the result of the
+    /// terminal line to the next forced break. The last one is that terminal line.
     pub(super) fn preview_physical_candidate(
         &mut self,
         measure: f32,
         tab_origin: LineTabOrigin,
     ) -> Option<LineShapeCandidate> {
-        let terminal = self.preview_natural_candidate(f32::MAX, tab_origin)?;
-        let endpoints = self.source_endpoints(terminal.source_end(&self.layout.data));
-        let expanded = self
-            .shape_candidates
-            .as_ref()
-            .is_some_and(|shapes| shapes.expanded);
-        let line_start = SourceCursor::at(
-            &self.layout.data,
-            self.state.item_idx,
-            self.state.cluster_idx,
-        )
-        .source_offset(&self.layout.data);
-        let mut limit = self
-            .preview_natural_candidate(measure, tab_origin)
-            .map(|natural| natural.line.text_range.end + natural.line.text_range.len());
+        let fit = PhysicalFit {
+            measure,
+            tab_origin,
+            expanded: self
+                .shape_candidates
+                .as_ref()
+                .is_some_and(|shapes| shapes.expanded),
+            line_start: SourceCursor::at(
+                &self.layout.data,
+                self.state.item_idx,
+                self.state.cluster_idx,
+            )
+            .source_offset(&self.layout.data),
+            limit: self
+                .preview_natural_candidate(measure, tab_origin)
+                .map(|natural| natural.line.text_range.end + natural.line.text_range.len()),
+        };
+        let mut reach = Some(4.0 * measure).filter(|reach| reach.is_finite());
+        let mut previous = None;
+        loop {
+            let terminal = self.preview_natural_candidate(reach.unwrap_or(f32::MAX), tab_origin)?;
+            let end = terminal.source_end(&self.layout.data);
+            if let Some(candidate) = self.fit_physical_line(fit, end, reach.is_none()) {
+                return Some(candidate);
+            }
+            reach = reach
+                .map(|reach| 2.0 * reach.max(terminal.line.metrics.advance))
+                .filter(|wider| wider.is_finite() && previous != Some(end));
+            previous = Some(end);
+        }
+    }
+
+    /// The fitting candidate of the line from the terminal line that ends at `terminal`. Without `complete`, the
+    /// terminal line can end before the forced break: it gives `None` when its glyphs, natural break or bound can
+    /// differ from those of the terminal line to the forced break.
+    fn fit_physical_line(
+        &mut self,
+        fit: PhysicalFit,
+        terminal: SourceCursor,
+        complete: bool,
+    ) -> Option<LineShapeCandidate> {
+        let cut = terminal.source_offset(&self.layout.data);
+        if !complete
+            && !self
+                .physical_shaper
+                .as_ref()
+                .expect("physical source shaper")
+                .keeps_boundaries_before(terminal.source_key(&self.layout.data), cut)
+        {
+            return None;
+        }
+        let endpoints = self.source_endpoints(terminal);
+        let mut limit = fit.limit;
         let mut fallback = None;
         let mut bound = None;
         for end in endpoints.iter().copied().rev() {
             if bound.is_some_and(|bound: SourceCursor| end.key() > bound.key()) {
                 continue;
             }
-            let Some(prefix) = self.preview_source_prefix(end, tab_origin) else {
+            let Some(prefix) = self.preview_source_prefix(end, fit.tab_origin) else {
+                if bound.is_none() && !complete {
+                    return None;
+                }
                 continue;
             };
             let (shape, candidate) = loop {
                 let (shape, boundaries) = self.physical_prefix_shape(
                     &prefix,
                     limit.filter(|_| bound.is_none()),
-                    expanded,
+                    fit.expanded,
                 );
+                if bound.is_none() && !complete && !shape.ends_before(cut) {
+                    return None;
+                }
                 let installed = self.install_physical_shape(&shape);
                 let normal = self
-                    .preview_natural_candidate(measure, tab_origin)
+                    .preview_natural_candidate(fit.measure, fit.tab_origin)
                     .expect("retained source prefix");
                 let normal_end = normal.source_end(&self.layout.data);
-                let line_bound = bound.unwrap_or_else(|| {
-                    self.first_regular_break_after(&endpoints, normal_end, tab_origin)
-                });
+                let line_bound = match bound {
+                    Some(bound) => Some(bound),
+                    None if complete => Some(
+                        self.first_regular_break_after(&endpoints, normal_end, fit.tab_origin)
+                            .unwrap_or(terminal),
+                    ),
+                    None if normal_end.key() < terminal.key() => {
+                        self.first_regular_break_after(&endpoints, normal_end, fit.tab_origin)
+                    }
+                    None => None,
+                };
+                let Some(line_bound) = line_bound else {
+                    self.remove_physical_shape(installed);
+                    return None;
+                };
                 if !shape.covers(line_bound.source_offset(&self.layout.data)) {
                     self.remove_physical_shape(installed);
                     limit = limit.map(|limit| {
-                        limit.max(line_start) + limit.saturating_sub(line_start).max(1)
+                        limit.max(fit.line_start) + limit.saturating_sub(fit.line_start).max(1)
                     });
                     continue;
                 }
@@ -132,7 +195,7 @@ impl<B: Brush> BreakLines<'_, B> {
                     core::cmp::Ordering::Less => None,
                     core::cmp::Ordering::Equal => Some(normal),
                     core::cmp::Ordering::Greater => {
-                        self.preview_source_break(end, measure, tab_origin)
+                        self.preview_source_break(end, fit.measure, fit.tab_origin)
                     }
                 }
                 .filter(|candidate| {
@@ -166,13 +229,13 @@ impl<B: Brush> BreakLines<'_, B> {
         Some(fallback.expect("retained source has a terminal or unavoidable break"))
     }
 
+    /// The first endpoint after `natural_end` where a line can end with a regular break.
     fn first_regular_break_after(
         &mut self,
         endpoints: &[SourceCursor],
         natural_end: SourceCursor,
         tab_origin: LineTabOrigin,
-    ) -> SourceCursor {
-        let terminal = *endpoints.last().expect("terminal endpoint");
+    ) -> Option<SourceCursor> {
         endpoints
             .iter()
             .copied()
@@ -181,6 +244,15 @@ impl<B: Brush> BreakLines<'_, B> {
                 self.preview_source_break(*end, f32::MAX, tab_origin)
                     .is_some_and(|candidate| candidate.line.break_reason == BreakReason::Regular)
             })
-            .unwrap_or(terminal)
     }
+}
+
+/// The inputs of the physical line fit that do not depend on the terminal line.
+#[derive(Clone, Copy)]
+struct PhysicalFit {
+    measure: f32,
+    tab_origin: LineTabOrigin,
+    expanded: bool,
+    line_start: usize,
+    limit: Option<usize>,
 }

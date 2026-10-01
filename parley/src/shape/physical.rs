@@ -11,7 +11,7 @@ use super::{
 use crate::{
     Brush,
     layout::{
-        LineItemData, OwnerIndex,
+        LineItemData, OwnerIndex, SourceKey,
         data::{ClusterData, LayoutData},
     },
 };
@@ -52,6 +52,7 @@ pub(crate) struct PhysicalWork {
     pub(crate) released_segments: usize,
     pub(crate) safe_boundaries: usize,
     pub(crate) owner_visits: usize,
+    pub(crate) visited_clusters: usize,
 }
 
 struct PhysicalSegment {
@@ -69,6 +70,11 @@ impl PhysicalShape {
     /// The shape gives the glyphs of the line up to `offset`.
     pub(crate) fn covers(&self, offset: usize) -> bool {
         self.end.is_none_or(|end| offset <= end)
+    }
+
+    /// The shape ends at a boundary before `offset`.
+    pub(crate) fn ends_before(&self, offset: usize) -> bool {
+        self.end.is_some_and(|end| end < offset)
     }
 }
 
@@ -218,6 +224,12 @@ impl<B: Brush> PhysicalShaper<B> {
     /// The physical shaping boundaries of the line with `items`.
     pub(crate) fn boundaries(&self, data: &LayoutData<B>, items: &[LineItemData]) -> Vec<usize> {
         self.owners.boundaries(data, items)
+    }
+
+    /// Whether a line that ends at `cut`, the source position `offset`, has the boundaries of each longer line before
+    /// `offset`.
+    pub(crate) fn keeps_boundaries_before(&self, cut: SourceKey, offset: usize) -> bool {
+        self.owners.keeps_boundaries_before(cut, offset)
     }
 
     /// The segments of a line from `line_start`: each window of `affected_windows` from the line start to the next

@@ -50,6 +50,17 @@ impl SourceCursor {
         }
     }
 
+    /// The position of the cursor among the source items: its item, with its byte in a text item.
+    pub(super) fn source_key<B: Brush>(
+        self,
+        data: &crate::layout::LayoutData<B>,
+    ) -> crate::layout::SourceKey {
+        match self {
+            Self::BeforeItem(item) => (item, None),
+            Self::WithinText { item, .. } => (item, Some(self.source_offset(data))),
+        }
+    }
+
     pub(super) fn key(self) -> (usize, Option<usize>) {
         match self {
             Self::BeforeItem(item) => (item, None),
