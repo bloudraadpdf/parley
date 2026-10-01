@@ -21,16 +21,14 @@ struct SegmentKey {
     features: Vec<(harfrust::Tag, u32, u32, u32)>,
 }
 
-struct StoredSegment {
-    shape: Arc<PreparedSourceShape>,
-    line_boundaries: Vec<usize>,
-}
-
 pub(crate) struct PhysicalShaper<B: Brush> {
     context: ShapeContext,
     scratch: LayoutData<B>,
     owner_edges: Vec<usize>,
-    segments: BTreeMap<SegmentKey, StoredSegment>,
+    segments: BTreeMap<SegmentKey, Arc<PreparedSourceShape>>,
+    line_segments: BTreeMap<SegmentKey, Arc<PreparedSourceShape>>,
+    #[cfg(test)]
+    line_boundaries: alloc::collections::BTreeSet<usize>,
     #[cfg(test)]
     work: PhysicalWork,
 }
@@ -40,6 +38,7 @@ pub(crate) struct PhysicalShaper<B: Brush> {
 pub(crate) struct PhysicalWork {
     pub(crate) shaped_source: usize,
     pub(crate) installed_clusters: usize,
+    pub(crate) released_segments: usize,
 }
 
 struct PhysicalSegment {
@@ -116,22 +115,26 @@ impl<B: Brush> PhysicalShaper<B> {
             scratch: super::source::source_scratch(data),
             owner_edges,
             segments: BTreeMap::new(),
+            line_segments: BTreeMap::new(),
+            #[cfg(test)]
+            line_boundaries: alloc::collections::BTreeSet::new(),
             #[cfg(test)]
             work: PhysicalWork::default(),
         }
     }
 
     pub(crate) fn release_line_segments(&mut self) {
-        self.segments
-            .retain(|_, segment| segment.line_boundaries.is_empty());
+        #[cfg(test)]
+        {
+            self.work.released_segments += self.line_segments.len();
+            self.line_boundaries.clear();
+        }
+        self.line_segments.clear();
     }
 
     #[cfg(test)]
     pub(crate) fn line_boundaries(&self) -> alloc::collections::BTreeSet<usize> {
-        self.segments
-            .values()
-            .flat_map(|segment| segment.line_boundaries.iter().copied())
-            .collect()
+        self.line_boundaries.clone()
     }
 
     #[cfg(test)]
@@ -332,8 +335,12 @@ impl<B: Brush> PhysicalShaper<B> {
                 .map(|feature| (feature.tag, feature.value, feature.start, feature.end))
                 .collect(),
         };
-        if let Some(stored) = self.segments.get(&key) {
-            return Arc::clone(&stored.shape);
+        if let Some(shape) = self
+            .segments
+            .get(&key)
+            .or_else(|| self.line_segments.get(&key))
+        {
+            return Arc::clone(shape);
         }
         #[cfg(test)]
         {
@@ -352,13 +359,14 @@ impl<B: Brush> PhysicalShaper<B> {
                 features,
             ),
         );
-        self.segments.insert(
-            key,
-            StoredSegment {
-                shape: Arc::clone(&shape),
-                line_boundaries: line_boundaries.to_vec(),
-            },
-        );
+        let store = if line_boundaries.is_empty() {
+            &mut self.segments
+        } else {
+            #[cfg(test)]
+            self.line_boundaries.extend(line_boundaries);
+            &mut self.line_segments
+        };
+        store.insert(key, Arc::clone(&shape));
         shape
     }
 

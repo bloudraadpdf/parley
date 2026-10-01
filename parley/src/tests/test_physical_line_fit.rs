@@ -420,6 +420,16 @@ fn a_physical_line_fit_installs_clusters_in_proportion_to_its_lines() {
 }
 
 #[test]
+fn a_physical_line_fit_releases_segments_in_proportion_to_its_lines() {
+    let short = physical_line_fit_work("Roboto Flex", 80);
+    let long = physical_line_fit_work("Roboto Flex", 160);
+    assert!(
+        long.released_segments * 10 <= short.released_segments * 22,
+        "{short:?} to {long:?}"
+    );
+}
+
+#[test]
 fn a_physical_line_fit_shapes_no_end_after_the_first_overflowing_word() {
     let measure = four_edged_words_measure();
     let mut reference = edged_words();
