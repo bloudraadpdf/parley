@@ -4,11 +4,7 @@
 use super::{
     BreakLines, LineTabOrigin, justification::LineShapeCandidate, source_probe::SourceCursor,
 };
-use crate::{
-    Brush,
-    layout::{BreakReason, physical_shaping::physical_shaping_boundaries},
-    shape::physical::PhysicalShape,
-};
+use crate::{Brush, layout::BreakReason, shape::physical::PhysicalShape};
 
 impl<B: Brush> BreakLines<'_, B> {
     #[cfg(test)]
@@ -33,11 +29,11 @@ impl<B: Brush> BreakLines<'_, B> {
         limit: Option<usize>,
         expanded: bool,
     ) -> (PhysicalShape, alloc::vec::Vec<usize>) {
-        let boundaries = physical_shaping_boundaries(
-            &self.layout.data,
-            &prefix.items,
-            &self.layout.data.inline_owner_shaping,
-        );
+        let boundaries = self
+            .physical_shaper
+            .as_ref()
+            .expect("physical source shaper")
+            .boundaries(&self.layout.data, &prefix.items);
         let soft_boundaries = (!prefix.line.text_range.is_empty())
             .then_some([prefix.line.text_range.start, prefix.line.text_range.end]);
         let shape = self
@@ -140,11 +136,11 @@ impl<B: Brush> BreakLines<'_, B> {
                     }
                 }
                 .filter(|candidate| {
-                    physical_shaping_boundaries(
-                        &self.layout.data,
-                        &candidate.items,
-                        &self.layout.data.inline_owner_shaping,
-                    ) == boundaries
+                    self.physical_shaper
+                        .as_ref()
+                        .expect("physical source shaper")
+                        .boundaries(&self.layout.data, &candidate.items)
+                        == boundaries
                 });
                 self.remove_physical_shape(installed);
                 break (shape, candidate);

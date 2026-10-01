@@ -50,6 +50,7 @@ pub use run::{Run, RunMetrics};
 
 pub(crate) use data::{LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData};
 pub(crate) use line::LineItem;
+pub(crate) use physical_shaping::OwnerIndex;
 
 // TODO - Deprecation not yet active to ease internal code migration.
 #[deprecated(since = "TBD", note = "Access from the `editing` module instead.")]

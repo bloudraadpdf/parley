@@ -11,7 +11,10 @@ use super::{
 use crate::layout::{
     InlineOwnerShaping, InlineShapingEdge, PhysicalLineEdge, ShapingEdgePlacement,
 };
-use crate::{BaseDirection, FontFamily, Layout, LayoutContext, LineTabOrigin, StyleProperty};
+use crate::{
+    BaseDirection, FontFamily, InlineBox, InlineBoxBreakAffinity, Layout, LayoutContext,
+    LineTabOrigin, StyleProperty,
+};
 
 fn arabic_layout(physical: bool, explicit: bool) -> Layout<ColorBrush> {
     let text = "السلامعليكم";
@@ -178,24 +181,12 @@ fn zero_advance_owner_edges_keep_intrinsic_physical_boundaries() {
         )));
         builder.push_default(StyleProperty::FontSize(24.0));
         builder.push_inline_box(
-            crate::InlineBox::inline_start_edge(
-                41,
-                0,
-                0.0,
-                0.0,
-                crate::InlineBoxBreakAffinity::ToNext,
-            )
-            .with_continuous_shaping(),
+            InlineBox::inline_start_edge(41, 0, 0.0, 0.0, InlineBoxBreakAffinity::ToNext)
+                .with_continuous_shaping(),
         );
         builder.push_inline_box(
-            crate::InlineBox::inline_end_edge(
-                42,
-                12,
-                0.0,
-                0.0,
-                crate::InlineBoxBreakAffinity::ToPrevious,
-            )
-            .with_continuous_shaping(),
+            InlineBox::inline_end_edge(42, 12, 0.0, 0.0, InlineBoxBreakAffinity::ToPrevious)
+                .with_continuous_shaping(),
         );
         if physical {
             let mut owner = owner(
@@ -232,24 +223,12 @@ fn a_line_of_only_an_owner_edge_fits_without_a_text_start() {
         builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
         builder.push_default(StyleProperty::FontSize(10.0));
         builder.push_inline_box(
-            crate::InlineBox::inline_start_edge(
-                41,
-                6,
-                5.0,
-                0.0,
-                crate::InlineBoxBreakAffinity::ToNext,
-            )
-            .with_continuous_shaping(),
+            InlineBox::inline_start_edge(41, 6, 5.0, 0.0, InlineBoxBreakAffinity::ToNext)
+                .with_continuous_shaping(),
         );
         builder.push_inline_box(
-            crate::InlineBox::inline_end_edge(
-                42,
-                8,
-                5.0,
-                0.0,
-                crate::InlineBoxBreakAffinity::ToPrevious,
-            )
-            .with_continuous_shaping(),
+            InlineBox::inline_end_edge(42, 8, 5.0, 0.0, InlineBoxBreakAffinity::ToPrevious)
+                .with_continuous_shaping(),
         );
         builder.push_inline_owner_shaping(InlineOwnerShaping {
             text: 6..8,
@@ -285,12 +264,12 @@ fn geometry_only_owner_has_no_text_to_reshape() {
     let mut context = LayoutContext::<ColorBrush>::new();
     let mut build = |physical| {
         let mut builder = context.ranged_builder(&mut fonts, "", 1.0, false);
-        builder.push_inline_box(crate::InlineBox::inline_start_edge(
+        builder.push_inline_box(InlineBox::inline_start_edge(
             41,
             0,
             10.0,
             0.0,
-            crate::InlineBoxBreakAffinity::ToNext,
+            InlineBoxBreakAffinity::ToNext,
         ));
         if physical {
             let mut owner = owner(
@@ -351,49 +330,92 @@ fn physical_intrinsics_distinguish_anywhere_from_break_word() {
 const EDGED_WORD: &str = "word ";
 const EDGED_WORDS: usize = 40;
 
-fn edged_words() -> Layout<ColorBrush> {
-    edged_words_in("Roboto", EDGED_WORDS)
+/// The owner of each word: its text, or an empty milestone with an edge box on each side.
+#[derive(Clone, Copy)]
+enum WordOwner {
+    Text,
+    Milestone,
 }
 
-fn edged_words_in(family: &str, words: usize) -> Layout<ColorBrush> {
+fn edged_words() -> Layout<ColorBrush> {
+    owned_words("Roboto", EDGED_WORDS, WordOwner::Text)
+}
+
+fn owned_words(family: &str, words: usize, owner: WordOwner) -> Layout<ColorBrush> {
     let text = EDGED_WORD.repeat(words);
     let mut fonts = create_font_context();
     let mut context = LayoutContext::<ColorBrush>::new();
     let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named(family)));
     builder.push_default(StyleProperty::FontSize(10.0));
-    for start in (0..text.len()).step_by(EDGED_WORD.len()) {
-        builder.push_inline_owner_shaping(InlineOwnerShaping {
-            text: start..start + EDGED_WORD.trim_end().len(),
-            inline_boxes: Vec::new(),
-            edges: vec![
-                InlineShapingEdge {
-                    side: PhysicalLineEdge::Left,
-                    placement: ShapingEdgePlacement::FirstLine,
-                },
-                InlineShapingEdge {
-                    side: PhysicalLineEdge::Right,
-                    placement: ShapingEdgePlacement::LastLine,
-                },
-            ],
-        });
+    for (word, start) in (0..text.len()).step_by(EDGED_WORD.len()).enumerate() {
+        let edges = vec![
+            InlineShapingEdge {
+                side: PhysicalLineEdge::Left,
+                placement: ShapingEdgePlacement::FirstLine,
+            },
+            InlineShapingEdge {
+                side: PhysicalLineEdge::Right,
+                placement: ShapingEdgePlacement::LastLine,
+            },
+        ];
+        let owned = match owner {
+            WordOwner::Text => InlineOwnerShaping {
+                text: start..start + EDGED_WORD.trim_end().len(),
+                inline_boxes: Vec::new(),
+                edges,
+            },
+            WordOwner::Milestone => {
+                let id = 2 * word as u64;
+                builder.push_inline_box(
+                    InlineBox::inline_start_edge(
+                        id,
+                        start,
+                        2.0,
+                        0.0,
+                        InlineBoxBreakAffinity::ToNext,
+                    )
+                    .with_continuous_shaping(),
+                );
+                builder.push_inline_box(
+                    InlineBox::inline_end_edge(
+                        id + 1,
+                        start,
+                        2.0,
+                        0.0,
+                        InlineBoxBreakAffinity::ToPrevious,
+                    )
+                    .with_continuous_shaping(),
+                );
+                InlineOwnerShaping {
+                    text: start..start,
+                    inline_boxes: vec![id, id + 1],
+                    edges,
+                }
+            }
+        };
+        builder.push_inline_owner_shaping(owned);
     }
     builder.build(&text)
 }
 
 fn four_edged_words_measure() -> f32 {
-    four_edged_words_measure_in("Roboto", EDGED_WORDS)
+    four_words_measure("Roboto", EDGED_WORDS, WordOwner::Text)
 }
 
-fn four_edged_words_measure_in(family: &str, words: usize) -> f32 {
-    let mut layout = edged_words_in(family, words);
+fn four_words_measure(family: &str, words: usize, owner: WordOwner) -> f32 {
+    let mut layout = owned_words(family, words, owner);
     layout.break_all_lines(None);
     layout.width() * 4.5 / words as f32
 }
 
-fn physical_line_fit_work(family: &str, words: usize) -> crate::shape::physical::PhysicalWork {
-    let measure = four_edged_words_measure_in(family, words);
-    let mut layout = edged_words_in(family, words);
+fn physical_line_fit_work(
+    family: &str,
+    words: usize,
+    owner: WordOwner,
+) -> crate::shape::physical::PhysicalWork {
+    let measure = four_words_measure(family, words, owner);
+    let mut layout = owned_words(family, words, owner);
     let mut breaker = layout.break_lines();
     while breaker.break_next(measure, LineTabOrigin::ZERO).is_some() {}
     breaker.physical_work()
@@ -401,8 +423,8 @@ fn physical_line_fit_work(family: &str, words: usize) -> crate::shape::physical:
 
 #[test]
 fn a_physical_line_fit_shapes_source_in_proportion_to_its_lines() {
-    let short = physical_line_fit_work("Roboto Flex", 80);
-    let long = physical_line_fit_work("Roboto Flex", 160);
+    let short = physical_line_fit_work("Roboto Flex", 80, WordOwner::Text);
+    let long = physical_line_fit_work("Roboto Flex", 160, WordOwner::Text);
     assert!(
         long.shaped_source * 10 <= short.shaped_source * 22,
         "{short:?} to {long:?}"
@@ -411,8 +433,8 @@ fn a_physical_line_fit_shapes_source_in_proportion_to_its_lines() {
 
 #[test]
 fn a_physical_line_fit_installs_clusters_in_proportion_to_its_lines() {
-    let short = physical_line_fit_work("Roboto Flex", 80);
-    let long = physical_line_fit_work("Roboto Flex", 160);
+    let short = physical_line_fit_work("Roboto Flex", 80, WordOwner::Text);
+    let long = physical_line_fit_work("Roboto Flex", 160, WordOwner::Text);
     assert!(
         long.installed_clusters * 10 <= short.installed_clusters * 22,
         "{short:?} to {long:?}"
@@ -421,8 +443,8 @@ fn a_physical_line_fit_installs_clusters_in_proportion_to_its_lines() {
 
 #[test]
 fn a_physical_line_fit_collects_safe_boundaries_in_proportion_to_its_lines() {
-    let short = physical_line_fit_work("Roboto", 80);
-    let long = physical_line_fit_work("Roboto", 160);
+    let short = physical_line_fit_work("Roboto", 80, WordOwner::Text);
+    let long = physical_line_fit_work("Roboto", 160, WordOwner::Text);
     assert!(
         long.safe_boundaries * 10 <= short.safe_boundaries * 22,
         "{short:?} to {long:?}"
@@ -431,12 +453,25 @@ fn a_physical_line_fit_collects_safe_boundaries_in_proportion_to_its_lines() {
 
 #[test]
 fn a_physical_line_fit_releases_segments_in_proportion_to_its_lines() {
-    let short = physical_line_fit_work("Roboto Flex", 80);
-    let long = physical_line_fit_work("Roboto Flex", 160);
+    let short = physical_line_fit_work("Roboto Flex", 80, WordOwner::Text);
+    let long = physical_line_fit_work("Roboto Flex", 160, WordOwner::Text);
     assert!(
         long.released_segments * 10 <= short.released_segments * 22,
         "{short:?} to {long:?}"
     );
+}
+
+#[test]
+fn physical_boundaries_visit_owners_in_proportion_to_the_line() {
+    let visits = |words: usize| {
+        let mut layout = owned_words("Roboto", words, WordOwner::Milestone);
+        let mut breaker = layout.break_lines();
+        while breaker.break_next(f32::MAX, LineTabOrigin::ZERO).is_some() {}
+        breaker.physical_work().owner_visits
+    };
+    let short = visits(80);
+    let long = visits(160);
+    assert!(long * 10 <= short * 22, "{short} to {long}");
 }
 
 #[test]

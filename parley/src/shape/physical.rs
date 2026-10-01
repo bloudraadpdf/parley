@@ -10,7 +10,10 @@ use super::{
 };
 use crate::{
     Brush,
-    layout::data::{ClusterData, LayoutData},
+    layout::{
+        LineItemData, OwnerIndex,
+        data::{ClusterData, LayoutData},
+    },
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -31,6 +34,7 @@ pub(crate) struct PhysicalShaper<B: Brush> {
     context: ShapeContext,
     scratch: LayoutData<B>,
     owner_edges: Vec<usize>,
+    owners: OwnerIndex,
     alternatives: Vec<Option<Alternative>>,
     segments: BTreeMap<SegmentKey, Arc<PreparedSourceShape>>,
     line_segments: BTreeMap<SegmentKey, Arc<PreparedSourceShape>>,
@@ -47,6 +51,7 @@ pub(crate) struct PhysicalWork {
     pub(crate) installed_clusters: usize,
     pub(crate) released_segments: usize,
     pub(crate) safe_boundaries: usize,
+    pub(crate) owner_visits: usize,
 }
 
 struct PhysicalSegment {
@@ -169,6 +174,7 @@ impl<B: Brush> PhysicalShaper<B> {
             context: ShapeContext::default(),
             scratch: super::source::source_scratch(data),
             owner_edges,
+            owners: OwnerIndex::new(data, &data.inline_owner_shaping),
             #[cfg(test)]
             work: PhysicalWork {
                 safe_boundaries: alternatives
@@ -203,7 +209,15 @@ impl<B: Brush> PhysicalShaper<B> {
 
     #[cfg(test)]
     pub(crate) fn work(&self) -> PhysicalWork {
-        self.work
+        PhysicalWork {
+            owner_visits: self.owners.visits(),
+            ..self.work
+        }
+    }
+
+    /// The physical shaping boundaries of the line with `items`.
+    pub(crate) fn boundaries(&self, data: &LayoutData<B>, items: &[LineItemData]) -> Vec<usize> {
+        self.owners.boundaries(data, items)
     }
 
     /// The segments of a line from `line_start`: each window of `affected_windows` from the line start to the next
