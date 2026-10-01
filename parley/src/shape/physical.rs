@@ -21,10 +21,17 @@ struct SegmentKey {
     features: Vec<(harfrust::Tag, u32, u32, u32)>,
 }
 
+/// The justification alternative of a run, with the safe concatenation boundaries of both shapes when it is prepared.
+struct Alternative {
+    shape: usize,
+    safe_concat_boundaries: Option<Vec<usize>>,
+}
+
 pub(crate) struct PhysicalShaper<B: Brush> {
     context: ShapeContext,
     scratch: LayoutData<B>,
     owner_edges: Vec<usize>,
+    alternatives: Vec<Option<Alternative>>,
     segments: BTreeMap<SegmentKey, Arc<PreparedSourceShape>>,
     line_segments: BTreeMap<SegmentKey, Arc<PreparedSourceShape>>,
     #[cfg(test)]
@@ -39,6 +46,7 @@ pub(crate) struct PhysicalWork {
     pub(crate) shaped_source: usize,
     pub(crate) installed_clusters: usize,
     pub(crate) released_segments: usize,
+    pub(crate) safe_boundaries: usize,
 }
 
 struct PhysicalSegment {
@@ -66,12 +74,14 @@ pub(crate) struct InstalledShape {
 }
 
 /// The source ranges that need new glyphs for `points`, each from the safe boundary before a point to the safe
-/// boundary after it, with the last point in each range.
+/// boundary after it, with the last point in each range and its glyph context: an end at a safe boundary limits the
+/// context, else the end of `context` applies.
 fn affected_windows(
     range: &Range<usize>,
+    context: &Range<usize>,
     safe: &[usize],
     mut points: Vec<usize>,
-) -> Vec<(Range<usize>, usize)> {
+) -> Vec<(Range<usize>, usize, Range<usize>)> {
     points.sort_unstable();
     points.dedup();
     let mut windows: Vec<(Range<usize>, usize)> = Vec::new();
@@ -97,7 +107,20 @@ fn affected_windows(
             windows.push((start..end, point));
         }
     }
+    let safe_or = |position: usize, outer: usize| {
+        if safe.binary_search(&position).is_ok() {
+            position
+        } else {
+            outer
+        }
+    };
     windows
+        .into_iter()
+        .map(|(window, last)| {
+            let context = safe_or(window.start, context.start)..safe_or(window.end, context.end);
+            (window, last, context)
+        })
+        .collect()
 }
 
 impl<B: Brush> PhysicalShaper<B> {
@@ -110,16 +133,57 @@ impl<B: Brush> PhysicalShaper<B> {
             .collect::<Vec<_>>();
         owner_edges.sort_unstable();
         owner_edges.dedup();
+        let alternatives = data
+            .deferred_physical_shapes
+            .iter()
+            .map(|deferred| {
+                let shape = data
+                    .deferred_justification_shapes
+                    .binary_search_by_key(&deferred.run_index, |candidate| {
+                        candidate.source.run_index
+                    })
+                    .ok()?;
+                let safe_concat_boundaries = data.deferred_justification_shapes[shape]
+                    .prepared
+                    .as_ref()
+                    .map(|prepared| {
+                        deferred
+                            .safe_concat_boundaries
+                            .iter()
+                            .copied()
+                            .filter(|boundary| {
+                                prepared
+                                    .safe_concat_boundaries
+                                    .binary_search(boundary)
+                                    .is_ok()
+                            })
+                            .collect()
+                    });
+                Some(Alternative {
+                    shape,
+                    safe_concat_boundaries,
+                })
+            })
+            .collect::<Vec<_>>();
         Self {
             context: ShapeContext::default(),
             scratch: super::source::source_scratch(data),
             owner_edges,
+            #[cfg(test)]
+            work: PhysicalWork {
+                safe_boundaries: alternatives
+                    .iter()
+                    .flatten()
+                    .filter_map(|alternative| alternative.safe_concat_boundaries.as_ref())
+                    .map(Vec::len)
+                    .sum(),
+                ..PhysicalWork::default()
+            },
+            alternatives,
             segments: BTreeMap::new(),
             line_segments: BTreeMap::new(),
             #[cfg(test)]
             line_boundaries: alloc::collections::BTreeSet::new(),
-            #[cfg(test)]
-            work: PhysicalWork::default(),
         }
     }
 
@@ -174,27 +238,16 @@ impl<B: Brush> PhysicalShaper<B> {
                 .copied()
         });
         let mut segments = Vec::new();
-        for deferred in &data.deferred_physical_shapes {
+        let first = data
+            .deferred_physical_shapes
+            .partition_point(|deferred| data.runs[deferred.run_index].text_range.end <= line_start);
+        for index in first..data.deferred_physical_shapes.len() {
+            let deferred = &data.deferred_physical_shapes[index];
             let run = &data.runs[deferred.run_index];
-            let alternative = expanded
-                .then(|| {
-                    data.deferred_justification_shapes
-                        .iter()
-                        .find(|candidate| candidate.source.run_index == deferred.run_index)
-                })
-                .flatten();
-            let safe = deferred
-                .safe_concat_boundaries
-                .iter()
-                .copied()
-                .filter(|boundary| {
-                    alternative
-                        .and_then(|shape| shape.prepared.as_ref())
-                        .is_none_or(|shape| {
-                            shape.safe_concat_boundaries.binary_search(boundary).is_ok()
-                        })
-                })
-                .collect::<Vec<_>>();
+            if end.is_some_and(|end| run.text_range.start >= end) {
+                break;
+            }
+            let alternative = self.alternatives[index].as_ref().filter(|_| expanded);
             let points = boundaries
                 .iter()
                 .copied()
@@ -206,16 +259,13 @@ impl<B: Brush> PhysicalShaper<B> {
                     *boundary > run.text_range.start && *boundary < run.text_range.end
                 }))
                 .collect();
-            for (range, last) in affected_windows(&run.text_range, &safe, points) {
-                let context = (if safe.binary_search(&range.start).is_ok() {
-                    range.start
-                } else {
-                    deferred.context.start
-                })..(if safe.binary_search(&range.end).is_ok() {
-                    range.end
-                } else {
-                    deferred.context.end
-                });
+            let safe = alternative
+                .and_then(|alternative| alternative.safe_concat_boundaries.as_deref())
+                .unwrap_or(&deferred.safe_concat_boundaries);
+            let windows = affected_windows(&run.text_range, &deferred.context, safe, points);
+            let alternative = alternative
+                .map(|alternative| &data.deferred_justification_shapes[alternative.shape]);
+            for (range, last, context) in windows {
                 let next_edge = self.owner_edges
                     [self.owner_edges.partition_point(|edge| *edge <= last)..]
                     .first()

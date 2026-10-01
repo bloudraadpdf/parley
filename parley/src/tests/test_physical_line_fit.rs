@@ -420,6 +420,16 @@ fn a_physical_line_fit_installs_clusters_in_proportion_to_its_lines() {
 }
 
 #[test]
+fn a_physical_line_fit_collects_safe_boundaries_in_proportion_to_its_lines() {
+    let short = physical_line_fit_work("Roboto", 80);
+    let long = physical_line_fit_work("Roboto", 160);
+    assert!(
+        long.safe_boundaries * 10 <= short.safe_boundaries * 22,
+        "{short:?} to {long:?}"
+    );
+}
+
+#[test]
 fn a_physical_line_fit_releases_segments_in_proportion_to_its_lines() {
     let short = physical_line_fit_work("Roboto Flex", 80);
     let long = physical_line_fit_work("Roboto Flex", 160);
