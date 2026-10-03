@@ -850,6 +850,7 @@ pub(crate) struct ClusterInfo {
     boundary: Boundary,
     source_char: char,
     authored_break_unit: AuthoredBreakUnit,
+    default_ignorable: bool,
 }
 
 impl ClusterInfo {
@@ -862,6 +863,10 @@ impl ClusterInfo {
             boundary,
             source_char,
             authored_break_unit,
+            default_ignorable: icu_properties::CodePointSetData::new::<
+                icu_properties::props::DefaultIgnorableCodePoint,
+            >()
+            .contains(source_char),
         }
     }
 
@@ -911,8 +916,7 @@ impl ClusterInfo {
     /// hyphen: its visible replacement is discretionary material and is
     /// measured separately only when the line actually breaks there.
     pub(crate) fn is_default_ignorable(self) -> bool {
-        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>()
-            .contains(self.source_char)
+        self.default_ignorable
     }
 }
 
@@ -2749,4 +2753,22 @@ fn push_cluster(
         line_break_advance: final_line_break_advance,
         trimmed_letter_spacing: 0.0,
     });
+}
+
+#[cfg(test)]
+mod cluster_info_tests {
+    use super::ClusterInfo;
+    use crate::analysis::{AuthoredBreakUnit, Boundary};
+
+    #[test]
+    fn a_cluster_keeps_its_default_ignorable_class_in_eight_bytes() {
+        assert_eq!(size_of::<ClusterInfo>(), 8);
+        assert!(
+            ClusterInfo::new(Boundary::None, '\u{AD}', AuthoredBreakUnit::Other)
+                .is_default_ignorable()
+        );
+        assert!(
+            !ClusterInfo::new(Boundary::None, 'a', AuthoredBreakUnit::Other).is_default_ignorable()
+        );
+    }
 }
