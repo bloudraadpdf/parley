@@ -1,7 +1,7 @@
 // Copyright 2025 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::FontVariation;
+use crate::{AdvanceQuantisation, FontVariation};
 use alloc::boxed::Box;
 use hashbrown::Equivalent;
 
@@ -11,13 +11,20 @@ pub(crate) struct ShapeDataKey {
     font_blob_id: u64,
     /// The font's index in the font collection.
     font_index: u32,
+    /// The grid of the advances of the font.
+    advance_quantisation: Option<AdvanceQuantisation>,
 }
 
 impl ShapeDataKey {
-    pub(crate) const fn new(font_blob_id: u64, font_index: u32) -> Self {
+    pub(crate) const fn new(
+        font_blob_id: u64,
+        font_index: u32,
+        advance_quantisation: Option<AdvanceQuantisation>,
+    ) -> Self {
         Self {
             font_blob_id,
             font_index,
+            advance_quantisation,
         }
     }
 }

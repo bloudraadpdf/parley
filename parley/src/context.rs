@@ -12,6 +12,7 @@ use super::resolve::tree::TreeStyleBuilder;
 use super::resolve::{RangedStyleBuilder, ResolveContext, ResolvedStyle, StyleRun};
 use super::style::{Brush, TextStyle};
 
+use crate::AdvanceQuantisation;
 use crate::analysis::{AnalysisDataSources, CharInfo};
 use crate::bidi::BidiResolver;
 use crate::builder::TreeBuilder;
@@ -67,6 +68,8 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
 
     // Optional fixed grid used by consumers when serializing font advances.
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
+    // Optional consumer grid for the default-instance advance of each glyph.
+    pub(crate) advance_quantisation: Option<AdvanceQuantisation>,
     // Whether line fit uses nominal font metrics while glyph positioning and
     // emitted advances retain shaping adjustments such as kerning.
     pub(crate) nominal_font_metric_line_breaks: bool,
@@ -91,6 +94,7 @@ impl<B: Brush> LayoutContext<B> {
             analysis_data_sources: AnalysisDataSources::new(),
             scx: ShapeContext::default(),
             font_metric_advance_quantization: None,
+            advance_quantisation: None,
             nominal_font_metric_line_breaks: false,
             #[cfg(test)]
             owner_box_reads: 0,
@@ -108,6 +112,12 @@ impl<B: Brush> LayoutContext<B> {
         quantization: Option<FontMetricAdvanceQuantization>,
     ) {
         self.font_metric_advance_quantization = quantization;
+    }
+
+    /// Quantises the default-instance advance of each glyph for shaping and the font metrics, as if
+    /// each font carried the quantised advances in its `hmtx` table.
+    pub fn set_advance_quantisation(&mut self, quantisation: Option<AdvanceQuantisation>) {
+        self.advance_quantisation = quantisation;
     }
 
     /// Select nominal font-metric advances for line-fit decisions while
@@ -268,6 +278,7 @@ impl<B: Brush> Clone for LayoutContext<B> {
         // caller configuration must survive cloning.
         let mut cloned = Self::new();
         cloned.font_metric_advance_quantization = self.font_metric_advance_quantization;
+        cloned.advance_quantisation = self.advance_quantisation;
         cloned.nominal_font_metric_line_breaks = self.nominal_font_metric_line_breaks;
         cloned
     }

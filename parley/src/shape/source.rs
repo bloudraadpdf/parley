@@ -11,6 +11,7 @@ pub(super) fn source_scratch<B: Brush>(
     let mut scratch = crate::layout::data::LayoutData::default();
     scratch.styles.clone_from(&data.styles);
     scratch.font_metric_advance_quantization = data.font_metric_advance_quantization;
+    scratch.advance_quantisation = data.advance_quantisation;
     scratch.nominal_font_metric_line_breaks = data.nominal_font_metric_line_breaks;
     scratch
 }
@@ -156,6 +157,7 @@ impl DeferredSourceShape {
             before: &source[source_context.start..range.start],
             after: &source[range.end..source_context.end],
             produce_concat_boundaries: true,
+            advance_quantisation: data.advance_quantisation,
         });
         scratch.push_run(
             data.fonts[run.font_index].clone(),

@@ -109,6 +109,7 @@ extern crate std;
 pub use fontique;
 pub use shape::justification::JustificationShapePolicy;
 
+mod advance_quantisation;
 mod analysis;
 mod bidi;
 mod builder;
@@ -132,6 +133,7 @@ mod tests;
 pub use linebender_resource_handle::FontData;
 pub use util::BoundingBox;
 
+pub use advance_quantisation::AdvanceQuantisation;
 pub use builder::{RangedBuilder, StyleRunBuilder, TreeBuilder};
 pub use context::{FontMetricAdvanceQuantization, LayoutContext};
 pub use font::FontContext;

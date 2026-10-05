@@ -33,7 +33,7 @@ mod segment;
 pub(crate) mod source;
 
 pub(crate) struct ShapeContext {
-    shape_data_cache: LruCache<cache::ShapeDataKey, harfrust::ShaperData>,
+    shape_data_cache: LruCache<cache::ShapeDataKey, segment::FontShapeData>,
     shape_instance_cache: LruCache<cache::ShapeInstanceId, harfrust::ShaperInstance>,
     shape_plan_cache: LruCache<cache::ShapePlanId, harfrust::ShapePlan>,
     unicode_buffer: Option<harfrust::UnicodeBuffer>,
@@ -548,6 +548,7 @@ fn shape_item<'a, B: Brush>(
             before: &text[context_start..segment_start],
             after: &text[segment_end..context_end],
             produce_concat_boundaries,
+            advance_quantisation: layout.data.advance_quantisation,
         });
         scx.features = features;
 
