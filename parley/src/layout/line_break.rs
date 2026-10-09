@@ -126,6 +126,8 @@ struct LineState {
     items: Range<usize>,
     clusters: Range<usize>,
     num_spaces: usize,
+    /// The advance by which the word separators of the line may shrink.
+    space_shrink: f32,
     /// Of the line currently being built, the maximum line height seen so far.
     /// This represents a lower-bound on the eventual line height of the line.
     running_line_height: f32,
@@ -555,11 +557,14 @@ impl BreakerState {
         next_fit_x: f32,
         height: f32,
         authored_break_unit: AuthoredBreakUnit,
-        justification_space: bool,
+        justification_space: Option<f32>,
     ) {
         self.append_cluster_to_line(next_x, next_fit_x, height, authored_break_unit);
         self.cluster_idx += 1;
-        self.line.num_spaces += usize::from(justification_space);
+        if let Some(shrink) = justification_space {
+            self.line.num_spaces += 1;
+            self.line.space_shrink += shrink;
+        }
     }
 
     /// Add inline box to line
@@ -974,12 +979,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let mut idx = end;
         let mut reclaimed = 0.0f32;
         let mut reclaimed_fit = 0.0f32;
+        let mut reclaimed_shrink = 0.0f32;
         let mut spaces = 0_usize;
         while idx > cluster_start {
             let cluster = &self.layout.data.clusters[idx - 1];
             if cluster.info.whitespace().is_space_or_nbsp() {
                 reclaimed += cluster.advance;
                 reclaimed_fit += cluster.line_break_advance;
+                reclaimed_shrink +=
+                    self.layout.data.justify_shrink(cluster) * cluster.line_break_advance;
                 spaces += 1;
                 idx -= 1;
             } else {
@@ -1008,6 +1016,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.x -= reclaimed;
         self.state.line.fit_x -= reclaimed_fit;
         self.state.line.num_spaces = self.state.line.num_spaces.saturating_sub(spaces);
+        self.state.line.space_shrink -= reclaimed_shrink;
         Some(reclaimed)
     }
 
@@ -1857,10 +1866,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             }
                         };
 
-                        let contributes_justification_space = is_space
+                        let justification_space = (is_space
                             && projected_source_cluster
                                 == ProjectedSourceClusterParticipation::Normal
-                            && !self.state.line.removes_leading_source_at(byte_index);
+                            && !self.state.line.removes_leading_source_at(byte_index))
+                        .then_some(style.justify_shrink * fit_advance);
                         match line_fit {
                             LineFit::Fits | LineFit::TrailingPreservedSpaceOverflow => {
                                 if self.advance_fits(next_fit_x - hanging_tracking, max_advance) {
@@ -1872,7 +1882,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     next_fit_x,
                                     line_height,
                                     cluster.info().authored_break_unit(),
-                                    contributes_justification_space,
+                                    justification_space,
                                 );
                             }
                             LineFit::TrailingCollapsibleSpaceOverflow(opportunity) => {
@@ -1909,7 +1919,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             next_fit_x,
                                             line_height,
                                             cluster.info().authored_break_unit(),
-                                            contributes_justification_space,
+                                            justification_space,
                                         );
                                     }
                                 }
@@ -1926,8 +1936,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                         next_fit_x,
                                         run.metrics().line_height,
                                         cluster.info().authored_break_unit(),
-                                        contributes_justification_space
-                                            && self.has_negative_end_edges,
+                                        justification_space.filter(|_| self.has_negative_end_edges),
                                     );
                                 }
                             }
@@ -2077,7 +2086,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Compare positive advances within their floating-point error bound.
     fn advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
         line_advance_fits(
-            candidate + self.state.line.cloned_owners.end_advance(),
+            candidate + self.state.line.cloned_owners.end_advance() - self.state.line.space_shrink,
             max_advance,
             self.state.line.clusters.len() + self.state.line.items.len() + 1,
         )
@@ -3565,6 +3574,7 @@ fn try_commit_line<B: Brush>(
 
     // Reset state for the new line
     state.num_spaces = 0;
+    state.space_shrink = 0.0;
     if committed_text_run {
         state.clusters.start = state.clusters.end;
     }

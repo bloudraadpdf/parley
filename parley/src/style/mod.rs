@@ -216,6 +216,11 @@ pub enum StyleProperty<'a, B: Brush> {
     WordSpacing(f32),
     /// Extra spacing between letters.
     LetterSpacing(f32),
+    /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
+    ///
+    /// Line breaking counts it; only a layout aligned with [`Alignment::Justify`](crate::Alignment::Justify)
+    /// shrinks the separators of its lines, so set it only for justified text.
+    JustifyShrink(f32),
     /// Control over where words can wrap.
     WordBreak(WordBreak),
     /// Control over normal line-breaking opportunities and their priority.
@@ -294,6 +299,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub word_spacing: f32,
     /// Extra spacing between letters.
     pub letter_spacing: f32,
+    /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
+    pub justify_shrink: f32,
     /// Control over where words can wrap.
     pub word_break: WordBreak,
     /// Control over normal line-breaking opportunities and their priority.
@@ -342,6 +349,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             line_height: LineHeight::default(),
             word_spacing: 0.0,
             letter_spacing: 0.0,
+            justify_shrink: 0.0,
             word_break: WordBreak::default(),
             line_break_mode: LineBreakMode::default(),
             overflow_wrap: OverflowWrap::default(),

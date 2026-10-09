@@ -82,6 +82,8 @@ pub struct Style<B: Brush> {
     pub(crate) soft_break_policy: SoftBreakPolicy,
     /// Per-cluster overflow-wrap setting
     pub(crate) overflow_wrap: OverflowWrap,
+    /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
+    pub(crate) justify_shrink: f32,
     /// Per-cluster text-wrap-mode setting
     pub(crate) text_wrap_mode: TextWrapMode,
     /// Per-cluster white-space collapsing and hanging setting.

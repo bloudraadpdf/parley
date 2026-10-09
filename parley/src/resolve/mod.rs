@@ -176,6 +176,7 @@ impl ResolveContext {
             StyleProperty::LineHeight(value) => LineHeight(value.scale(scale)),
             StyleProperty::WordSpacing(value) => WordSpacing(*value * scale),
             StyleProperty::LetterSpacing(value) => LetterSpacing(*value * scale),
+            StyleProperty::JustifyShrink(value) => JustifyShrink(*value),
             StyleProperty::WordBreak(value) => WordBreak(*value),
             StyleProperty::LineBreakMode(value) => LineBreakMode(*value),
             StyleProperty::OverflowWrap(value) => OverflowWrap(*value),
@@ -231,6 +232,7 @@ impl ResolveContext {
             line_height: raw_style.line_height.scale(scale),
             word_spacing: raw_style.word_spacing * scale,
             letter_spacing: raw_style.letter_spacing * scale,
+            justify_shrink: raw_style.justify_shrink,
             word_break: raw_style.word_break,
             line_break_mode: raw_style.line_break_mode,
             overflow_wrap: raw_style.overflow_wrap,
@@ -434,6 +436,8 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     WordSpacing(f32),
     /// Extra spacing between letters.
     LetterSpacing(f32),
+    /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
+    JustifyShrink(f32),
     /// Control over where words can wrap.
     WordBreak(WordBreak),
     /// Control over normal line-breaking opportunities and their priority.
@@ -503,6 +507,8 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) word_spacing: f32,
     /// Extra spacing between letters.
     pub(crate) letter_spacing: f32,
+    /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
+    pub(crate) justify_shrink: f32,
     /// Control over where words can wrap.
     pub(crate) word_break: WordBreak,
     /// Control over normal line-breaking opportunities and their priority.
@@ -555,6 +561,7 @@ impl<B: Brush> ResolvedStyle<B> {
             LineHeight(value) => self.line_height = value,
             WordSpacing(value) => self.word_spacing = value,
             LetterSpacing(value) => self.letter_spacing = value,
+            JustifyShrink(value) => self.justify_shrink = value,
             WordBreak(value) => self.word_break = value,
             LineBreakMode(value) => self.line_break_mode = value,
             OverflowWrap(value) => self.overflow_wrap = value,
@@ -599,6 +606,7 @@ impl<B: Brush> ResolvedStyle<B> {
             LineHeight(value) => self.line_height.nearly_eq(*value),
             WordSpacing(value) => nearly_eq(self.word_spacing, *value),
             LetterSpacing(value) => nearly_eq(self.letter_spacing, *value),
+            JustifyShrink(value) => nearly_eq(self.justify_shrink, *value),
             WordBreak(value) => self.word_break == *value,
             LineBreakMode(value) => self.line_break_mode == *value,
             OverflowWrap(value) => self.overflow_wrap == *value,
@@ -618,6 +626,7 @@ impl<B: Brush> ResolvedStyle<B> {
             line_height: self.line_height,
             soft_break_policy: self.soft_break_policy(),
             overflow_wrap: self.overflow_wrap,
+            justify_shrink: self.justify_shrink,
             text_wrap_mode: self.text_wrap_mode,
             white_space_collapse: self.white_space_collapse,
             tab_size: self.tab_size,

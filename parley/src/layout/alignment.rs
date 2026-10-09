@@ -238,7 +238,12 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
         layout.lines[line_index].metrics.offset -= left_occupied_advance;
 
         // Compute free space.
-        let free_space = alignment_width - indent - line_advance + trailing_whitespace_advance;
+        let mut free_space = alignment_width - indent - line_advance + trailing_whitespace_advance;
+        if UNDO_JUSTIFICATION {
+            restore_word_separators(layout, line_index);
+        } else if free_space < 0.0 && layout.aligned_justification_mode.is_some() {
+            free_space += shrink_word_separators(layout, line_index, -free_space);
+        }
 
         if !options.align_when_overflowing && free_space <= 0.0 {
             if is_rtl {
@@ -388,6 +393,62 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                 }
             }
         }
+    }
+}
+
+/// The non-terminal word separators of a line.
+fn word_separators<B: Brush>(layout: &LayoutData<B>, line_index: usize) -> alloc::vec::Vec<usize> {
+    let line = &layout.lines[line_index];
+    let terminal_start = line.terminal_justification_start;
+    layout.line_items[line.item_range.clone()]
+        .iter()
+        .filter(|item| item.is_text_run())
+        .flat_map(|item| {
+            let run_start = layout.runs[item.index].text_range.start;
+            item.cluster_range.clone().filter(move |&index| {
+                let cluster = &layout.clusters[index];
+                cluster.info.whitespace().is_space_or_nbsp()
+                    && terminal_start.is_none_or(|start| run_start + cluster.text_offset < start)
+            })
+        })
+        .collect()
+}
+
+/// Shrinks the word separators of a line by one fraction of their shrink to absorb `deficit`, and returns the
+/// advance removed.
+fn shrink_word_separators<B: Brush>(
+    layout: &mut LayoutData<B>,
+    line_index: usize,
+    deficit: f32,
+) -> f32 {
+    let separators = word_separators(layout, line_index);
+    let capacity: f32 = separators
+        .iter()
+        .map(|&index| {
+            layout.justify_shrink(&layout.clusters[index]) * layout.clusters[index].advance
+        })
+        .sum();
+    if capacity <= 0.0 {
+        return 0.0;
+    }
+    let factor = (deficit / capacity).min(1.0);
+    let mut removed = 0.0;
+    for index in separators {
+        let natural = layout.clusters[index].advance;
+        let shrink = factor * layout.justify_shrink(&layout.clusters[index]) * natural;
+        layout.clusters[index].advance = natural - shrink;
+        layout.lines[line_index]
+            .shrunk_separators
+            .push((index, natural));
+        removed += shrink;
+    }
+    removed
+}
+
+/// Restores the word separators that [`shrink_word_separators`] shrank.
+fn restore_word_separators<B: Brush>(layout: &mut LayoutData<B>, line_index: usize) {
+    for (index, natural) in core::mem::take(&mut layout.lines[line_index].shrunk_separators) {
+        layout.clusters[index].advance = natural;
     }
 }
 

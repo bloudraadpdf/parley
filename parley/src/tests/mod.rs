@@ -12,6 +12,7 @@ mod test_font_synthesis;
 mod test_inline_box_wrap;
 mod test_justification;
 mod test_justification_shapes;
+mod test_justify_shrink;
 mod test_letter_spacing;
 mod test_line_break_overrides;
 mod test_line_metrics;

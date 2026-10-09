@@ -1042,6 +1042,8 @@ pub(crate) struct LineData {
     pub(crate) terminal_fit_whitespace: TerminalWhitespace,
     /// Number of justified clusters on the line.
     pub(crate) num_spaces: usize,
+    /// The cluster index and natural advance of each word separator that justification shrank.
+    pub(crate) shrunk_separators: Vec<(usize, f32)>,
     pub(crate) terminal_justification_start: Option<usize>,
     pub(crate) justification_side_spacing: alloc::collections::BTreeMap<
         super::justification::JustificationUnitAddress,
@@ -1361,6 +1363,10 @@ impl<B: Brush> Default for LayoutData<B> {
 }
 
 impl<B: Brush> LayoutData<B> {
+    pub(crate) fn justify_shrink(&self, cluster: &ClusterData) -> f32 {
+        self.styles[cluster.style_index as usize].justify_shrink
+    }
+
     pub(crate) fn is_overflow_opportunity(&self, byte_index: usize) -> bool {
         self.line_break_overrides
             .binary_search_by_key(&byte_index, |entry| entry.byte_index())
