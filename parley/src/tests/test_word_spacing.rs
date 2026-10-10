@@ -10,10 +10,7 @@ use crate::{FontFamily, LayoutContext, StyleProperty, TextWrapMode, WhiteSpaceCo
 fn word_spacing_preserves_spaces_in_mark_clusters() {
     let mut fonts = create_font_context();
     fonts.collection.register_fonts(
-        fontique::Blob::new(Arc::new(
-            parley_dev::fonts::MARK_ANCHOR_TEST
-                .to_vec(),
-        )),
+        fontique::Blob::new(Arc::new(parley_dev::fonts::MARK_ANCHOR_TEST.to_vec())),
         None,
     );
     let mut context: LayoutContext<ColorBrush> = LayoutContext::new();

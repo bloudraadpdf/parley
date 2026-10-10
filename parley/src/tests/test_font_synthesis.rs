@@ -13,13 +13,8 @@ use crate::{
 const TEST_FAMILY: &str = "Parley style synthesis test";
 
 fn test_font_context_with_style(second_style: FontStyle) -> (FontContext, u64, u64) {
-    let regular = Blob::new(Arc::new(
-        parley_dev::fonts::ROBOTO_REGULAR.to_vec(),
-    ));
-    let italic = Blob::new(Arc::new(
-        parley_dev::fonts::ARIMO_VARIABLE
-            .to_vec(),
-    ));
+    let regular = Blob::new(Arc::new(parley_dev::fonts::ROBOTO_REGULAR.to_vec()));
+    let italic = Blob::new(Arc::new(parley_dev::fonts::ARIMO_VARIABLE.to_vec()));
     let mut collection = Collection::new(CollectionOptions {
         shared: false,
         system_fonts: false,

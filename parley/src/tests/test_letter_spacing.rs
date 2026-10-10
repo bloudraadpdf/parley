@@ -46,17 +46,11 @@ fn configured_unbroken_layout(
 ) -> Layout<ColorBrush> {
     let mut font_context = create_font_context();
     font_context.collection.register_fonts(
-        fontique::Blob::new(Arc::new(
-            parley_dev::fonts::NOTO_NASKH_ARABIC
-            .to_vec(),
-        )),
+        fontique::Blob::new(Arc::new(parley_dev::fonts::NOTO_NASKH_ARABIC.to_vec())),
         None,
     );
     font_context.collection.register_fonts(
-        fontique::Blob::new(Arc::new(
-            parley_dev::fonts::NOTO_SANS_BENGALI
-            .to_vec(),
-        )),
+        fontique::Blob::new(Arc::new(parley_dev::fonts::NOTO_SANS_BENGALI.to_vec())),
         None,
     );
     let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();

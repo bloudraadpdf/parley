@@ -115,11 +115,19 @@ impl FontInfo {
             FontStyle::Italic if self.has_italic_axis() => (0.0, 1.0),
             FontStyle::Italic => (-14.0, 1.0),
             FontStyle::Oblique(angle) if self.has_slant_axis() => (-angle.unwrap_or(14.0), 0.0),
-            FontStyle::Oblique(angle) => (0.0, if angle.unwrap_or(14.0) > 0.0 { 1.0 } else { 0.0 }),
+            FontStyle::Oblique(angle) => (
+                0.0,
+                if angle.unwrap_or(14.0) > 0.0 {
+                    1.0
+                } else {
+                    0.0
+                },
+            ),
         };
         let style_axes = [
             self.has_slant_axis().then_some((Tag::new(b"slnt"), slant)),
-            self.has_italic_axis().then_some((Tag::new(b"ital"), italic)),
+            self.has_italic_axis()
+                .then_some((Tag::new(b"ital"), italic)),
         ];
         if style_axes.iter().any(Option::is_some) {
             for axis in style_axes.into_iter().flatten() {
@@ -530,8 +538,7 @@ mod tests {
         let source = SourceInfo::new(
             SourceId::new(),
             SourceKind::Memory(Blob::new(Arc::new(
-                parley_dev::fonts::ROBOTO_REGULAR
-                    .to_vec(),
+                parley_dev::fonts::ROBOTO_REGULAR.to_vec(),
             ))),
         );
         let mut font = FontInfo::from_source(source, 0).unwrap();
@@ -559,10 +566,7 @@ mod tests {
     fn normal_request_uses_slant_axis_for_an_oblique_selected_face() {
         let source = SourceInfo::new(
             SourceId::new(),
-            SourceKind::Memory(Blob::new(Arc::new(
-                parley_dev::fonts::ROBOTO_FLEX
-                .to_vec(),
-            ))),
+            SourceKind::Memory(Blob::new(Arc::new(parley_dev::fonts::ROBOTO_FLEX.to_vec()))),
         );
         let mut font = FontInfo::from_source(source, 0).unwrap();
         font.attr_axes |= ITALIC_AXIS;
@@ -597,8 +601,7 @@ mod tests {
         let source = SourceInfo::new(
             SourceId::new(),
             SourceKind::Memory(Blob::new(Arc::new(
-                parley_dev::fonts::FONT_STYLE_TEST_SLNT_ITAL
-                .to_vec(),
+                parley_dev::fonts::FONT_STYLE_TEST_SLNT_ITAL.to_vec(),
             ))),
         );
         FontInfo::from_source(source, 0).unwrap()

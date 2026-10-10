@@ -340,14 +340,8 @@ mod tests {
     const TEST_FAMILY: &str = "Query style synthesis test";
 
     fn test_collection() -> (Collection, Blob<u8>, Blob<u8>) {
-        let regular = Blob::new(Arc::new(
-            parley_dev::fonts::ROBOTO_REGULAR
-                .to_vec(),
-        ));
-        let italic = Blob::new(Arc::new(
-            parley_dev::fonts::ARIMO_VARIABLE
-            .to_vec(),
-        ));
+        let regular = Blob::new(Arc::new(parley_dev::fonts::ROBOTO_REGULAR.to_vec()));
+        let italic = Blob::new(Arc::new(parley_dev::fonts::ARIMO_VARIABLE.to_vec()));
         let mut collection = Collection::new(CollectionOptions {
             shared: false,
             system_fonts: false,

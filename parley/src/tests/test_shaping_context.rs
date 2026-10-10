@@ -76,10 +76,7 @@ fn logical_glyph_ids(layout: &crate::Layout<ColorBrush>) -> Vec<u32> {
 pub(super) fn naskh_font_context() -> crate::FontContext {
     let mut font_context = create_font_context();
     font_context.collection.register_fonts(
-        fontique::Blob::new(Arc::new(
-            parley_dev::fonts::NOTO_NASKH_ARABIC
-            .to_vec(),
-        )),
+        fontique::Blob::new(Arc::new(parley_dev::fonts::NOTO_NASKH_ARABIC.to_vec())),
         None,
     );
     font_context

@@ -495,8 +495,7 @@ fn rtl_ligatures_survive_transparent_inline_boundaries() {
         let mut fcx = create_font_context();
         fcx.collection.register_fonts(
             fontique::Blob::new(alloc::sync::Arc::new(
-                parley_dev::fonts::NOTO_NASKH_ARABIC
-                .to_vec(),
+                parley_dev::fonts::NOTO_NASKH_ARABIC.to_vec(),
             )),
             None,
         );

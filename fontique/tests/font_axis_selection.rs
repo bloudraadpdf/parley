@@ -41,8 +41,7 @@ fn declared_slant_range_limits_high_level_style_selection() {
 }
 
 fn variable_face() -> FontInfo {
-    let bytes =
-        parley_dev::fonts::ROBOTO_FLEX;
+    let bytes = parley_dev::fonts::ROBOTO_FLEX;
     FontInfo::from_source(
         SourceInfo::new(
             SourceId::new(),
