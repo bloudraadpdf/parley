@@ -110,30 +110,24 @@ impl FontInfo {
             // A designed bold face already supplies the family's bold fallback.
             synth.embolden = true;
         }
-        let (slant, italic) = match style {
-            FontStyle::Normal => (0.0, 0.0),
-            FontStyle::Italic if self.has_italic_axis() => (0.0, 1.0),
-            FontStyle::Italic => (-14.0, 1.0),
-            FontStyle::Oblique(angle) if self.has_slant_axis() => (-angle.unwrap_or(14.0), 0.0),
-            FontStyle::Oblique(angle) => (
-                0.0,
-                if angle.unwrap_or(14.0) > 0.0 {
-                    1.0
-                } else {
-                    0.0
-                },
-            ),
-        };
-        let style_axes = [
-            self.has_slant_axis().then_some((Tag::new(b"slnt"), slant)),
-            self.has_italic_axis()
-                .then_some((Tag::new(b"ital"), italic)),
-        ];
-        if style_axes.iter().any(Option::is_some) {
-            for axis in style_axes.into_iter().flatten() {
-                synth.vars[len] = axis;
-                len += 1;
+        let style_axis = match style {
+            FontStyle::Normal
+                if matches!(self.style, FontStyle::Oblique(_)) && self.has_slant_axis() =>
+            {
+                Some((Tag::new(b"slnt"), 0.0))
             }
+            FontStyle::Normal if self.has_italic_axis() => Some((Tag::new(b"ital"), 0.0)),
+            FontStyle::Normal if self.has_slant_axis() => Some((Tag::new(b"slnt"), 0.0)),
+            FontStyle::Italic if self.has_italic_axis() => Some((Tag::new(b"ital"), 1.0)),
+            FontStyle::Italic if self.has_slant_axis() => Some((Tag::new(b"slnt"), -14.0)),
+            FontStyle::Oblique(angle) if self.has_slant_axis() => {
+                Some((Tag::new(b"slnt"), -angle.unwrap_or(14.0)))
+            }
+            _ => None,
+        };
+        if let Some(axis) = style_axis {
+            synth.vars[len] = axis;
+            len += 1;
         } else if self.style != style
             && self.style == FontStyle::Normal
             && style_synthesis == FontStyleSynthesis::Allowed
@@ -354,7 +348,7 @@ pub struct AxisInfo {
 /// [`QueryFont::synthesis`]: crate::QueryFont::synthesis
 #[derive(Copy, Clone, Default, PartialEq)]
 pub struct Synthesis {
-    vars: [(Tag, f32); 4],
+    vars: [(Tag, f32); 3],
     len: u8,
     embolden: bool,
     skew: i8,
@@ -531,7 +525,6 @@ mod tests {
     use super::*;
     use crate::source::SourceId;
     use alloc::sync::Arc;
-    use alloc::vec::Vec;
 
     #[test]
     fn existing_bold_faces_do_not_receive_additional_faux_bold() {
@@ -590,10 +583,10 @@ mod tests {
                 .any(|(tag, value)| *tag == Tag::new(b"slnt") && *value == -45.0)
         );
         assert!(
-            synthesis
+            !synthesis
                 .variation_settings()
                 .iter()
-                .any(|(tag, value)| *tag == Tag::new(b"ital") && *value == 0.0)
+                .any(|(tag, _)| *tag == Tag::new(b"ital"))
         );
     }
 
@@ -607,29 +600,36 @@ mod tests {
         FontInfo::from_source(source, 0).unwrap()
     }
 
-    fn style_axes(style: FontStyle) -> Vec<(Tag, f32)> {
-        let mut axes = style_test_font()
-            .synthesis(
-                FontWidth::NORMAL,
-                style,
-                FontWeight::NORMAL,
-                FontStyleSynthesis::Allowed,
-            )
-            .variation_settings()
-            .to_vec();
-        axes.sort_by_key(|(tag, _)| *tag);
-        axes
+    fn synthesis(font: &FontInfo, style: FontStyle) -> Synthesis {
+        font.synthesis(
+            FontWidth::NORMAL,
+            style,
+            FontWeight::NORMAL,
+            FontStyleSynthesis::Allowed,
+        )
     }
 
     #[test]
-    fn a_style_sets_both_style_axes_of_a_font_with_ital_and_slnt() {
+    fn a_style_sets_one_style_axis_of_a_font_with_ital_and_slnt() {
+        let font = style_test_font();
         let ital = Tag::new(b"ital");
         let slnt = Tag::new(b"slnt");
-        assert_eq!(style_axes(FontStyle::Normal), [(ital, 0.0), (slnt, 0.0)]);
-        assert_eq!(style_axes(FontStyle::Italic), [(ital, 1.0), (slnt, 0.0)]);
-        assert_eq!(
-            style_axes(FontStyle::Oblique(None)),
-            [(ital, 0.0), (slnt, -14.0)]
-        );
+        for (style, expected) in [
+            (FontStyle::Normal, (ital, 0.0)),
+            (FontStyle::Italic, (ital, 1.0)),
+            (FontStyle::Oblique(None), (slnt, -14.0)),
+        ] {
+            assert_eq!(synthesis(&font, style).variation_settings(), [expected]);
+        }
+    }
+
+    #[test]
+    fn an_oblique_request_skews_a_font_with_ital_only() {
+        let mut font = style_test_font();
+        font.attr_axes &= !SLANT_AXIS;
+        font.style = FontStyle::Normal;
+        let oblique = synthesis(&font, FontStyle::Oblique(None));
+        assert_eq!(oblique.variation_settings(), []);
+        assert_eq!(oblique.skew(), Some(14.0));
     }
 }
