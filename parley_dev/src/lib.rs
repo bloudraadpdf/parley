@@ -35,6 +35,8 @@ pub mod fonts {
     pub const NOTO_SANS_BENGALI: &[u8] = include_bytes!("../assets/fonts/noto_sans_bengali/NotoSansBengali-Regular.ttf");
     /// `assets/fonts/noto_color_emoji/NotoColorEmoji-Subset.ttf`.
     pub const NOTO_COLOR_EMOJI_SUBSET: &[u8] = include_bytes!("../assets/fonts/noto_color_emoji/NotoColorEmoji-Subset.ttf");
+    /// `assets/fonts/font_style_test/FontStyleTest-slnt_ital-VF.ttf`.
+    pub const FONT_STYLE_TEST_SLNT_ITAL: &[u8] = include_bytes!("../assets/fonts/font_style_test/FontStyleTest-slnt_ital-VF.ttf");
 }
 
 /// The font families that are available in the assets/fonts directory.
