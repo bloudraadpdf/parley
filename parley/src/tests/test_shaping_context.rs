@@ -77,9 +77,7 @@ pub(super) fn naskh_font_context() -> crate::FontContext {
     let mut font_context = create_font_context();
     font_context.collection.register_fonts(
         fontique::Blob::new(Arc::new(
-            include_bytes!(
-                "../../../parley_dev/assets/fonts/noto_naskh_arabic/NotoNaskhArabic.ttf"
-            )
+            parley_dev::fonts::NOTO_NASKH_ARABIC
             .to_vec(),
         )),
         None,

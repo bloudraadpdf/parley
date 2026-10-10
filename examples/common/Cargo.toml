@@ -7,4 +7,5 @@ publish = false
 
 [dependencies]
 parley = { workspace = true, default-features = true }
+parley_dev = { workspace = true }
 peniko = { workspace = true, default-features = false, features = ["std"] }

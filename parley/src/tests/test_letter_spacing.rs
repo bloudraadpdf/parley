@@ -47,18 +47,14 @@ fn configured_unbroken_layout(
     let mut font_context = create_font_context();
     font_context.collection.register_fonts(
         fontique::Blob::new(Arc::new(
-            include_bytes!(
-                "../../../parley_dev/assets/fonts/noto_naskh_arabic/NotoNaskhArabic.ttf"
-            )
+            parley_dev::fonts::NOTO_NASKH_ARABIC
             .to_vec(),
         )),
         None,
     );
     font_context.collection.register_fonts(
         fontique::Blob::new(Arc::new(
-            include_bytes!(
-                "../../../parley_dev/assets/fonts/noto_sans_bengali/NotoSansBengali-Regular.ttf"
-            )
+            parley_dev::fonts::NOTO_SANS_BENGALI
             .to_vec(),
         )),
         None,

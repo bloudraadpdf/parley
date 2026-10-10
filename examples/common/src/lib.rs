@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -101,21 +100,13 @@ pub fn prepare_layouts() -> (PreparedLayout, PreparedLayout) {
         &mut font_cx,
         &mut layout_cx,
         &rich_config,
-        &default_colr_font_path(),
+        parley_dev::fonts::NOTO_COLOR_EMOJI_SUBSET,
     );
 
     (
         (simple_layout, sw, sh, simple_config),
         (rich_layout, rw, rh, rich_config),
     )
-}
-
-/// Default path to the COLR emoji font (relative to workspace).
-pub fn default_colr_font_path() -> PathBuf {
-    PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../parley_dev/assets/fonts/noto_color_emoji/NotoColorEmoji-Subset.ttf"
-    ))
 }
 
 /// Build a simple layout with plain Latin text (no emoji, no decorations, no inline boxes).
@@ -163,18 +154,17 @@ pub fn build_simple_layout(
     (layout, padded_width, padded_height)
 }
 
-/// Load COLR emoji font from `colr_font_path` into `font_cx`, then build the
+/// Load the COLR emoji font `colr_font` into `font_cx`, then build the
 /// rich layout with emoji, Arabic text, underline/strikethrough, and an inline box.
 pub fn build_rich_layout(
     font_cx: &mut FontContext,
     layout_cx: &mut LayoutContext<ColorBrush>,
     config: &ExampleConfig,
-    colr_font_path: &Path,
+    colr_font: &[u8],
 ) -> (Layout<ColorBrush>, u16, u16) {
-    let colr_font_data = std::fs::read(colr_font_path).expect("Failed to load COLR font");
     font_cx
         .collection
-        .register_fonts(Blob::new(Arc::new(colr_font_data)), None);
+        .register_fonts(Blob::new(Arc::new(colr_font.to_vec())), None);
 
     let (underline_range, strikethrough_range, party_emoji_range) = style_ranges(&config.text);
 

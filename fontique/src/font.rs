@@ -534,7 +534,7 @@ mod tests {
         let source = SourceInfo::new(
             SourceId::new(),
             SourceKind::Memory(Blob::new(Arc::new(
-                include_bytes!("../../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf")
+                parley_dev::fonts::ROBOTO_REGULAR
                     .to_vec(),
             ))),
         );
@@ -564,9 +564,7 @@ mod tests {
         let source = SourceInfo::new(
             SourceId::new(),
             SourceKind::Memory(Blob::new(Arc::new(
-                include_bytes!(
-                    "../../parley_dev/assets/fonts/roboto_fonts/RobotoFlex-VariableFont.ttf"
-                )
+                parley_dev::fonts::ROBOTO_FLEX
                 .to_vec(),
             ))),
         );

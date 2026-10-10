@@ -11,7 +11,7 @@ fn word_spacing_preserves_spaces_in_mark_clusters() {
     let mut fonts = create_font_context();
     fonts.collection.register_fonts(
         fontique::Blob::new(Arc::new(
-            include_bytes!("../../../parley_dev/assets/fonts/mark_anchor/mark-anchor-test.ttf")
+            parley_dev::fonts::MARK_ANCHOR_TEST
                 .to_vec(),
         )),
         None,

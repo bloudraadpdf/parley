@@ -14,10 +14,10 @@ const TEST_FAMILY: &str = "Parley style synthesis test";
 
 fn test_font_context_with_style(second_style: FontStyle) -> (FontContext, u64, u64) {
     let regular = Blob::new(Arc::new(
-        include_bytes!("../../../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf").to_vec(),
+        parley_dev::fonts::ROBOTO_REGULAR.to_vec(),
     ));
     let italic = Blob::new(Arc::new(
-        include_bytes!("../../../parley_dev/assets/fonts/arimo_fonts/Arimo-VariableFont_wght.ttf")
+        parley_dev::fonts::ARIMO_VARIABLE
             .to_vec(),
     ));
     let mut collection = Collection::new(CollectionOptions {

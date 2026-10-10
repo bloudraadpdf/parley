@@ -151,21 +151,19 @@ fn positioned(
 fn a_quantised_advance_shapes_as_a_font_with_the_quantised_hmtx() {
     for (font, family, text, weights) in [
         (
-            &include_bytes!("../../../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf")[..],
+            &parley_dev::fonts::ROBOTO_REGULAR[..],
             "Roboto",
             "Hamburgefonstiv AV To",
             &[400.0][..],
         ),
         (
-            include_bytes!("../../../parley_dev/assets/fonts/mark_anchor/mark-anchor-test.ttf"),
+            parley_dev::fonts::MARK_ANCHOR_TEST,
             "mark-anchor-test",
             "A\u{0301}A\u{0300}\u{0301} \u{05D0}\u{0301}",
             &[400.0],
         ),
         (
-            include_bytes!(
-                "../../../parley_dev/assets/fonts/arimo_fonts/Arimo-VariableFont_wght.ttf"
-            ),
+            parley_dev::fonts::ARIMO_VARIABLE,
             "Arimo",
             "Hamburgefonstiv AV To",
             &[400.0, 700.0],

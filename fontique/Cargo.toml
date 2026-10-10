@@ -12,6 +12,9 @@ repository.workspace = true
 [package.metadata.docs.rs]
 all-features = true
 
+[dev-dependencies]
+parley_dev = { workspace = true }
+
 [lints]
 workspace = true
 

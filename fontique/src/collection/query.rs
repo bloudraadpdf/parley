@@ -341,13 +341,11 @@ mod tests {
 
     fn test_collection() -> (Collection, Blob<u8>, Blob<u8>) {
         let regular = Blob::new(Arc::new(
-            include_bytes!("../../../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf")
+            parley_dev::fonts::ROBOTO_REGULAR
                 .to_vec(),
         ));
         let italic = Blob::new(Arc::new(
-            include_bytes!(
-                "../../../parley_dev/assets/fonts/arimo_fonts/Arimo-VariableFont_wght.ttf"
-            )
+            parley_dev::fonts::ARIMO_VARIABLE
             .to_vec(),
         ));
         let mut collection = Collection::new(CollectionOptions {

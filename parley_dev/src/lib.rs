@@ -19,6 +19,24 @@ pub fn font_dirs() -> impl Iterator<Item = PathBuf> {
     .into_iter()
 }
 
+/// The bytes of the font files in the assets/fonts directory.
+pub mod fonts {
+    /// `assets/fonts/roboto_fonts/Roboto-Regular.ttf`.
+    pub const ROBOTO_REGULAR: &[u8] = include_bytes!("../assets/fonts/roboto_fonts/Roboto-Regular.ttf");
+    /// `assets/fonts/roboto_fonts/RobotoFlex-VariableFont.ttf`.
+    pub const ROBOTO_FLEX: &[u8] = include_bytes!("../assets/fonts/roboto_fonts/RobotoFlex-VariableFont.ttf");
+    /// `assets/fonts/arimo_fonts/Arimo-VariableFont_wght.ttf`.
+    pub const ARIMO_VARIABLE: &[u8] = include_bytes!("../assets/fonts/arimo_fonts/Arimo-VariableFont_wght.ttf");
+    /// `assets/fonts/mark_anchor/mark-anchor-test.ttf`.
+    pub const MARK_ANCHOR_TEST: &[u8] = include_bytes!("../assets/fonts/mark_anchor/mark-anchor-test.ttf");
+    /// `assets/fonts/noto_naskh_arabic/NotoNaskhArabic.ttf`.
+    pub const NOTO_NASKH_ARABIC: &[u8] = include_bytes!("../assets/fonts/noto_naskh_arabic/NotoNaskhArabic.ttf");
+    /// `assets/fonts/noto_sans_bengali/NotoSansBengali-Regular.ttf`.
+    pub const NOTO_SANS_BENGALI: &[u8] = include_bytes!("../assets/fonts/noto_sans_bengali/NotoSansBengali-Regular.ttf");
+    /// `assets/fonts/noto_color_emoji/NotoColorEmoji-Subset.ttf`.
+    pub const NOTO_COLOR_EMOJI_SUBSET: &[u8] = include_bytes!("../assets/fonts/noto_color_emoji/NotoColorEmoji-Subset.ttf");
+}
+
 /// The font families that are available in the assets/fonts directory.
 pub const FONT_FAMILIES: &[&str] = &[
     "Arimo",
