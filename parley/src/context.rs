@@ -24,20 +24,23 @@ use parlance::BaseDirection;
 pub enum FontMetricAdvanceQuantization {
     /// Project every shaping run.
     All(NonZeroU16),
-    /// Project only runs on the Latin shaping path. Common and inherited
-    /// characters follow the script assigned to their surrounding run.
-    Latin(NonZeroU16),
+    /// Project only runs on the alphabetic shaping path: Latin, Greek and
+    /// Cyrillic. Common and inherited characters follow the script assigned to
+    /// their surrounding run.
+    Alphabetic(NonZeroU16),
 }
 
 impl FontMetricAdvanceQuantization {
     pub(crate) fn denominator(self) -> NonZeroU16 {
         match self {
-            Self::All(denominator) | Self::Latin(denominator) => denominator,
+            Self::All(denominator) | Self::Alphabetic(denominator) => denominator,
         }
     }
 
     pub(crate) fn applies_to_script(self, script: icu_properties::props::Script) -> bool {
-        matches!(self, Self::All(_)) || script == icu_properties::props::Script::Latin
+        use icu_properties::props::Script;
+        matches!(self, Self::All(_))
+            || matches!(script, Script::Latin | Script::Greek | Script::Cyrillic)
     }
 }
 

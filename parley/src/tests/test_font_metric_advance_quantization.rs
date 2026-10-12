@@ -292,7 +292,7 @@ fn projected_ligature_cluster_and_glyph_advances_stay_consistent() {
 }
 
 #[test]
-fn latin_projection_scope_leaves_complex_script_advances_untouched() {
+fn alphabetic_projection_scope_leaves_complex_script_advances_untouched() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
 
@@ -301,28 +301,34 @@ fn latin_projection_scope_leaves_complex_script_advances_untouched() {
         &mut lcx,
         &mut fcx,
         "سلام",
-        Some(FontMetricAdvanceQuantization::Latin(
+        Some(FontMetricAdvanceQuantization::Alphabetic(
             FIXED_WIDTH_DENOMINATOR,
         )),
         None,
     );
     assert_eq!(
         scoped_arabic, natural_arabic,
-        "Latin metric projection must leave quality-shaped Arabic advances unchanged",
+        "alphabetic metric projection must leave quality-shaped Arabic advances unchanged",
     );
 
-    let natural_latin = measure_advance(&mut lcx, &mut fcx, "alpha", None, None);
-    let scoped_latin = measure_advance(
-        &mut lcx,
-        &mut fcx,
+    for text in [
         "alpha",
-        Some(FontMetricAdvanceQuantization::Latin(
-            FIXED_WIDTH_DENOMINATOR,
-        )),
-        None,
-    );
-    assert!(
-        scoped_latin < natural_latin,
-        "Latin metric projection must still project Latin base advances",
-    );
+        "\u{3b1}\u{3bb}\u{3c6}\u{3b1}",
+        "\u{430}\u{43b}\u{44c}\u{444}\u{430}",
+    ] {
+        let natural = measure_advance(&mut lcx, &mut fcx, text, None, None);
+        let scoped = measure_advance(
+            &mut lcx,
+            &mut fcx,
+            text,
+            Some(FontMetricAdvanceQuantization::Alphabetic(
+                FIXED_WIDTH_DENOMINATOR,
+            )),
+            None,
+        );
+        assert!(
+            scoped < natural,
+            "alphabetic metric projection must project Latin, Greek and Cyrillic base advances: {text}",
+        );
+    }
 }
