@@ -1223,7 +1223,6 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) scale: f32,
     pub(crate) quantize: bool,
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
-    pub(crate) advance_quantisation: Option<crate::AdvanceQuantisation>,
     pub(crate) nominal_font_metric_line_breaks: bool,
     pub(crate) normal_soft_wrap_selection: NormalSoftWrapSelection,
     /// CSS Text 4 §8.2: letter-spacing is not applied after the last
@@ -1312,7 +1311,6 @@ impl<B: Brush> Default for LayoutData<B> {
             scale: 1.,
             quantize: true,
             font_metric_advance_quantization: None,
-            advance_quantisation: None,
             nominal_font_metric_line_breaks: false,
             normal_soft_wrap_selection: NormalSoftWrapSelection::default(),
             trim_line_end_letter_spacing: true,
@@ -1551,7 +1549,6 @@ impl<B: Brush> LayoutData<B> {
         self.scale = 1.;
         self.quantize = true;
         self.font_metric_advance_quantization = None;
-        self.advance_quantisation = None;
         self.nominal_font_metric_line_breaks = false;
         self.normal_soft_wrap_selection = NormalSoftWrapSelection::default();
         self.trim_line_end_letter_spacing = true;
@@ -1667,10 +1664,10 @@ impl<B: Brush> LayoutData<B> {
         let size = skrifa::prelude::Size::new(font_size);
         let metrics = skrifa::metrics::Metrics::new(&font_ref, size, coords);
         let scale_factor = font_size / metrics.units_per_em as f32;
-        let glyph_advances = crate::advance_quantisation::GlyphAdvances::new(
+        let glyph_metrics = skrifa::metrics::GlyphMetrics::new(
             &font_ref,
+            skrifa::prelude::Size::unscaled(),
             coords,
-            self.advance_quantisation,
         );
         let advance_projection = self
             .font_metric_advance_quantization
@@ -1680,7 +1677,8 @@ impl<B: Brush> LayoutData<B> {
             })
             .map(|quantization| {
                 FontMetricAdvanceProjection::new(
-                    glyph_advances.clone(),
+                    &font_ref,
+                    coords,
                     metrics.units_per_em,
                     font_size,
                     quantization.denominator(),
@@ -1690,7 +1688,7 @@ impl<B: Brush> LayoutData<B> {
             let gid = font_ref.charmap().map(character);
             let advance = gid
                 .and_then(|gid| {
-                    glyph_advances.advance_width(gid).map(|advance| {
+                    glyph_metrics.advance_width(gid).map(|advance| {
                         let advance = advance * scale_factor;
                         advance_projection
                             .as_ref()
@@ -2624,7 +2622,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
 /// Shaping adjustments remain intact because the residual is removed from
 /// the already-shaped advance instead of quantizing that final advance.
 struct FontMetricAdvanceProjection<'a> {
-    glyph_advances: crate::advance_quantisation::GlyphAdvances<'a>,
+    glyph_metrics: skrifa::metrics::GlyphMetrics<'a>,
     units_per_em: f64,
     font_size: f64,
     denominator: f64,
@@ -2632,13 +2630,18 @@ struct FontMetricAdvanceProjection<'a> {
 
 impl<'a> FontMetricAdvanceProjection<'a> {
     fn new(
-        glyph_advances: crate::advance_quantisation::GlyphAdvances<'a>,
+        font: &skrifa::FontRef<'a>,
+        coords: &'a [skrifa::prelude::NormalizedCoord],
         units_per_em: u16,
         font_size: f32,
         denominator: NonZeroU16,
     ) -> Self {
         Self {
-            glyph_advances,
+            glyph_metrics: skrifa::metrics::GlyphMetrics::new(
+                font,
+                skrifa::prelude::Size::unscaled(),
+                coords,
+            ),
             units_per_em: f64::from(units_per_em),
             font_size: f64::from(font_size),
             denominator: f64::from(denominator.get()),
@@ -2646,7 +2649,7 @@ impl<'a> FontMetricAdvanceProjection<'a> {
     }
 
     fn project(&self, glyph_id: skrifa::GlyphId, shaped_advance: f32) -> f32 {
-        let Some(metric_units) = self.glyph_advances.advance_width(glyph_id) else {
+        let Some(metric_units) = self.glyph_metrics.advance_width(glyph_id) else {
             return shaped_advance;
         };
         let metric_em = f64::from(metric_units) / self.units_per_em;
@@ -2656,7 +2659,7 @@ impl<'a> FontMetricAdvanceProjection<'a> {
     }
 
     fn nominal(&self, glyph_id: skrifa::GlyphId) -> f32 {
-        let Some(metric_units) = self.glyph_advances.advance_width(glyph_id) else {
+        let Some(metric_units) = self.glyph_metrics.advance_width(glyph_id) else {
             return 0.0;
         };
         let metric_em = f64::from(metric_units) / self.units_per_em;

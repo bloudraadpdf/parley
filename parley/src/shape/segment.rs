@@ -4,16 +4,7 @@
 use alloc::vec::Vec;
 
 use super::{ShapeContext, cache, variations_iter};
-use crate::{
-    AdvanceQuantisation, FontData, FontVariation,
-    advance_quantisation::{QuantisedFont, QuantisedFontFuncs},
-};
-
-/// The shaper data of 1 font, with its quantised advances when the layout quantises them.
-pub(super) struct FontShapeData {
-    shaper: harfrust::ShaperData,
-    quantised: Option<QuantisedFont>,
-}
+use crate::{FontData, FontVariation};
 
 pub(super) struct SegmentShape<'a> {
     pub(super) font: FontData,
@@ -28,7 +19,6 @@ pub(super) struct SegmentShape<'a> {
     pub(super) before: &'a str,
     pub(super) after: &'a str,
     pub(super) produce_concat_boundaries: bool,
-    pub(super) advance_quantisation: Option<AdvanceQuantisation>,
 }
 
 pub(super) struct ShapedSegment {
@@ -41,18 +31,11 @@ impl ShapeContext {
         let font = harfrust::FontRef::from_index(input.font.data.as_ref(), input.font.index)
             .expect("selected shaping font");
         let blob_id = input.font.data.id();
-        let FontShapeData {
-            shaper: shaper_data,
-            quantised,
-        } = self.shape_data_cache.entry(
-            cache::ShapeDataKey::new(blob_id, input.font.index, input.advance_quantisation),
-            || FontShapeData {
-                shaper: harfrust::ShaperData::new(&font),
-                quantised: input
-                    .advance_quantisation
-                    .and_then(|quantisation| QuantisedFont::new(&font, quantisation)),
-            },
-        );
+        let shaper_data = self
+            .shape_data_cache
+            .entry(cache::ShapeDataKey::new(blob_id, input.font.index), || {
+                harfrust::ShaperData::new(&font)
+            });
         let instance = self.shape_instance_cache.entry(
             cache::ShapeInstanceKey::new(
                 blob_id,
@@ -109,21 +92,13 @@ impl ShapeContext {
         if let Some(language) = input.language {
             buffer.set_language(language);
         }
-        let mut funcs = quantised.as_ref().map(|quantised| {
-            QuantisedFontFuncs::new(quantised, &font, !shaper.coords().is_empty())
-        });
         ShapedSegment {
             glyphs: shaper.shape(
                 buffer,
                 harfrust::ShapeOptions::new()
                     .plan(Some(plan))
                     .features(input.features)
-                    .point_size(Some(input.size))
-                    .font_funcs(
-                        funcs
-                            .as_mut()
-                            .map(|funcs| funcs as &mut dyn harfrust::font::FontFuncs),
-                    ),
+                    .point_size(Some(input.size)),
             ),
             coords: shaper.coords().to_vec(),
         }
