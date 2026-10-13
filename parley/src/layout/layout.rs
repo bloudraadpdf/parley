@@ -44,7 +44,7 @@ impl<B: Brush> FollowingBreakShape<B> {
     pub fn new(byte_index: usize, text: String, layout: Layout<B>) -> Option<Self> {
         if byte_index == 0
             || layout.len() > 1
-            || (layout.len() == 0 && !text.is_empty())
+            || (layout.is_empty() && !text.is_empty())
             || layout.data.text_len != text.len()
             || !layout.inline_boxes().is_empty()
             || !layout.full_width().is_finite()
@@ -80,7 +80,7 @@ impl<B: Brush> DiscretionaryBreakShape<B> {
     ) -> Option<Self> {
         if byte_index == 0
             || layout.len() > 1
-            || (layout.len() == 0 && !text.is_empty())
+            || (layout.is_empty() && !text.is_empty())
             || layout.data.text_len != text.len()
             || !layout.inline_boxes().is_empty()
             || !layout.full_width().is_finite()

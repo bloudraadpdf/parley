@@ -643,7 +643,7 @@ impl BreakerState {
             match condition {
                 DiscretionaryBreakCondition::Normal => self.prev_boundary = candidate,
                 DiscretionaryBreakCondition::Overflow => {
-                    self.overflow_discretionary_boundary = candidate
+                    self.overflow_discretionary_boundary = candidate;
                 }
             }
         }
@@ -981,9 +981,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             .end
             .min(self.layout.data.clusters.len());
         let mut idx = end;
-        let mut reclaimed = 0.0f32;
-        let mut reclaimed_fit = 0.0f32;
-        let mut reclaimed_shrink = 0.0f32;
+        let mut reclaimed = 0.0_f32;
+        let mut reclaimed_fit = 0.0_f32;
+        let mut reclaimed_shrink = 0.0_f32;
         let mut spaces = 0_usize;
         while idx > cluster_start {
             let cluster = &self.layout.data.clusters[idx - 1];
@@ -1167,16 +1167,18 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.item_idx,
                                 inline_box.index,
                             );
-                            let candidate =
-                                self.source_boundary_kind(inline_box.index, max_advance);
-                            if self.state.line.text_wrap_mode == TextWrapMode::Wrap
-                                && boundary.is_available_from(self.state.line.text_wrap_mode)
-                                && self.state.line.has_content_advance()
-                                && candidate.is_some()
-                            {
+                            let candidate = self
+                                .source_boundary_kind(inline_box.index, max_advance)
+                                .filter(|_| {
+                                    self.state.line.text_wrap_mode == TextWrapMode::Wrap
+                                        && boundary
+                                            .is_available_from(self.state.line.text_wrap_mode)
+                                        && self.state.line.has_content_advance()
+                                });
+                            if let Some(candidate) = candidate {
                                 finish_source_fragment!();
                                 self.state.item_idx += 1;
-                                self.state.mark_line_break_opportunity(candidate.unwrap());
+                                self.state.mark_line_break_opportunity(candidate);
                                 let next_fit_x = self.state.line.fit_x + width;
                                 if !self.advance_contribution_fits(width, next_fit_x, max_advance) {
                                     if let Some(candidate) = self.state.take_overflow_candidate() {

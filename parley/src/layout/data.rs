@@ -12,6 +12,8 @@ use crate::layout::{
 };
 use crate::style::Brush;
 
+use super::justification::JustificationOpportunities;
+
 #[cfg(feature = "libm")]
 #[allow(unused_imports)]
 use core_maths::CoreFloat;
@@ -1248,9 +1250,8 @@ pub(crate) struct LayoutData<B: Brush> {
     /// `false` suppresses the Unicode soft break at that boundary.
     pub(crate) line_break_overrides: Vec<LineBreakOverride>,
     pub(crate) first_line_source_end: Option<usize>,
-    pub(crate) justification_opportunities: super::justification::JustificationOpportunities,
-    pub(crate) selected_line_justification_opportunities:
-        Option<super::justification::JustificationOpportunities>,
+    pub(crate) justification_opportunities: JustificationOpportunities,
+    pub(crate) selected_line_justification_opportunities: Option<JustificationOpportunities>,
     pub(crate) line_start_fit_advances: Vec<LineStartFitAdvance>,
     /// Original cluster fit values retained while a caller projection is active.
     pub(crate) source_cluster_fit_baseline: Vec<f32>,
@@ -1328,7 +1329,7 @@ impl<B: Brush> Default for LayoutData<B> {
             line_fit_tolerance: 0.0,
             line_break_overrides: Vec::new(),
             first_line_source_end: None,
-            justification_opportunities: Default::default(),
+            justification_opportunities: JustificationOpportunities::default(),
             selected_line_justification_opportunities: None,
             line_start_fit_advances: Vec::new(),
             source_cluster_fit_baseline: Vec::new(),

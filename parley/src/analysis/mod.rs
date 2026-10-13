@@ -53,7 +53,7 @@ impl AnalysisDataSources {
             .filter(move |boundary| {
                 // UAX #29 revision 49, GB9c: Linker Extend* × Consonant.
                 let next = text[*boundary..].chars().next();
-                if !next.is_some_and(|ch| conjunct.get(ch) == IndicConjunctBreak::Consonant) {
+                if next.is_none_or(|ch| conjunct.get(ch) != IndicConjunctBreak::Consonant) {
                     return true;
                 }
                 text[..*boundary]

@@ -63,10 +63,6 @@ pub struct AlignmentOptions {
     pub last_line_alignment: Option<Alignment>,
 }
 
-#[expect(
-    clippy::derivable_impls,
-    reason = "Make default values explicit rather than relying on the implicit default value of bool"
-)]
 impl Default for AlignmentOptions {
     fn default() -> Self {
         Self {
@@ -109,7 +105,7 @@ pub(crate) fn align<B: Brush>(
 /// Align the layout with per-line alignment widths.
 ///
 /// Each line in `alignment_widths` overrides the layout's single-width
-/// [`crate::Layout::align`] alignment_width for that line. Lines beyond
+/// [`crate::Layout::align`] `alignment_width` for that line. Lines beyond
 /// `alignment_widths.len()` fall back to the LAST per-line width (which is
 /// also stored as `LayoutData::alignment_width` for downstream readers).
 /// Pass an empty slice to fall back fully to single-width behaviour using
@@ -324,10 +320,10 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                     for site in source_targets {
                         match site.before.address {
                             super::justification::JustificationUnitAddress::TextCluster(index) => {
-                                layout.clusters[index].advance += adjustment
+                                layout.clusters[index].advance += adjustment;
                             }
                             super::justification::JustificationUnitAddress::InlineBox(_) => {
-                                layout.line_items[site.before.item_index].advance += adjustment
+                                layout.line_items[site.before.item_index].advance += adjustment;
                             }
                         }
                         if let Some(after) = site.after {
@@ -468,7 +464,7 @@ fn count_inter_character_opportunities(
     clusters: &[ClusterData],
     is_rtl: bool,
 ) -> usize {
-    let mut eligible_clusters = 0usize;
+    let mut eligible_clusters = 0_usize;
     let line_items: &mut dyn Iterator<Item = &LineItemData> = if is_rtl {
         &mut line_items.iter().rev()
     } else {
@@ -646,8 +642,10 @@ mod tests {
         line_advance: f32,
         num_spaces: usize,
     ) -> LayoutData<()> {
-        let mut layout = LayoutData::default();
-        layout.width = line_advance;
+        let mut layout = LayoutData {
+            width: line_advance,
+            ..Default::default()
+        };
         layout.line_items.push(LineItemData {
             kind: LayoutItemKind::TextRun,
             index: 0,
