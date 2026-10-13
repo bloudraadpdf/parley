@@ -181,12 +181,24 @@ fn zero_advance_owner_edges_keep_intrinsic_physical_boundaries() {
         )));
         builder.push_default(StyleProperty::FontSize(24.0));
         builder.push_inline_box(
-            InlineBox::inline_start_edge(41, 0, 0.0, 0.0, InlineBoxBreakAffinity::ToNext)
-                .with_continuous_shaping(),
+            InlineBox::inline_start_edge(
+                41,
+                0,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            )
+            .with_continuous_shaping(),
         );
         builder.push_inline_box(
-            InlineBox::inline_end_edge(42, 12, 0.0, 0.0, InlineBoxBreakAffinity::ToPrevious)
-                .with_continuous_shaping(),
+            InlineBox::inline_end_edge(
+                42,
+                12,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            )
+            .with_continuous_shaping(),
         );
         if physical {
             let mut owner = owner(
@@ -223,12 +235,24 @@ fn a_line_of_only_an_owner_edge_fits_without_a_text_start() {
         builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
         builder.push_default(StyleProperty::FontSize(10.0));
         builder.push_inline_box(
-            InlineBox::inline_start_edge(41, 6, 5.0, 0.0, InlineBoxBreakAffinity::ToNext)
-                .with_continuous_shaping(),
+            InlineBox::inline_start_edge(
+                41,
+                6,
+                crate::InlineOwnerEdgeAdvance::uniform(5.0),
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            )
+            .with_continuous_shaping(),
         );
         builder.push_inline_box(
-            InlineBox::inline_end_edge(42, 8, 5.0, 0.0, InlineBoxBreakAffinity::ToPrevious)
-                .with_continuous_shaping(),
+            InlineBox::inline_end_edge(
+                42,
+                8,
+                crate::InlineOwnerEdgeAdvance::uniform(5.0),
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            )
+            .with_continuous_shaping(),
         );
         builder.push_inline_owner_shaping(InlineOwnerShaping {
             text: 6..8,
@@ -267,7 +291,7 @@ fn geometry_only_owner_has_no_text_to_reshape() {
         builder.push_inline_box(InlineBox::inline_start_edge(
             41,
             0,
-            10.0,
+            crate::InlineOwnerEdgeAdvance::uniform(10.0),
             0.0,
             InlineBoxBreakAffinity::ToNext,
         ));
@@ -371,7 +395,7 @@ fn owned_words(family: &str, words: usize, owner: WordOwner) -> Layout<ColorBrus
                     InlineBox::inline_start_edge(
                         id,
                         start,
-                        2.0,
+                        crate::InlineOwnerEdgeAdvance::uniform(2.0),
                         0.0,
                         InlineBoxBreakAffinity::ToNext,
                     )
@@ -381,7 +405,7 @@ fn owned_words(family: &str, words: usize, owner: WordOwner) -> Layout<ColorBrus
                     InlineBox::inline_end_edge(
                         id + 1,
                         start,
-                        2.0,
+                        crate::InlineOwnerEdgeAdvance::uniform(2.0),
                         0.0,
                         InlineBoxBreakAffinity::ToPrevious,
                     )

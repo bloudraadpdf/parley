@@ -191,8 +191,20 @@ fn zero_height_boundaries_keep_negative_line_extents() {
     let text = "negative leading";
     let cases = [
         alloc::vec![
-            InlineBox::inline_start_edge(1, 0, 0.0, 0.0, InlineBoxBreakAffinity::ToNext),
-            InlineBox::inline_end_edge(2, text.len(), 0.0, 0.0, InlineBoxBreakAffinity::ToPrevious,),
+            InlineBox::inline_start_edge(
+                1,
+                0,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToNext
+            ),
+            InlineBox::inline_end_edge(
+                2,
+                text.len(),
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ),
         ],
         alloc::vec![InlineBox::transparent_anchor(3, 0)],
     ];
@@ -224,16 +236,29 @@ fn runs_keep_their_own_style_index_across_boundaries() {
     builder.push_default(StyleProperty::FontSize(10.0));
     builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(2.0)));
     builder.push(StyleProperty::FontSize(20.0), boundary + 1..text.len());
-    builder.push(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.0)), boundary + 1..text.len());
+    builder.push(
+        StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.0)),
+        boundary + 1..text.len(),
+    );
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
     let line = layout.lines().next().unwrap();
-    let lhs: alloc::vec::Vec<(f32, f32)> = line.runs().map(|r| (r.font_size(), r.metrics().line_height)).collect();
+    let lhs: alloc::vec::Vec<(f32, f32)> = line
+        .runs()
+        .map(|r| (r.font_size(), r.metrics().line_height))
+        .collect();
     assert_eq!(lhs.len(), 2);
-    assert!((lhs[0].1 - 20.0).abs() < 0.01, "run A (10px, 2.0x) line-height should be 20, got {:?}", lhs);
-    assert!((lhs[1].1 - 20.0).abs() < 0.01, "run B (20px, 1.0x) line-height should be 20, got {:?}", lhs);
+    assert!(
+        (lhs[0].1 - 20.0).abs() < 0.01,
+        "run A (10px, 2.0x) line-height should be 20, got {:?}",
+        lhs
+    );
+    assert!(
+        (lhs[1].1 - 20.0).abs() < 0.01,
+        "run B (20px, 1.0x) line-height should be 20, got {:?}",
+        lhs
+    );
 }
-
 
 #[test]
 fn default_font_size_relative_line_height_resolves() {
@@ -248,8 +273,11 @@ fn default_font_size_relative_line_height_resolves() {
     layout.break_all_lines(None);
     let line = layout.lines().next().unwrap();
     let run = line.runs().next().unwrap();
-    assert!((run.metrics().line_height - 20.0).abs() < 0.01,
-        "default-only FontSizeRelative(2.0) at 10px should give 20, got {}", run.metrics().line_height);
+    assert!(
+        (run.metrics().line_height - 20.0).abs() < 0.01,
+        "default-only FontSizeRelative(2.0) at 10px should give 20, got {}",
+        run.metrics().line_height
+    );
 }
 
 #[test]

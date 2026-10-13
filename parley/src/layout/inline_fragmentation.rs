@@ -37,12 +37,18 @@ impl ClonedInlineFlow {
         }
     }
 
-    pub(super) fn start_advance(&self) -> f32 {
-        self.owners.iter().map(|owner| owner.start_width).sum()
+    pub(super) fn start_advance(&self, line_index: usize) -> f32 {
+        self.owners
+            .iter()
+            .map(|owner| owner.start_width.for_line(line_index))
+            .sum()
     }
 
-    pub(super) fn end_advance(&self) -> f32 {
-        self.owners.iter().map(|owner| owner.end_width).sum()
+    pub(super) fn end_advance(&self, line_index: usize) -> f32 {
+        self.owners
+            .iter()
+            .map(|owner| owner.end_width.for_line(line_index))
+            .sum()
     }
 
     pub(super) fn finish_intrinsic_fragment(
@@ -50,9 +56,10 @@ impl ClonedInlineFlow {
         maximum: &mut f32,
         advance: &mut f32,
         trailing: f32,
+        line_index: usize,
     ) {
-        *maximum = maximum.max(*advance - trailing + self.end_advance());
-        *advance = self.start_advance();
+        *maximum = maximum.max(*advance - trailing + self.end_advance(line_index));
+        *advance = self.start_advance(line_index + 1);
     }
 
     pub(super) fn start_ids(&self) -> impl Iterator<Item = u64> + '_ {
@@ -64,7 +71,7 @@ impl ClonedInlineFlow {
     }
 }
 
-pub(super) struct ClonedInlineEdgeMap(BTreeMap<u64, LineItemData>);
+pub(super) struct ClonedInlineEdgeMap(BTreeMap<u64, [LineItemData; 2]>);
 
 impl ClonedInlineEdgeMap {
     pub(super) fn new<B: Brush>(layout: &LayoutData<B>) -> Self {
@@ -78,18 +85,29 @@ impl ClonedInlineEdgeMap {
                     }
                     let edge = &layout.inline_boxes[item.index];
                     edge.cloned_owner()?;
-                    Some((edge.id, LineItemData::inline_box(item, None, edge.width())))
+                    Some((
+                        edge.id,
+                        [
+                            LineItemData::inline_box(item, None, edge.width_for_line(0)),
+                            LineItemData::inline_box(item, None, edge.width_for_line(1)),
+                        ],
+                    ))
                 })
                 .collect(),
         )
     }
 
-    pub(super) fn append(&self, ids: impl IntoIterator<Item = u64>, items: &mut Vec<LineItemData>) {
+    pub(super) fn append(
+        &self,
+        ids: impl IntoIterator<Item = u64>,
+        items: &mut Vec<LineItemData>,
+        line_index: usize,
+    ) {
         items.extend(ids.into_iter().map(|id| {
             self.0
                 .get(&id)
-                .expect("a cloned owner retains both source edges")
-                .clone()
+                .expect("a cloned owner retains both source edges")[usize::from(line_index != 0)]
+            .clone()
         }));
     }
 }

@@ -57,6 +57,21 @@ Parley itself does text layout and includes utilities for text selection and edi
 **Text layout** means computing x/y coordinates for each glyph in a string of text.
 Besides what the other libraries do, this involves things like determining a glyph's size, line breaking, and bidi resolution.
 
+## Bloudraad logical owner-edge advances
+
+Moegoe uses logical owner edges to compose inline fragments. Each edge has typed
+first-line and normal-line advances in `InlineOwnerEdgeAdvance`. The caller supplies
+computed values; Parley does not compute CSS lengths. Line zero uses the first-line
+advance. Later source edges and cloned continuation edges use the normal advance.
+Atomic boxes and contextual spacing keep their existing width model.
+
+Logical-edge constructors require this record. Use `uniform` when both advances
+are equal, or `first_line(normal, first_line)` when they differ. This API change
+requires coordinated Moegoe and Bladsy integration at the published fork revision.
+No local dependency override is part of this patch. The owning tests cover slice,
+clone, explicit and soft breaks, nested and sibling owners, intrinsic widths and
+positive retained-glyph hit testing. No upstream issue submission is claimed.
+
 ## Minimum supported Rust Version (MSRV)
 
 This version of Parley has been verified to compile with **Rust 1.88** and later.

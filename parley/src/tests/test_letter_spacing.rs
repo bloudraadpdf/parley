@@ -419,7 +419,10 @@ fn break_all_keeps_bengali_vowel_conjuncts_whole() {
     });
     layout.break_all_lines(Some(1.0));
     assert_eq!(
-        layout.lines().map(|line| line.text_range()).collect::<Vec<_>>(),
+        layout
+            .lines()
+            .map(|line| line.text_range())
+            .collect::<Vec<_>>(),
         [0..12, 12..24]
     );
 }
@@ -427,7 +430,8 @@ fn break_all_keeps_bengali_vowel_conjuncts_whole() {
 #[test]
 fn indic_linker_boundaries_follow_unicode_18_gb9c() {
     let analysis = crate::analysis::AnalysisDataSources::new();
-    for text in ["অ্যা", "এ্যা", "অ\u{200d}্যা", "অ্\u{200d}যা", "অ্ক", "্য"] {
+    for text in ["অ্যা", "এ্যা", "অ\u{200d}্যা", "অ্\u{200d}যা", "অ্ক", "্য"]
+    {
         assert_eq!(
             analysis.grapheme_boundaries(text).collect::<Vec<_>>(),
             [0, text.len()]
@@ -471,15 +475,19 @@ fn cursive_scripts_receive_no_letter_spacing() {
     // CSS Text 4 §8.2.1: letter-spacing is not applied within cursive scripts.
     let plain = unwrapped_layout("Noto Naskh Arabic", "ععع", 0.0);
     let tracked = unwrapped_layout("Noto Naskh Arabic", "ععع", 5.0);
-    assert!(plain
-        .lines()
-        .flat_map(|line| line.runs())
-        .all(|run| run.is_cursive_script()));
+    assert!(
+        plain
+            .lines()
+            .flat_map(|line| line.runs())
+            .all(|run| run.is_cursive_script())
+    );
     let latin = unwrapped_layout("Roboto", "abc", 0.0);
-    assert!(latin
-        .lines()
-        .flat_map(|line| line.runs())
-        .all(|run| !run.is_cursive_script()));
+    assert!(
+        latin
+            .lines()
+            .flat_map(|line| line.runs())
+            .all(|run| !run.is_cursive_script())
+    );
 
     let advance = |layout: &Layout<ColorBrush>| layout.lines().next().unwrap().metrics().advance;
     assert!((advance(&tracked) - advance(&plain)).abs() < 0.001);
@@ -784,14 +792,14 @@ fn empty_inline_edges_separate_the_two_tracking_halves() {
                     builder.push_inline_box(crate::InlineBox::inline_start_edge(
                         10,
                         edge,
-                        2.0,
+                        crate::InlineOwnerEdgeAdvance::uniform(2.0),
                         0.0,
                         crate::InlineBoxBreakAffinity::Independent,
                     ));
                     builder.push_inline_box(crate::InlineBox::inline_end_edge(
                         11,
                         edge,
-                        2.0,
+                        crate::InlineOwnerEdgeAdvance::uniform(2.0),
                         0.0,
                         crate::InlineBoxBreakAffinity::Independent,
                     ));

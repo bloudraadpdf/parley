@@ -854,7 +854,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.items = self.lines.line_items.len();
         self.state.lines = self.lines.lines.len();
         self.state.line.cloned_start_edges = self.state.line.cloned_owners.start_ids().collect();
-        self.state.line.x = self.state.line.cloned_owners.start_advance();
+        self.state.line.x = self
+            .state
+            .line
+            .cloned_owners
+            .start_advance(self.state.lines);
         self.state.line.fit_x = self.state.line.x;
         self.state.line.fragment_fit = FragmentFit::Fits;
         self.state.line.running_line_height = 0.;
@@ -1157,7 +1161,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
-                            let width = inline_box.advance();
+                            let width = inline_box.advance_for_line(self.state.lines);
                             let height = inline_box.height();
                             let boundary = self.layout.data.contextual_spacing_soft_wrap_boundary(
                                 self.state.item_idx,
@@ -1201,10 +1205,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         }
                         InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) => {
                             self.state.line.cloned_owners.before_edge(inline_box);
-                            let edge_width = inline_box.width();
+                            let edge_width = inline_box.width_for_line(self.state.lines);
                             let edge_height = inline_box.height();
                             let edge_source_index = inline_box.index;
-                            let source_projection = edge.source_projection(inline_box.width());
+                            let source_projection = edge.source_projection(edge_width);
                             let boundary = self.layout.data.source_soft_wrap_boundary_after(
                                 self.state.item_idx,
                                 inline_box.index,
@@ -1329,7 +1333,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             continue;
                         }
                     };
-                    let width = inline_box.advance();
+                    let width = inline_box.advance_for_line(self.state.lines);
                     let height = inline_box.height();
                     if break_affinity.allows_break_before() {
                         finish_source_fragment!();
@@ -1903,9 +1907,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                         }
                                     }
                                     (_, Some(candidate))
-                                        if candidate.preempts_overflowing_collapsible_space(
-                                            cluster.text_range().start,
-                                        ) =>
+                                        if candidate
+                                            .preempts_overflowing_collapsible_space(cluster.text_range().start) =>
                                     {
                                         if try_commit_regular_candidate!(candidate) {
                                             return self.start_new_line();
@@ -2086,7 +2089,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Compare positive advances within their floating-point error bound.
     fn advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
         line_advance_fits(
-            candidate + self.state.line.cloned_owners.end_advance() - self.state.line.space_shrink,
+            candidate + self.state.line.cloned_owners.end_advance(self.state.lines)
+                - self.state.line.space_shrink,
             max_advance,
             self.state.line.clusters.len() + self.state.line.items.len() + 1,
         )
@@ -2159,8 +2163,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Compute the x position for the line width tracking
                     self.state.line.cloned_owners.before_edge(inline_box);
-                    let next_x = self.state.line.x + inline_box.advance();
-                    let next_fit_x = self.state.line.fit_x + inline_box.advance();
+                    let advance = inline_box.advance_for_line(self.state.lines);
+                    let next_x = self.state.line.x + advance;
+                    let next_fit_x = self.state.line.fit_x + advance;
                     self.state.item_idx += 1;
                     self.state.append_inline_box_to_line(
                         next_x,
@@ -2460,7 +2465,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
         for item in &mut line_items[line.item_range.clone()] {
             if item.kind == LayoutItemKind::InlineBox {
-                item.advance = data.inline_boxes[item.index].advance();
+                item.advance = data.inline_boxes[item.index].advance_for_line(line_idx);
             }
         }
     }
@@ -2526,7 +2531,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             for line_item in &self.lines.line_items[line.item_range.clone()] {
                 match line_item.kind {
                     LayoutItemKind::InlineBox => {
-                        line_x += self.layout.data.inline_boxes[line_item.index].advance();
+                        line_x += self.layout.data.inline_boxes[line_item.index]
+                            .advance_for_line(line_idx);
                     }
                     LayoutItemKind::TextRun => {
                         let run = &self.layout.data.runs[line_item.index];
@@ -3428,10 +3434,12 @@ fn try_commit_line<B: Brush>(
     state.clusters.end = state.clusters.end.min(layout.data.clusters.len());
     state.items.end = state.items.end.min(layout.data.items.len());
 
+    let line_index = lines.lines.len();
     let start_item_idx = lines.line_items.len();
     cloned_edges.append(
         state.cloned_start_edges.iter().copied(),
         &mut lines.line_items,
+        line_index,
     );
     // let start_run_idx = lines.line_items.last().map(|item| item.index).unwrap_or(0);
 
@@ -3464,7 +3472,7 @@ fn try_commit_line<B: Brush>(
                 lines.line_items.push(LineItemData::inline_box(
                     item,
                     Some(state.items.start + i),
-                    inline_box.width(),
+                    inline_box.width_for_line(line_index),
                 ));
             }
             LayoutItemKind::TextRun => {
@@ -3540,7 +3548,11 @@ fn try_commit_line<B: Brush>(
         .last()
         .map_or(LayoutItemKind::TextRun, |item| item.kind);
     lines.line_items.extend(committed_items);
-    cloned_edges.append(state.cloned_owners.end_ids(), &mut lines.line_items);
+    cloned_edges.append(
+        state.cloned_owners.end_ids(),
+        &mut lines.line_items,
+        line_index,
+    );
     let end_item_idx = lines.line_items.len();
 
     // Return false and don't commit line if there were no items to process
@@ -3566,7 +3578,7 @@ fn try_commit_line<B: Brush>(
         conditional_line_start_omission: state.conditional_line_start_omission.clone(),
         ends_at_discretionary_break: state.discretionary_break,
         metrics: LineMetrics {
-            advance: state.x + state.cloned_owners.end_advance(),
+            advance: state.x + state.cloned_owners.end_advance(line_index),
             ..Default::default()
         },
         ..Default::default()

@@ -56,11 +56,14 @@ enum InlineBoxParticipation {
     ContextualSpacing { width: f32, height: f32 },
     /// A logical owner edge which contributes geometry but no soft-wrap
     /// opportunity of its own.
-    LogicalOwnerStart { width: f32, height: f32 },
+    LogicalOwnerStart {
+        width: InlineOwnerEdgeAdvance,
+        height: f32,
+    },
     /// A logical inline-end edge with explicit following source-space
     /// participation.
     LogicalOwnerEnd {
-        width: f32,
+        width: InlineOwnerEdgeAdvance,
         height: f32,
         following_source_space: FollowingSourceSpace,
     },
@@ -68,12 +71,42 @@ enum InlineBoxParticipation {
     TransparentAnchor,
 }
 
+/// Computed logical owner-edge advances for first and normal lines.
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub struct InlineOwnerEdgeAdvance {
+    normal: f32,
+    first_line: f32,
+}
+
+impl InlineOwnerEdgeAdvance {
+    /// Uses one computed advance on all lines.
+    pub const fn uniform(width: f32) -> Self {
+        Self {
+            normal: width,
+            first_line: width,
+        }
+    }
+
+    /// Uses separate computed first-line and normal-line advances.
+    pub const fn first_line(normal: f32, first_line: f32) -> Self {
+        Self { normal, first_line }
+    }
+
+    pub(crate) const fn for_line(self, line_index: usize) -> f32 {
+        if line_index == 0 {
+            self.first_line
+        } else {
+            self.normal
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) struct ClonedInlineOwner {
     pub start_id: u64,
     pub end_id: u64,
-    pub start_width: f32,
-    pub end_width: f32,
+    pub start_width: InlineOwnerEdgeAdvance,
+    pub end_width: InlineOwnerEdgeAdvance,
 }
 
 /// Closed line-breaking participation for inline boxes.
@@ -127,10 +160,10 @@ pub(crate) enum InlineBoxBidiAttachment {
 impl InlineBoxParticipation {
     pub(crate) const fn width(self) -> f32 {
         match self {
-            Self::Atomic { width, .. }
-            | Self::ContextualSpacing { width, .. }
-            | Self::LogicalOwnerStart { width, .. }
-            | Self::LogicalOwnerEnd { width, .. } => width,
+            Self::Atomic { width, .. } | Self::ContextualSpacing { width, .. } => width,
+            Self::LogicalOwnerStart { width, .. } | Self::LogicalOwnerEnd { width, .. } => {
+                width.normal
+            }
             Self::TransparentAnchor => 0.0,
         }
     }
@@ -170,7 +203,7 @@ impl InlineBoxParticipation {
                 InlineBoxShapingParticipation::InterveningInlineAdvance
             }
             Self::LogicalOwnerStart { width, .. } | Self::LogicalOwnerEnd { width, .. } => {
-                if width == 0.0 {
+                if width.normal == 0.0 && width.first_line == 0.0 {
                     InlineBoxShapingParticipation::TransparentBoundary
                 } else {
                     InlineBoxShapingParticipation::InterveningInlineAdvance
@@ -343,7 +376,7 @@ impl InlineBox {
     pub fn inline_start_edge(
         id: u64,
         index: usize,
-        width: f32,
+        width: InlineOwnerEdgeAdvance,
         height: f32,
         _break_affinity: InlineBoxBreakAffinity,
     ) -> Self {
@@ -363,7 +396,7 @@ impl InlineBox {
     pub fn inline_end_edge(
         id: u64,
         index: usize,
-        width: f32,
+        width: InlineOwnerEdgeAdvance,
         height: f32,
         _break_affinity: InlineBoxBreakAffinity,
     ) -> Self {
@@ -382,7 +415,7 @@ impl InlineBox {
     pub fn inline_end_edge_with_following_source_space(
         id: u64,
         index: usize,
-        width: f32,
+        width: InlineOwnerEdgeAdvance,
         height: f32,
         following_source_space: FollowingSourceSpace,
         _break_affinity: InlineBoxBreakAffinity,
@@ -408,7 +441,7 @@ impl InlineBox {
     pub fn cloned_inline_edges(
         ids: [u64; 2],
         range: core::ops::Range<usize>,
-        widths: [f32; 2],
+        widths: [InlineOwnerEdgeAdvance; 2],
         following_source_space: FollowingSourceSpace,
     ) -> [Self; 2] {
         assert_ne!(
@@ -454,6 +487,19 @@ impl InlineBox {
         self.participation.width()
     }
 
+    /// Returns the used inline advance on the specified line.
+    pub const fn width_for_line(&self, line_index: usize) -> f32 {
+        match self.participation {
+            InlineBoxParticipation::LogicalOwnerStart { width, .. }
+            | InlineBoxParticipation::LogicalOwnerEnd { width, .. } => width.for_line(line_index),
+            _ => self.width(),
+        }
+    }
+
+    pub(crate) fn advance_for_line(&self, line_index: usize) -> f32 {
+        self.width_for_line(line_index) + self.applied_letter_spacing
+    }
+
     /// Returns the block extent in pixels.
     pub const fn height(&self) -> f32 {
         self.participation.height()
@@ -465,7 +511,9 @@ impl InlineBox {
 
     pub(crate) const fn shaping_participation(&self) -> InlineBoxShapingParticipation {
         match self.participation.shaping_participation() {
-            InlineBoxShapingParticipation::InterveningInlineAdvance if self.preserves_shaping_context => {
+            InlineBoxShapingParticipation::InterveningInlineAdvance
+                if self.preserves_shaping_context =>
+            {
                 InlineBoxShapingParticipation::NonInterveningInlineAdvance
             }
             participation => participation,

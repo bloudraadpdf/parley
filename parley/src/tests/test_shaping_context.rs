@@ -135,18 +135,23 @@ fn explicit_boundaries_reject_an_offset_inside_a_codepoint() {
 fn continuous_owner_edges_keep_ligatures_and_their_advance() {
     let mut fonts = create_font_context();
     let mut context = LayoutContext::<ColorBrush>::new();
-    let make_layout = |context: &mut LayoutContext<ColorBrush>,
-                       fonts: &mut crate::FontContext,
-                       width| {
-        let mut builder = context.ranged_builder(fonts, "fi", 1.0, false);
-        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
-        builder.push_default(StyleProperty::FontSize(24.0));
-        builder.push_inline_box(
-            InlineBox::inline_start_edge(91, 1, width, 0.0, crate::InlineBoxBreakAffinity::ToNext)
+    let make_layout =
+        |context: &mut LayoutContext<ColorBrush>, fonts: &mut crate::FontContext, width| {
+            let mut builder = context.ranged_builder(fonts, "fi", 1.0, false);
+            builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+            builder.push_default(StyleProperty::FontSize(24.0));
+            builder.push_inline_box(
+                InlineBox::inline_start_edge(
+                    91,
+                    1,
+                    crate::InlineOwnerEdgeAdvance::uniform(width),
+                    0.0,
+                    crate::InlineBoxBreakAffinity::ToNext,
+                )
                 .with_continuous_shaping(),
-        );
-        builder.build("fi")
-    };
+            );
+            builder.build("fi")
+        };
     let mut plain = make_layout(&mut context, &mut fonts, 0.0);
     plain.break_all_lines(None);
     let mut edged = make_layout(&mut context, &mut fonts, 10.0);
@@ -164,9 +169,14 @@ fn continuous_owner_edges_keep_ligatures_and_their_advance() {
 #[test]
 fn continuous_owner_edges_preserve_joining_with_separate_context_boundaries() {
     let text = "ععع";
-    let edge =
-        InlineBox::inline_start_edge(91, 2, 10.0, 0.0, crate::InlineBoxBreakAffinity::ToNext)
-            .with_continuous_shaping();
+    let edge = InlineBox::inline_start_edge(
+        91,
+        2,
+        crate::InlineOwnerEdgeAdvance::uniform(10.0),
+        0.0,
+        crate::InlineBoxBreakAffinity::ToNext,
+    )
+    .with_continuous_shaping();
     let mut continuous = naskh_glyph_ids_with(text, None, Some(edge.clone()), &[]);
     let mut joined = naskh_glyph_ids(text, None);
     continuous.sort_unstable();

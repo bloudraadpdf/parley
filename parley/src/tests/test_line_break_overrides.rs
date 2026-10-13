@@ -306,14 +306,14 @@ fn source_justification_retains_owned_halves_at_inline_borders() {
         builder.push_inline_box(InlineBox::inline_end_edge(
             71,
             1,
-            0.0,
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
             0.0,
             InlineBoxBreakAffinity::ToNext,
         ));
         builder.push_inline_box(InlineBox::inline_start_edge(
             72,
             1,
-            0.0,
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
             0.0,
             InlineBoxBreakAffinity::ToNext,
         ));
@@ -353,7 +353,14 @@ fn source_justification_retains_owned_halves_at_inline_borders() {
     assert!((units[1].leading_justification() - 2.0).abs() < 0.001);
     assert_eq!(units[1].trailing_justification(), 0.0);
     layout.align(Some(width), Alignment::Start, AlignmentOptions::default());
-    assert!(layout.lines().next().unwrap().letter_spacing_units().all(|unit| unit.leading_justification() == 0.0 && unit.trailing_justification() == 0.0));
+    assert!(
+        layout
+            .lines()
+            .next()
+            .unwrap()
+            .letter_spacing_units()
+            .all(|unit| unit.leading_justification() == 0.0 && unit.trailing_justification() == 0.0)
+    );
 }
 
 #[test]
@@ -462,7 +469,9 @@ fn join_controls_at_word_edges_preserve_intrinsic_word_breaks() {
 #[test]
 fn join_controls_after_spaces_preserve_soft_wraps() {
     let plain = "This is a simple test";
-    let width = configured_layout(plain, |_| {}).calculate_content_widths().min;
+    let width = configured_layout(plain, |_| {})
+        .calculate_content_widths()
+        .min;
     let line_count = |text| {
         let mut layout = configured_layout(text, |_| {});
         layout.break_all_lines(Some(width));
@@ -483,7 +492,9 @@ fn emergency_min_content_keeps_combining_marks_with_base() {
         builder.push_default(StyleProperty::OverflowWrap(crate::OverflowWrap::Anywhere));
     });
     let min = layout.calculate_content_widths().min;
-    let cluster = configured_layout("a\u{0301}\u{0301}\u{0301}", |_| {}).calculate_content_widths().max;
+    let cluster = configured_layout("a\u{0301}\u{0301}\u{0301}", |_| {})
+        .calculate_content_widths()
+        .max;
     assert!((min - cluster).abs() < 0.001, "{min} != {cluster}");
     layout.break_all_lines(Some(min));
     assert_eq!(layout.lines().count(), 2);
@@ -516,14 +527,14 @@ fn rtl_ligatures_survive_transparent_inline_boundaries() {
             builder.push_inline_box(InlineBox::inline_start_edge(
                 0,
                 start,
-                0.0,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
                 0.0,
                 InlineBoxBreakAffinity::ToNext,
             ));
             builder.push_inline_box(InlineBox::inline_end_edge(
                 1,
                 end,
-                0.0,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
                 0.0,
                 InlineBoxBreakAffinity::ToPrevious,
             ));
@@ -697,14 +708,14 @@ fn split_collapsible_bidi_layout(text: &str) -> Layout<ColorBrush> {
             builder.push_inline_box(InlineBox::inline_start_edge(
                 id,
                 range.start,
-                0.0,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
                 0.0,
                 InlineBoxBreakAffinity::ToNext,
             ));
             builder.push_inline_box(InlineBox::inline_end_edge(
                 id + 1,
                 range.end,
-                0.0,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
                 0.0,
                 InlineBoxBreakAffinity::ToPrevious,
             ));
@@ -880,7 +891,8 @@ fn resolved_tabs_keep_their_minimum_independent_of_the_shaping_font() {
         for _ in 0..2 {
             layout.break_all_lines(None);
             assert!(
-                (layout.full_width() - (interval * stop_count + following_advance) * scale).abs() < 0.01
+                (layout.full_width() - (interval * stop_count + following_advance) * scale).abs()
+                    < 0.01
             );
         }
     }
@@ -1131,7 +1143,7 @@ fn pre_terminal_space_is_measured_across_transparent_owner_end() {
         builder.push_inline_box(InlineBox::inline_end_edge(
             1,
             text.len(),
-            0.0,
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
             0.0,
             InlineBoxBreakAffinity::ToPrevious,
         ));
@@ -1230,7 +1242,7 @@ fn conditional_terminal_spans_a_transparent_owner_edge() {
         builder.push_inline_box(InlineBox::inline_end_edge(
             2,
             3,
-            0.0,
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
             0.0,
             InlineBoxBreakAffinity::ToPrevious,
         ));

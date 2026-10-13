@@ -408,7 +408,7 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                     return Some(PositionedLayoutItem::InlineBox(PositionedInlineBox {
                         x,
                         y: self.line.data.metrics.baseline - inline_box.height(),
-                        width: inline_box.width(),
+                        width: inline_box.width_for_line(self.line.index as usize),
                         height: inline_box.height(),
                         id: inline_box.id,
                     }));

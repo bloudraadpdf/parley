@@ -107,8 +107,20 @@ fn restored_source_opportunities_stay_conditional_across_inline_boxes() {
             InlineBoxBreakAffinity::SourceText,
         )],
         vec![
-            InlineBox::inline_end_edge(1, 2, 0.0, 0.0, InlineBoxBreakAffinity::ToPrevious),
-            InlineBox::inline_start_edge(2, 2, 0.0, 0.0, InlineBoxBreakAffinity::ToNext),
+            InlineBox::inline_end_edge(
+                1,
+                2,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ),
+            InlineBox::inline_start_edge(
+                2,
+                2,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            ),
         ],
     ]
     .into_iter()
@@ -365,11 +377,17 @@ fn logical_boundaries_preserve_all_whitespace_run_metrics() {
         16.0,
         Some(LineHeight::Absolute(96.0)),
         [
-            InlineBox::inline_start_edge(81, 0, 0.0, 0.0, InlineBoxBreakAffinity::ToNext),
+            InlineBox::inline_start_edge(
+                81,
+                0,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            ),
             InlineBox::inline_end_edge(
                 82,
                 text.len(),
-                0.0,
+                crate::InlineOwnerEdgeAdvance::uniform(0.0),
                 0.0,
                 InlineBoxBreakAffinity::ToPrevious,
             ),
@@ -400,7 +418,7 @@ fn text_retains_consecutive_transparent_anchors_at_its_start() {
     builder.push_inline_box(InlineBox::inline_end_edge(
         80,
         text.len(),
-        0.0,
+        crate::InlineOwnerEdgeAdvance::uniform(0.0),
         0.0,
         InlineBoxBreakAffinity::ToPrevious,
     ));
@@ -474,7 +492,7 @@ fn logical_inline_edge_fixture(
         builder.push_inline_box(InlineBox::inline_end_edge(
             depth as u64,
             edge_index,
-            0.0,
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
             0.0,
             InlineBoxBreakAffinity::ToPrevious,
         ));
@@ -483,7 +501,7 @@ fn logical_inline_edge_fixture(
         builder.push_inline_box(InlineBox::inline_start_edge(
             (edge_depth + depth) as u64,
             edge_index,
-            0.0,
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
             0.0,
             InlineBoxBreakAffinity::ToNext,
         ));
@@ -520,7 +538,7 @@ fn inline_boundary_shaping_layout(edge_width: f32) -> crate::Layout<ColorBrush> 
     builder.push_inline_box(InlineBox::inline_end_edge(
         90,
         1,
-        edge_width,
+        crate::InlineOwnerEdgeAdvance::uniform(edge_width),
         0.0,
         InlineBoxBreakAffinity::ToPrevious,
     ));
@@ -629,14 +647,14 @@ fn owner_transition_layout(
     builder.push_inline_box(InlineBox::inline_end_edge(
         80,
         edge_index,
-        0.0,
+        crate::InlineOwnerEdgeAdvance::uniform(0.0),
         0.0,
         InlineBoxBreakAffinity::ToPrevious,
     ));
     builder.push_inline_box(InlineBox::inline_start_edge(
         81,
         edge_index,
-        edge_width,
+        crate::InlineOwnerEdgeAdvance::uniform(edge_width),
         0.0,
         InlineBoxBreakAffinity::ToNext,
     ));
@@ -703,14 +721,14 @@ fn logical_start_geometry_wraps_before_its_owner_fragment() {
     builder.push_inline_box(InlineBox::inline_start_edge(
         82,
         3,
-        character_width * 2.5,
+        crate::InlineOwnerEdgeAdvance::uniform(character_width * 2.5),
         0.0,
         InlineBoxBreakAffinity::ToNext,
     ));
     builder.push_inline_box(InlineBox::inline_end_edge(
         83,
         4,
-        0.0,
+        crate::InlineOwnerEdgeAdvance::uniform(0.0),
         0.0,
         InlineBoxBreakAffinity::ToPrevious,
     ));
@@ -787,14 +805,14 @@ fn logical_owner_edges_retain_the_following_space_after_wrap() {
     owner.push_inline_box(InlineBox::inline_start_edge(
         84,
         3,
-        character_width * 2.5,
+        crate::InlineOwnerEdgeAdvance::uniform(character_width * 2.5),
         0.0,
         InlineBoxBreakAffinity::ToNext,
     ));
     owner.push_inline_box(InlineBox::inline_end_edge(
         85,
         4,
-        0.0,
+        crate::InlineOwnerEdgeAdvance::uniform(0.0),
         0.0,
         InlineBoxBreakAffinity::ToPrevious,
     ));
@@ -927,14 +945,14 @@ fn exact_fit_owner_fragment_discards_its_following_space_at_the_next_line_start(
     builder.push_inline_box(InlineBox::inline_start_edge(
         124,
         0,
-        max_width - owner_text_width,
+        crate::InlineOwnerEdgeAdvance::uniform(max_width - owner_text_width),
         0.0,
         InlineBoxBreakAffinity::ToNext,
     ));
     builder.push_inline_box(InlineBox::inline_end_edge_with_following_source_space(
         125,
         2,
-        0.0,
+        crate::InlineOwnerEdgeAdvance::uniform(0.0),
         0.0,
         crate::FollowingSourceSpace::CollapseAfterFilledOwnerFragment,
         InlineBoxBreakAffinity::ToPrevious,
@@ -1009,14 +1027,14 @@ fn source_boundary_layout(
             SourceFixtureEdge::Start => InlineBox::inline_start_edge(
                 *id,
                 *index,
-                character_width * width,
+                crate::InlineOwnerEdgeAdvance::uniform(character_width * width),
                 0.0,
                 InlineBoxBreakAffinity::ToNext,
             ),
             SourceFixtureEdge::End => InlineBox::inline_end_edge(
                 *id,
                 *index,
-                character_width * width,
+                crate::InlineOwnerEdgeAdvance::uniform(character_width * width),
                 0.0,
                 InlineBoxBreakAffinity::ToPrevious,
             ),
@@ -1024,7 +1042,7 @@ fn source_boundary_layout(
                 InlineBox::inline_end_edge_with_following_source_space(
                     *id,
                     *index,
-                    character_width * width,
+                    crate::InlineOwnerEdgeAdvance::uniform(character_width * width),
                     0.0,
                     crate::FollowingSourceSpace::CollapsedAfterProjectedBreak,
                     InlineBoxBreakAffinity::ToPrevious,
@@ -1034,7 +1052,7 @@ fn source_boundary_layout(
                 InlineBox::inline_end_edge_with_following_source_space(
                     *id,
                     *index,
-                    character_width * width,
+                    crate::InlineOwnerEdgeAdvance::uniform(character_width * width),
                     0.0,
                     crate::FollowingSourceSpace::CollapseAfterFilledOwnerFragment,
                     InlineBoxBreakAffinity::ToPrevious,
@@ -1044,7 +1062,7 @@ fn source_boundary_layout(
                 InlineBox::inline_end_edge_with_following_source_space(
                     *id,
                     *index,
-                    character_width * width,
+                    crate::InlineOwnerEdgeAdvance::uniform(character_width * width),
                     0.0,
                     crate::FollowingSourceSpace::UnicodeBoundary,
                     InlineBoxBreakAffinity::ToPrevious,
@@ -1904,7 +1922,7 @@ fn projected_discretionary_break_retains_material_and_line_limits() {
                     InlineBox::inline_end_edge(
                         id as u64,
                         index,
-                        0.0,
+                        crate::InlineOwnerEdgeAdvance::uniform(0.0),
                         0.0,
                         InlineBoxBreakAffinity::ToPrevious,
                     )
@@ -2254,7 +2272,7 @@ fn cloned_owner_edges_do_not_repeat_a_break_without_source_progress() {
         let edges = InlineBox::cloned_inline_edges(
             [701, 702],
             0..text.len(),
-            [3.0, 40.0],
+            [3.0, 40.0].map(crate::InlineOwnerEdgeAdvance::uniform),
             crate::FollowingSourceSpace::RetainedAdvance,
         );
         let mut layout = build_inline_box_layout(&mut lcx, &mut fcx, text, 10.0, None, edges);
@@ -2293,7 +2311,13 @@ fn inline_start_edge_stays_with_no_wrap_atomic_content() {
         4..text.len(),
     );
     for inline_box in [
-        InlineBox::inline_start_edge(711, 4, 1.0, 0.0, InlineBoxBreakAffinity::ToNext),
+        InlineBox::inline_start_edge(
+            711,
+            4,
+            crate::InlineOwnerEdgeAdvance::uniform(1.0),
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        ),
         InlineBox::atomic_with_break_affinity(
             713,
             4,
@@ -2304,7 +2328,7 @@ fn inline_start_edge_stays_with_no_wrap_atomic_content() {
         InlineBox::inline_end_edge(
             712,
             text.len(),
-            1.0,
+            crate::InlineOwnerEdgeAdvance::uniform(1.0),
             0.0,
             InlineBoxBreakAffinity::ToPrevious,
         ),
@@ -2346,7 +2370,7 @@ fn cloned_owner_edges_participate_in_every_line_and_intrinsic_width() {
     let edges = InlineBox::cloned_inline_edges(
         [701, 702],
         0..text.len(),
-        [3.0, 40.0],
+        [3.0, 40.0].map(crate::InlineOwnerEdgeAdvance::uniform),
         crate::FollowingSourceSpace::RetainedAdvance,
     );
     let mut layout = build_inline_box_layout(&mut lcx, &mut fcx, text, 10.0, None, edges);
@@ -2403,13 +2427,13 @@ fn nested_cloned_edges_repeat_in_source_order_at_explicit_breaks() {
     let [outer_start, outer_end] = InlineBox::cloned_inline_edges(
         [801, 802],
         0..7,
-        [3.0, 4.0],
+        [3.0, 4.0].map(crate::InlineOwnerEdgeAdvance::uniform),
         crate::FollowingSourceSpace::RetainedAdvance,
     );
     let [inner_start, inner_end] = InlineBox::cloned_inline_edges(
         [803, 804],
         2..7,
-        [5.0, 6.0],
+        [5.0, 6.0].map(crate::InlineOwnerEdgeAdvance::uniform),
         crate::FollowingSourceSpace::RetainedAdvance,
     );
     let mut layout = build_inline_box_layout(
@@ -2452,7 +2476,7 @@ fn negative_margin_layout(
         builder.push_inline_box(InlineBox::inline_end_edge(
             id as u64,
             index,
-            margin,
+            crate::InlineOwnerEdgeAdvance::uniform(margin),
             0.0,
             InlineBoxBreakAffinity::ToPrevious,
         ));

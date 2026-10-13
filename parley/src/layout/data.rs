@@ -14,6 +14,7 @@ use crate::style::Brush;
 
 #[derive(Default)]
 struct IntrinsicLetterSpacing {
+    line_index: usize,
     edges: super::line_break::LetterSpacingEdges,
     measured: f32,
     unconditional: f32,
@@ -47,7 +48,8 @@ impl IntrinsicLetterSpacing {
         } else {
             self.measured
         };
-        owners.finish_intrinsic_fragment(maximum, advance, trailing + correction);
+        owners.finish_intrinsic_fragment(maximum, advance, trailing + correction, self.line_index);
+        self.line_index += 1;
         self.edges.clear();
         self.measured = 0.0;
         self.unconditional = 0.0;
@@ -2144,14 +2146,16 @@ impl<B: Brush> LayoutData<B> {
                     }
                     min_width = min_width.max(
                         running_min_width - trailing_min_width - min_spacing.measured
-                            + cloned_owners.end_advance(),
+                            + cloned_owners.end_advance(min_spacing.line_index),
                     );
                 }
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
                     cloned_owners.before_edge(ibox);
-                    let width = ibox.width() + ibox.letter_spacing().unwrap_or(0.0);
-                    running_max_width += width;
+                    let width = ibox.width_for_line(min_spacing.line_index)
+                        + ibox.letter_spacing().unwrap_or(0.0);
+                    running_max_width += ibox.width_for_line(max_spacing.line_index)
+                        + ibox.letter_spacing().unwrap_or(0.0);
                     max_spacing.include(self, item_index, None);
                     let mut measure_atomic = |break_before, break_after| {
                         let can_wrap = text_wrap_mode == TextWrapMode::Wrap;

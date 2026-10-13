@@ -6,6 +6,7 @@ mod test_bidi_paragraph_boundaries;
 pub(crate) mod test_bidi_topology;
 mod test_builders;
 mod test_discretionary_breaks;
+mod test_first_line_owner_edges;
 mod test_font_metric_advance_quantization;
 mod test_font_synthesis;
 mod test_inline_box_wrap;

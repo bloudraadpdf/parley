@@ -137,8 +137,20 @@ fn atomics_at_the_same_byte_offset_keep_distinct_owner_membership() {
 #[test]
 fn empty_owner_edges_break_context_even_with_zero_total_advance() {
     let boxes = [
-        InlineBox::inline_start_edge(11, 1, 0.0, 0.0, InlineBoxBreakAffinity::ToNext),
-        InlineBox::inline_end_edge(12, 1, 0.0, 0.0, InlineBoxBreakAffinity::ToPrevious),
+        InlineBox::inline_start_edge(
+            11,
+            1,
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        ),
+        InlineBox::inline_end_edge(
+            12,
+            1,
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
+            0.0,
+            InlineBoxBreakAffinity::ToPrevious,
+        ),
     ];
     let mut layout = build_layout_with_direction("ab", boxes, Some(BaseDirection::Ltr));
     layout.break_all_lines(None);
@@ -277,14 +289,14 @@ fn owner_box_membership_reads_each_box_in_proportion_to_the_owners() {
             builder.push_inline_box(InlineBox::inline_start_edge(
                 id,
                 index,
-                1.0,
+                crate::InlineOwnerEdgeAdvance::uniform(1.0),
                 0.0,
                 InlineBoxBreakAffinity::ToNext,
             ));
             builder.push_inline_box(InlineBox::inline_end_edge(
                 id + 1,
                 index + 1,
-                1.0,
+                crate::InlineOwnerEdgeAdvance::uniform(1.0),
                 0.0,
                 InlineBoxBreakAffinity::ToPrevious,
             ));

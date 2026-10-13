@@ -115,7 +115,7 @@ impl<'a, B: Brush> Cluster<'a, B> {
                         }
                     }
                     LineItem::InlineBox(inline_box) => {
-                        offset += inline_box.advance();
+                        offset += inline_box.advance_for_line(line.index as usize);
                     }
                 }
             }
@@ -221,7 +221,12 @@ impl<'a, B: Brush> Cluster<'a, B> {
 
     /// Returns an iterator over the glyphs in the cluster.
     pub fn glyphs(&self) -> impl Iterator<Item = Glyph> + 'a + Clone {
-        if self.run.layout.data.lines.get(self.path.line_index as usize)
+        if self
+            .run
+            .layout
+            .data
+            .lines
+            .get(self.path.line_index as usize)
             .and_then(|line| line.conditional_line_start_omission.as_ref())
             .is_some_and(|range| range.contains(&self.text_range().start))
         {
@@ -449,7 +454,7 @@ impl<'a, B: Brush> Cluster<'a, B> {
                     }
                 }
                 LineItem::InlineBox(inline_box) => {
-                    offset += inline_box.advance();
+                    offset += inline_box.advance_for_line(line.index as usize);
                 }
             }
         }
