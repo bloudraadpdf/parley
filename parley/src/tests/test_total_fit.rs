@@ -15,6 +15,9 @@ const PRINCE: TotalFit = TotalFit {
     stretch: 0.5,
     tolerance: 800.0,
     line_penalty: 10.0,
+    hyphen_penalty: 50.0,
+    double_hyphen_demerits: 10_000.0,
+    final_hyphen_demerits: 5_000.0,
 };
 
 fn layout(text: &str, strategy: LineBreakStrategy) -> Layout<ColorBrush> {

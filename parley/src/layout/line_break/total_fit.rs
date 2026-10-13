@@ -23,7 +23,8 @@ pub enum LineBreakStrategy {
 /// The parameters of total-fit line breaking.
 ///
 /// A line that its separators stretch by `r` of their stretch, or shrink by `r` of their shrink, has the badness
-/// `100 r³` and the demerits `(line_penalty + badness)²`. The line that ends a segment has no badness.
+/// `100 r³` and the demerits `(line_penalty + badness)²`, plus `hyphen_penalty²` when it ends at a discretionary
+/// break. The line that ends a segment has no badness.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TotalFit {
     /// The stretch of a word separator, as a fraction of its advance.
@@ -32,6 +33,12 @@ pub struct TotalFit {
     pub tolerance: f32,
     /// The demerits that each line adds.
     pub line_penalty: f32,
+    /// The penalty of a line that ends at a discretionary break.
+    pub hyphen_penalty: f32,
+    /// The demerits of a discretionary break that follows a discretionary break.
+    pub double_hyphen_demerits: f32,
+    /// The demerits of a last line that follows a discretionary break.
+    pub final_hyphen_demerits: f32,
 }
 
 /// The progress of a line from the start of a probe line.
@@ -56,6 +63,8 @@ pub(super) struct Opportunity {
     pub(super) end: Measure,
     /// The start of the line that follows the break.
     pub(super) start: Measure,
+    /// Whether the break is discretionary.
+    pub(super) discretionary: bool,
 }
 
 /// The measures of a segment between forced breaks.
@@ -74,6 +83,7 @@ struct Node {
     point: usize,
     demerits: f32,
     previous: Option<usize>,
+    discretionary: bool,
 }
 
 enum LineFit {
@@ -143,10 +153,17 @@ impl Segment {
             };
             LineFit::Badness(100.0 * ratio * ratio * ratio)
         };
+        let discretionary = |point: usize| {
+            point
+                .checked_sub(1)
+                .and_then(|k| self.opportunities.get(k))
+                .is_some_and(|opportunity| opportunity.discretionary)
+        };
         let mut nodes = alloc::vec![Node {
             point: 0,
             demerits: 0.0,
-            previous: None
+            previous: None,
+            discretionary: false,
         }];
         let mut active = alloc::vec![0_usize];
         let mut point = 1;
@@ -166,6 +183,7 @@ impl Segment {
                                 point: underfull,
                                 demerits: node.demerits,
                                 previous: Some(node_index),
+                                discretionary: discretionary(underfull),
                             });
                             active.push(nodes.len() - 1);
                             forced = true;
@@ -176,12 +194,24 @@ impl Segment {
                     LineFit::Badness(badness) => badness,
                 };
                 if point == last || badness <= params.tolerance {
-                    let demerits = node.demerits + (params.line_penalty + badness).powi(2);
+                    let ends_discretionary = discretionary(point);
+                    let hyphenation = match (node.discretionary, ends_discretionary, point == last)
+                    {
+                        (_, true, _) if node.discretionary => {
+                            params.hyphen_penalty.powi(2) + params.double_hyphen_demerits
+                        }
+                        (_, true, _) => params.hyphen_penalty.powi(2),
+                        (true, false, true) => params.final_hyphen_demerits,
+                        _ => 0.0,
+                    };
+                    let demerits =
+                        node.demerits + (params.line_penalty + badness).powi(2) + hyphenation;
                     if best.is_none_or(|best| demerits < best.demerits) {
                         best = Some(Node {
                             point,
                             demerits,
                             previous: Some(node_index),
+                            discretionary: ends_discretionary,
                         });
                     }
                 }
@@ -244,6 +274,7 @@ mod tests {
                 cursor: (0, index + 1),
                 end,
                 start,
+                discretionary: false,
             });
         }
         Segment {
@@ -261,11 +292,18 @@ mod tests {
         stretch: 0.5,
         tolerance: 800.0,
         line_penalty: 10.0,
+        hyphen_penalty: 50.0,
+        double_hyphen_demerits: 10_000.0,
+        final_hyphen_demerits: 5_000.0,
     };
 
     fn plan(words: &[f32], width: f32) -> Vec<usize> {
-        segment(words)
-            .plan(PRINCE, width, width)
+        plan_with(segment(words), PRINCE, width)
+    }
+
+    fn plan_with(segment: Segment, params: TotalFit, width: f32) -> Vec<usize> {
+        segment
+            .plan(params, width, width)
             .expect("a segment with an end has a plan")
             .into_iter()
             .map(|(_, cluster)| cluster)
@@ -289,6 +327,19 @@ mod tests {
     fn a_word_moves_when_that_evens_the_separators_of_two_lines() {
         assert_eq!(plan(&two_lines(4.0 * SPACE), 200.0), [9, 18]);
         assert_eq!(plan(&two_lines(6.0 * SPACE), 200.0), [8, 18]);
+    }
+
+    /// The penalty of a discretionary break weighs against the evenness it buys.
+    #[test]
+    fn a_discretionary_break_pays_its_penalty() {
+        let mut segment = segment(&two_lines(6.0 * SPACE));
+        segment.opportunities[7].discretionary = true;
+        assert_eq!(plan_with(segment.clone(), PRINCE, 200.0), [8, 18]);
+        let costly = TotalFit {
+            hyphen_penalty: 300.0,
+            ..PRINCE
+        };
+        assert_eq!(plan_with(segment, costly, 200.0), [9, 18]);
     }
 
     /// Every line but the last stretches beyond the tolerance: each line ends where the next word overflows.

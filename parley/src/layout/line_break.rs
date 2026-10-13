@@ -644,6 +644,7 @@ impl BreakerState {
                     ..self.line.content_end
                 },
                 start: self.line.measure(),
+                discretionary: state.discretionary_break,
             });
         }
         self.planned_end_reached |= self.planned_end == Some(cursor);
