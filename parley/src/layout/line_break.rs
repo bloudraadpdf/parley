@@ -2087,12 +2087,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         );
     }
 
-    /// Compare positive advances within their floating-point error bound.
+    /// Compare positive advances within their floating-point error bound and the line fit tolerance.
     fn advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
         line_advance_fits(
             candidate + self.state.line.cloned_owners.end_advance(self.state.lines)
                 - self.state.line.space_shrink,
-            max_advance,
+            max_advance + self.layout.data.line_fit_tolerance,
             self.state.line.clusters.len() + self.state.line.items.len() + 1,
         )
     }

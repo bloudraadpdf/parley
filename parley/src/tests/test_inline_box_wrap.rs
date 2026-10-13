@@ -2579,3 +2579,28 @@ fn reverted_negative_margin_fragment_can_select_a_different_width() {
         [0..11]
     );
 }
+
+#[test]
+fn line_fit_tolerance_keeps_a_line_that_overflows_within_it() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let mut line_count = |tolerance: f32| {
+        let mut layout = build_inline_box_layout(
+            &mut lcx,
+            &mut fcx,
+            " ",
+            0.0,
+            None,
+            [
+                InlineBox::new(0, 0, 50.0, 20.0),
+                InlineBox::new(1, 1, 50.004, 20.0),
+            ],
+        );
+        layout.set_line_fit_tolerance(tolerance);
+        layout.break_all_lines(Some(100.0));
+        layout.lines().count()
+    };
+    assert_eq!(line_count(0.0), 2);
+    assert_eq!(line_count(0.003), 2);
+    assert_eq!(line_count(0.0075), 1);
+}

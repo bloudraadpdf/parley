@@ -294,6 +294,15 @@ impl<B: Brush> Layout<B> {
         self.data.reclaim_space_before_inline_box = reclaim;
     }
 
+    /// Let a line exceed its maximum advance by `tolerance` and still fit.
+    ///
+    /// PDFreactor keeps a line that overflows by up to 0.01 px; the CSS
+    /// line breaking of browsers fits a line only within its advance. Zero by
+    /// default; set before calling [`break_all_lines`](Self::break_all_lines).
+    pub fn set_line_fit_tolerance(&mut self, tolerance: f32) {
+        self.data.line_fit_tolerance = tolerance;
+    }
+
     /// Select how normal soft-wrap opportunities compete when a complete word
     /// fits but its following collapsible space does not.
     ///
