@@ -313,6 +313,11 @@ impl<B: Brush> Layout<B> {
         self.data.normal_soft_wrap_selection = selection;
     }
 
+    /// Select how the paragraph chooses the ends of its lines.
+    pub fn set_line_break_strategy(&mut self, strategy: super::LineBreakStrategy) {
+        self.data.line_break_strategy = strategy;
+    }
+
     /// Whether the letter-spacing after the last character of each line is
     /// removed (CSS Text 4 §8.2). Pass `false` for a paragraph that is only
     /// a fragment of a line, such as a ruby base. On by default; set before

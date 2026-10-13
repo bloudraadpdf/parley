@@ -41,9 +41,11 @@ use core::ops::Range;
 mod justification;
 mod physical;
 mod source_probe;
+mod total_fit;
 pub(crate) use justification::line_needs_justification_shape;
 use justification::{CandidateMutations, CommittedShape, ShapeCandidateBuffers};
 use source_probe::{ProbedBreak, SourceCursor, SourceProbe};
+pub use total_fit::{LineBreakStrategy, TotalFit};
 
 #[derive(Default)]
 struct LineLayout {
@@ -128,6 +130,10 @@ struct LineState {
     num_spaces: usize,
     /// The advance by which the word separators of the line may shrink.
     space_shrink: f32,
+    /// The fit advance of the word separators of the line.
+    separator_advance: f32,
+    /// The measure of the line up to the end of its last content, before its trailing separators.
+    content_end: total_fit::Measure,
     /// Of the line currently being built, the maximum line height seen so far.
     /// This represents a lower-bound on the eventual line height of the line.
     running_line_height: f32,
@@ -205,6 +211,14 @@ struct SelectedTabAdvance {
 }
 
 impl LineState {
+    fn measure(&self) -> total_fit::Measure {
+        total_fit::Measure {
+            advance: self.fit_x,
+            separators: self.separator_advance,
+            shrink: self.space_shrink,
+        }
+    }
+
     fn has_content_advance(&self) -> bool {
         self.start_position == LineStartPosition::Interior && self.fit_x != 0.0
     }
@@ -494,6 +508,11 @@ struct BreakerState {
     last_appended_authored_unit: AuthoredBreakUnit,
     /// Consecutive committed lines ending at discretionary boundaries.
     consecutive_discretionary_lines: u32,
+    /// The segment measured by a total-fit probe.
+    probe: Option<total_fit::Segment>,
+    /// The soft wrap opportunity at which a total-fit plan ends the current line.
+    planned_end: Option<total_fit::BreakCursor>,
+    planned_end_reached: bool,
 }
 
 impl BreakerState {
@@ -557,13 +576,16 @@ impl BreakerState {
         next_fit_x: f32,
         height: f32,
         authored_break_unit: AuthoredBreakUnit,
-        justification_space: Option<f32>,
+        justification_space: Option<Separator>,
     ) {
         self.append_cluster_to_line(next_x, next_fit_x, height, authored_break_unit);
         self.cluster_idx += 1;
-        if let Some(shrink) = justification_space {
+        if let Some(separator) = justification_space {
             self.line.num_spaces += 1;
-            self.line.space_shrink += shrink;
+            self.line.space_shrink += separator.shrink;
+            self.line.separator_advance += separator.advance;
+        } else {
+            self.line.content_end = self.line.measure();
         }
     }
 
@@ -580,6 +602,7 @@ impl BreakerState {
         self.line.x = next_x;
         self.line.fit_x = next_fit_x;
         self.add_line_height(box_height);
+        self.line.content_end = self.line.measure();
         self.last_appended_authored_unit = AuthoredBreakUnit::Other;
         self.line
             .source_start_whitespace
@@ -608,6 +631,19 @@ impl BreakerState {
             state.discretionary_advance = material.rendered;
             state.discretionary_break = true;
         }
+        let cursor = (self.item_idx, self.cluster_idx);
+        if let Some(segment) = &mut self.probe {
+            let material = state.fit_x - self.line.fit_x;
+            segment.record(total_fit::Opportunity {
+                cursor,
+                end: total_fit::Measure {
+                    advance: self.line.content_end.advance + material,
+                    ..self.line.content_end
+                },
+                start: self.line.measure(),
+            });
+        }
+        self.planned_end_reached |= self.planned_end == Some(cursor);
         let snapshot = BoundarySnapshot {
             item_idx: self.item_idx,
             run_idx: self.run_idx,
@@ -646,6 +682,12 @@ impl BreakerState {
                     self.overflow_discretionary_boundary = candidate;
                 }
             }
+        }
+    }
+
+    fn record_segment_end(&mut self) {
+        if let Some(segment) = &mut self.probe {
+            segment.end = Some(self.line.content_end);
         }
     }
 
@@ -781,8 +823,33 @@ pub struct BreakLines<'a, B: Brush> {
     previous_shape_commit: Option<CommittedShape>,
     source_probe: Option<SourceProbe>,
     physical_shaper: Option<crate::shape::physical::PhysicalShaper<B>>,
+    total_fit: TotalFitState,
     #[cfg(test)]
     visited_clusters: usize,
+}
+
+/// The total-fit plan of the current segment between forced breaks.
+#[derive(Clone, Debug, Default)]
+enum TotalFitState {
+    /// The next line starts a segment.
+    #[default]
+    Unplanned,
+    /// A probe line measures the segment.
+    Probing,
+    /// The planned line ends of the rest of the segment, last first, for lines of `max_advance`.
+    Planned {
+        max_advance: f32,
+        ends: Vec<total_fit::BreakCursor>,
+    },
+    /// The rest of the segment breaks first fit.
+    Abandoned,
+}
+
+/// A word separator: a justification opportunity.
+#[derive(Clone, Copy)]
+struct Separator {
+    advance: f32,
+    shrink: f32,
 }
 
 macro_rules! commit_current_line {
@@ -834,6 +901,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             previous_shape_commit: None,
             source_probe: None,
             physical_shaper,
+            total_fit: TotalFitState::default(),
             #[cfg(test)]
             visited_clusters: 0,
         }
@@ -1021,6 +1089,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.fit_x -= reclaimed_fit;
         self.state.line.num_spaces = self.state.line.num_spaces.saturating_sub(spaces);
         self.state.line.space_shrink -= reclaimed_shrink;
+        self.state.line.separator_advance -= reclaimed_fit;
         Some(reclaimed)
     }
 
@@ -1042,6 +1111,122 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Computes the next line in the paragraph. Returns the advance and size
     /// (width and height for horizontal layouts) of the line.
     pub fn break_next(
+        &mut self,
+        max_advance: f32,
+        tab_origin: LineTabOrigin,
+    ) -> Option<(f32, f32)> {
+        if self.done {
+            return None;
+        }
+        self.prepare_total_fit(max_advance, tab_origin);
+        let line = self.break_next_first_fit(max_advance, tab_origin);
+        self.settle_total_fit(line, max_advance, tab_origin)
+    }
+
+    /// Plans the segment that the next line starts and selects the planned end of the next line.
+    fn prepare_total_fit(&mut self, max_advance: f32, tab_origin: LineTabOrigin) {
+        self.state.planned_end = None;
+        self.state.planned_end_reached = false;
+        let LineBreakStrategy::TotalFit(params) = self.layout.data.line_break_strategy else {
+            return;
+        };
+        if self.shape_candidates.is_some() {
+            return;
+        }
+        if matches!(self.total_fit, TotalFitState::Unplanned) {
+            self.total_fit = self.plan_segment(params, max_advance, tab_origin);
+        }
+        if let TotalFitState::Planned {
+            max_advance: planned,
+            ends,
+        } = &self.total_fit
+        {
+            if *planned == max_advance {
+                self.state.planned_end = ends.last().copied();
+            } else {
+                self.total_fit = TotalFitState::Abandoned;
+            }
+        }
+    }
+
+    /// Measures the segment that the next line starts with an unbounded probe line, then plans its line ends.
+    fn plan_segment(
+        &mut self,
+        params: TotalFit,
+        max_advance: f32,
+        tab_origin: LineTabOrigin,
+    ) -> TotalFitState {
+        let first_width = max_advance - self.resolve_indent();
+        let width = max_advance
+            - if self.layout.data.indent_options.hanging {
+                self.layout.data.indent_amount
+            } else {
+                0.0
+            };
+        self.total_fit = TotalFitState::Probing;
+        self.state.line.content_end = self.state.line.measure();
+        self.state.probe = Some(total_fit::Segment {
+            start: self.state.line.measure(),
+            ..Default::default()
+        });
+        let probed = self
+            .break_next_first_fit(f32::INFINITY, tab_origin)
+            .is_some();
+        let segment = self.state.probe.take();
+        if probed {
+            self.revert();
+        }
+        self.state.probe = None;
+        segment
+            .and_then(|segment| segment.plan(params, first_width, width))
+            .map_or(TotalFitState::Abandoned, |mut ends| {
+                ends.reverse();
+                TotalFitState::Planned { max_advance, ends }
+            })
+    }
+
+    /// Accepts a line that ends at its planned end; otherwise reverts it and breaks the rest of the segment first fit.
+    fn settle_total_fit(
+        &mut self,
+        line: Option<(f32, f32)>,
+        max_advance: f32,
+        tab_origin: LineTabOrigin,
+    ) -> Option<(f32, f32)> {
+        let Some(planned) = self.state.planned_end.take() else {
+            if line.is_some() && self.ends_segment() {
+                self.total_fit = TotalFitState::Unplanned;
+            }
+            return line;
+        };
+        if line.is_some() && (self.state.item_idx, self.state.cluster_idx) == planned {
+            if let TotalFitState::Planned { ends, .. } = &mut self.total_fit {
+                ends.pop();
+            }
+            return line;
+        }
+        if line.is_some() {
+            self.revert();
+        }
+        self.total_fit = TotalFitState::Abandoned;
+        self.state.planned_end_reached = false;
+        let line = self.break_next_first_fit(max_advance, tab_origin);
+        if line.is_some() && self.ends_segment() {
+            self.total_fit = TotalFitState::Unplanned;
+        }
+        line
+    }
+
+    /// Whether the last committed line ends its segment.
+    fn ends_segment(&self) -> bool {
+        self.last_line().is_some_and(|line| {
+            matches!(
+                line.break_reason(),
+                BreakReason::Explicit | BreakReason::None
+            )
+        })
+    }
+
+    fn break_next_first_fit(
         &mut self,
         max_advance: f32,
         tab_origin: LineTabOrigin,
@@ -1727,6 +1912,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 run.metrics().line_height,
                                 cluster.info().authored_break_unit(),
                             );
+                            self.state.record_segment_end();
                             if commit_current_line!(
                                 self,
                                 max_advance,
@@ -1876,7 +2062,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             && projected_source_cluster
                                 == ProjectedSourceClusterParticipation::Normal
                             && !self.state.line.removes_leading_source_at(byte_index))
-                        .then_some(style.justify_shrink * fit_advance);
+                        .then_some(Separator {
+                            advance: fit_advance,
+                            shrink: style.justify_shrink * fit_advance,
+                        });
                         match line_fit {
                             LineFit::Fits | LineFit::TrailingPreservedSpaceOverflow => {
                                 if self.advance_fits(next_fit_x - hanging_tracking, max_advance) {
@@ -1982,6 +2171,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if self.reject_terminal_candidate && commit_overflow_candidate!() {
             return self.start_new_line();
         }
+        self.state.record_segment_end();
         if commit_current_line!(self, max_advance, line_indent, BreakReason::None) {
             self.done = true;
             return self.start_new_line();
@@ -2091,6 +2281,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
     /// Compare positive advances within their floating-point error bound and the line fit tolerance.
     fn advance_fits(&self, candidate: f32, max_advance: f32) -> bool {
+        if self.state.planned_end.is_some() {
+            return !self.state.planned_end_reached;
+        }
         line_advance_fits(
             candidate + self.state.line.cloned_owners.end_advance(self.state.lines)
                 - self.state.line.space_shrink,
@@ -3590,6 +3783,7 @@ fn try_commit_line<B: Brush>(
     // Reset state for the new line
     state.num_spaces = 0;
     state.space_shrink = 0.0;
+    state.separator_advance = 0.0;
     if committed_text_run {
         state.clusters.start = state.clusters.end;
     }

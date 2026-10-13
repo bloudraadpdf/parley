@@ -44,7 +44,7 @@ pub use letter_spacing::{LetterSpacingUnit, LetterSpacingUnitRecord};
 pub use line::{
     GlyphRun, HangingWhitespace, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem,
 };
-pub use line_break::{BreakLines, CommittedLine, LineTabOrigin};
+pub use line_break::{BreakLines, CommittedLine, LineBreakStrategy, LineTabOrigin, TotalFit};
 pub use physical_shaping::{InlineOwnerShaping, InlineShapingEdge, ShapingEdgePlacement};
 pub use run::{Run, RunMetrics};
 

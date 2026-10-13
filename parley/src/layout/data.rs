@@ -1233,6 +1233,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
     pub(crate) nominal_font_metric_line_breaks: bool,
     pub(crate) normal_soft_wrap_selection: NormalSoftWrapSelection,
+    pub(crate) line_break_strategy: super::LineBreakStrategy,
     /// CSS Text 4 §8.2: letter-spacing is not applied after the last
     /// character of a line. `false` keeps it, for a paragraph that is only a
     /// fragment of a line (a ruby base or annotation).
@@ -1324,6 +1325,7 @@ impl<B: Brush> Default for LayoutData<B> {
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
             normal_soft_wrap_selection: NormalSoftWrapSelection::default(),
+            line_break_strategy: super::LineBreakStrategy::default(),
             trim_line_end_letter_spacing: true,
             reclaim_space_before_inline_box: false,
             line_fit_tolerance: 0.0,
@@ -1564,6 +1566,7 @@ impl<B: Brush> LayoutData<B> {
         self.font_metric_advance_quantization = None;
         self.nominal_font_metric_line_breaks = false;
         self.normal_soft_wrap_selection = NormalSoftWrapSelection::default();
+        self.line_break_strategy = super::LineBreakStrategy::default();
         self.trim_line_end_letter_spacing = true;
         self.reclaim_space_before_inline_box = false;
         self.line_fit_tolerance = 0.0;
