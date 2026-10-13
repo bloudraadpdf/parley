@@ -1973,6 +1973,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
 
         finish_source_fragment!();
+        commit_probed_candidate!();
         if self.state.line.items.end == 0 {
             self.state.line.items.end = 1;
         }

@@ -163,8 +163,24 @@ impl<B: Brush> BreakLines<'_, B> {
     }
 
     pub(super) fn source_break_candidate(&self) -> Option<ProbedBreak> {
-        let Some(SourceProbe::LegalBreak(end)) = self.source_probe else {
+        let end = match self.source_probe {
+            Some(SourceProbe::LegalBreak(end)) => Some(end),
+            _ => None,
+        };
+        let byte_end = self
+            .layout
+            .data
+            .first_line_source_end
+            .filter(|end| self.state.lines == 0 && *end < self.layout.data.text_len);
+        if end.is_none() && byte_end.is_none() {
             return None;
+        }
+        let matches = |item, cluster| {
+            let offset =
+                SourceCursor::at(&self.layout.data, item, cluster).source_offset(&self.layout.data);
+            byte_end.is_none_or(|limit| offset <= limit)
+                && (end.is_some_and(|end| end.matches(&self.layout.data, item, cluster))
+                    || byte_end == Some(offset))
         };
         for candidate in [
             &self.state.prev_boundary,
@@ -175,28 +191,24 @@ impl<B: Brush> BreakLines<'_, B> {
         .flatten()
         {
             let (snapshot, _) = candidate.clone().into_snapshot();
-            if end.matches(&self.layout.data, snapshot.item_idx, snapshot.cluster_idx) {
+            if matches(snapshot.item_idx, snapshot.cluster_idx) {
                 return Some(ProbedBreak::Regular(candidate.clone()));
             }
         }
         self.state
             .emergency_boundary
             .as_ref()
-            .filter(|candidate| {
-                end.matches(
-                    &self.layout.data,
-                    candidate.0.item_idx,
-                    candidate.0.cluster_idx,
-                )
-            })
+            .filter(|candidate| matches(candidate.0.item_idx, candidate.0.cluster_idx))
             .map(|candidate| ProbedBreak::Emergency(candidate.0.clone()))
             .or_else(|| {
-                end.precedes(
-                    &self.layout.data,
-                    self.state.item_idx,
-                    self.state.cluster_idx,
-                )
-                .then_some(ProbedBreak::PassedEnd)
+                end.filter(|end| {
+                    end.precedes(
+                        &self.layout.data,
+                        self.state.item_idx,
+                        self.state.cluster_idx,
+                    )
+                })
+                .map(|_| ProbedBreak::PassedEnd)
             })
     }
 

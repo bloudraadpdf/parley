@@ -72,6 +72,19 @@ No local dependency override is part of this patch. The owning tests cover slice
 clone, explicit and soft breaks, nested and sibling owners, intrinsic widths and
 positive retained-glyph hit testing. No upstream issue submission is claimed.
 
+## Bloudraad fitted first-line source endpoints
+
+Moegoe fits first-line text with its computed font before it selects line
+membership. `Layout::set_first_line_source_end` retains that fitted endpoint
+when later content is reshaped with its normal font. It selects existing regular
+or emergency break snapshots; it does not insert a newline or a break opportunity.
+Mandatory breaks, source owner edges, atomic widths and normal clone replay retain
+their existing models. The endpoint applies only to line zero.
+
+The owning controls include source edges, sibling owners, atomic boxes, mandatory
+breaks, intrinsic widths and the terminal break reason. Moegoe and Bladsy must
+consume the same published revision. No upstream issue submission is claimed.
+
 ## Minimum supported Rust Version (MSRV)
 
 This version of Parley has been verified to compile with **Rust 1.88** and later.

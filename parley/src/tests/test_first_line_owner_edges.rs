@@ -206,9 +206,7 @@ fn explicit_clone_intrinsic_fragments_use_independent_line_advances() {
     assert_eq!(widths.max, normal.metrics().advance);
 }
 
-#[test]
-fn sibling_owners_select_the_line_that_contains_their_source_edges() {
-    let text = "A\nB";
+fn sibling_cloned_edges() -> [InlineBox; 4] {
     let first = InlineBox::cloned_inline_edges(
         [801, 802],
         0..1,
@@ -227,7 +225,14 @@ fn sibling_owners_select_the_line_that_contains_their_source_edges() {
         ],
         FollowingSourceSpace::RetainedAdvance,
     );
-    let layout = owner_layout(text, first.into_iter().chain(second), None);
+    let [first_start, first_end] = first;
+    let [second_start, second_end] = second;
+    [first_start, first_end, second_start, second_end]
+}
+
+#[test]
+fn sibling_owners_select_the_line_that_contains_their_source_edges() {
+    let layout = owner_layout("A\nB", sibling_cloned_edges(), None);
     assert_owner_lines(
         &layout,
         &[&[(801, 3.0), (802, 4.0)], &[(803, 50.0), (804, 60.0)]],
@@ -249,6 +254,107 @@ fn soft_clone_min_content_keeps_max_content_first_line_authority() {
     let widths = wrapped.calculate_content_widths();
     assert_eq!(widths.min, normal.metrics().advance);
     assert_eq!(widths.max, first.metrics().advance);
+}
+
+fn source_limited_layout(
+    text: &str,
+    edges: impl IntoIterator<Item = InlineBox>,
+    byte_end: usize,
+) -> Layout<ColorBrush> {
+    let mut layout = owner_layout(text, edges, Some(120.0));
+    layout.set_first_line_source_end(Some(byte_end));
+    layout.break_all_lines(Some(120.0));
+    layout
+}
+
+#[test]
+fn fitted_first_line_source_end_keeps_normal_clone_replay() {
+    let text = "A B";
+    let layout = source_limited_layout(text, differing_cloned_edges(text), 2);
+    assert_owner_lines(
+        &layout,
+        &[&[(801, 3.0), (802, 4.0)], &[(801, 30.0), (802, 40.0)]],
+    );
+    assert_eq!(layout.get(0).unwrap().text_range(), 0..2);
+    assert_eq!(layout.get(1).unwrap().text_range(), 2..3);
+}
+
+#[test]
+fn fitted_source_end_keeps_sliced_closing_edges_and_fitting_atomic_boxes() {
+    let edges = [
+        InlineBox::inline_start_edge(
+            801,
+            0,
+            InlineOwnerEdgeAdvance::uniform(3.0),
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        ),
+        InlineBox::inline_end_edge(
+            802,
+            1,
+            InlineOwnerEdgeAdvance::uniform(4.0),
+            0.0,
+            InlineBoxBreakAffinity::ToPrevious,
+        ),
+        InlineBox::new(803, 2, 8.0, 5.0),
+    ];
+    let layout = source_limited_layout("A B", edges, 2);
+    assert_owner_lines(&layout, &[&[(801, 3.0), (802, 4.0), (803, 8.0)], &[]]);
+    assert_eq!(layout.get(0).unwrap().text_range(), 0..2);
+    assert_eq!(layout.get(1).unwrap().text_range(), 2..3);
+}
+
+#[test]
+fn fitted_source_end_keeps_next_owner_source_edges_on_the_normal_line() {
+    let edges = sibling_cloned_edges();
+    let probe = owner_layout("A B", edges.clone(), Some(16.0));
+    let source_end = probe.get(0).expect("fitted first line").text_range().end;
+    assert_eq!(
+        source_end, 1,
+        "the real fitted endpoint precedes the source space"
+    );
+    assert!(probe.get(0).unwrap().items().any(|item| matches!(item,
+        PositionedLayoutItem::GlyphRun(run) if run.advance() > 0.0 && run.glyphs().count() > 0
+    )));
+    let layout = source_limited_layout("A B", edges, source_end);
+    assert_owner_lines(
+        &layout,
+        &[&[(801, 3.0), (802, 4.0)], &[(803, 50.0), (804, 60.0)]],
+    );
+}
+
+#[test]
+fn fitted_source_end_preserves_mandatory_breaks_and_normal_lines() {
+    use crate::layout::BreakReason;
+    let text = "A\nB C";
+    let layout = source_limited_layout(text, differing_cloned_edges(text), 4);
+    assert_owner_lines(
+        &layout,
+        &[&[(801, 3.0), (802, 4.0)], &[(801, 30.0), (802, 40.0)]],
+    );
+    assert_eq!(layout.get(0).unwrap().break_reason(), BreakReason::Explicit);
+    assert_eq!(layout.get(1).unwrap().text_range(), 2..5);
+}
+
+#[test]
+fn fitted_source_end_does_not_change_intrinsic_widths_or_terminal_reason() {
+    use crate::layout::BreakReason;
+    let text = "A B";
+    let normal = owner_layout(text, differing_cloned_edges(text), Some(120.0));
+    let mut limited = source_limited_layout(text, differing_cloned_edges(text), 2);
+    let limited_widths = limited.calculate_content_widths();
+    let normal_widths = normal.calculate_content_widths();
+    assert_eq!(
+        (limited_widths.min, limited_widths.max),
+        (normal_widths.min, normal_widths.max)
+    );
+    limited.set_first_line_source_end(Some(text.len()));
+    limited.break_all_lines(Some(120.0));
+    assert_owner_lines(&limited, &[&[(801, 3.0), (802, 4.0)]]);
+    assert_eq!(limited.get(0).unwrap().break_reason(), BreakReason::None);
+    limited.set_first_line_source_end(None);
+    limited.break_all_lines(Some(120.0));
+    assert_eq!(limited.len(), 1);
 }
 
 #[test]
