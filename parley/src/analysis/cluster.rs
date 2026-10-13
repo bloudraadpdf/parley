@@ -184,18 +184,13 @@ impl CharCluster {
                 }
 
                 let composer = analysis_data_sources.composing_normalizer();
-                let comp = composer.compose(self.chars[0].ch, self.chars[1].ch);
-                match comp {
-                    None => {}
-                    Some(ch) => {
-                        let mut copy = self.chars[0];
-                        copy.ch = ch;
-                        copy.contributes_to_font_coverage =
-                            Self::contributes_to_font_coverage(ch, analysis_data_sources);
-                        self.comp.chars[0] = copy;
-                        self.comp.len = 1;
-                    }
-                }
+                let ch = composer.compose(self.chars[0].ch, self.chars[1].ch)?;
+                let mut copy = self.chars[0];
+                copy.ch = ch;
+                copy.contributes_to_font_coverage =
+                    Self::contributes_to_font_coverage(ch, analysis_data_sources);
+                self.comp.chars[0] = copy;
+                self.comp.len = 1;
 
                 self.comp.state = FormState::Valid;
                 self.comp.setup();
@@ -374,15 +369,10 @@ impl<'a> Mapper<'a> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn default_ignorables_do_not_reduce_emoji_cluster_font_coverage() {
-        let data = AnalysisDataSources::new();
+    fn cluster(chars: impl IntoIterator<Item = char>, data: &AnalysisDataSources) -> CharCluster {
         let mut cluster = CharCluster::default();
-        let sequence =
-            "\u{1F469}\u{1F3FF}\u{200D}\u{2764}\u{FE0F}\u{200D}\u{1F48B}\u{200D}\u{1F468}\u{1F3FB}";
-
-        for ch in sequence.chars() {
-            let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, &data);
+        for ch in chars {
+            let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, data);
             cluster.map_len += usize::from(contributes_to_font_coverage);
             cluster.chars.push(Char {
                 ch,
@@ -391,6 +381,26 @@ mod tests {
                 style_index: 0,
             });
         }
+        cluster
+    }
+
+    #[test]
+    fn an_extended_pair_without_a_canonical_composition_needs_a_font_that_maps_it() {
+        let data = AnalysisDataSources::new();
+        let mut cluster = cluster("\u{0627}\u{064B}".chars(), &data);
+        cluster.force_normalize = true;
+
+        assert_eq!(cluster.map(|_| 0, &data), Status::Discard);
+    }
+
+    #[test]
+    fn default_ignorables_do_not_reduce_emoji_cluster_font_coverage() {
+        let data = AnalysisDataSources::new();
+        let mut cluster = cluster(
+            "\u{1F469}\u{1F3FF}\u{200D}\u{2764}\u{FE0F}\u{200D}\u{1F48B}\u{200D}\u{1F468}\u{1F3FB}"
+                .chars(),
+            &data,
+        );
 
         let status = cluster.map(
             |ch| {
@@ -413,18 +423,10 @@ mod tests {
     #[test]
     fn font_coverage_maps_every_character_in_a_large_cluster() {
         let data = AnalysisDataSources::new();
-        let mut cluster = CharCluster::default();
-
-        for ch in core::iter::once('e').chain(core::iter::repeat_n('\u{0301}', 35_000)) {
-            let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, &data);
-            cluster.map_len += usize::from(contributes_to_font_coverage);
-            cluster.chars.push(Char {
-                ch,
-                contributes_to_font_coverage,
-                glyph_id: 0,
-                style_index: 0,
-            });
-        }
+        let mut cluster = cluster(
+            core::iter::once('e').chain(core::iter::repeat_n('\u{0301}', 35_000)),
+            &data,
+        );
 
         assert_eq!(cluster.map(|_| 1, &data), Status::Complete);
         assert!(cluster.chars.iter().all(|ch| ch.glyph_id == 1));
