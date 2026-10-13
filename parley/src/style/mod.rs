@@ -22,6 +22,16 @@ pub use styleset::StyleSet;
 
 use crate::util::nearly_eq;
 
+/// Whether a collapsible space at the end of a line is removed (CSS Text 3 § 4.1.2) or kept and measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineEndSpace {
+    /// The space is removed and does not count for the fit of the line.
+    #[default]
+    Removed,
+    /// The space stays and counts for the fit of the line (Prince 16.2 keeps the space that ends generated content).
+    Kept,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WhiteSpaceCollapse {
     #[default]
@@ -221,6 +231,8 @@ pub enum StyleProperty<'a, B: Brush> {
     /// Line breaking counts it; only a layout aligned with [`Alignment::Justify`](crate::Alignment::Justify)
     /// shrinks the separators of its lines, so set it only for justified text.
     JustifyShrink(f32),
+    /// Whether a collapsible space at the end of a line is removed or kept.
+    LineEndSpace(LineEndSpace),
     /// Control over where words can wrap.
     WordBreak(WordBreak),
     /// Control over normal line-breaking opportunities and their priority.
@@ -301,6 +313,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub letter_spacing: f32,
     /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
     pub justify_shrink: f32,
+    /// Whether a collapsible space at the end of a line is removed or kept.
+    pub line_end_space: LineEndSpace,
     /// Control over where words can wrap.
     pub word_break: WordBreak,
     /// Control over normal line-breaking opportunities and their priority.
@@ -350,6 +364,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             word_spacing: 0.0,
             letter_spacing: 0.0,
             justify_shrink: 0.0,
+            line_end_space: LineEndSpace::default(),
             word_break: WordBreak::default(),
             line_break_mode: LineBreakMode::default(),
             overflow_wrap: OverflowWrap::default(),

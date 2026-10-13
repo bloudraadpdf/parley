@@ -84,6 +84,8 @@ pub struct Style<B: Brush> {
     pub(crate) overflow_wrap: OverflowWrap,
     /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
     pub(crate) justify_shrink: f32,
+    /// Whether a collapsible space at the end of a line is removed or kept.
+    pub(crate) line_end_space: crate::LineEndSpace,
     /// Per-cluster text-wrap-mode setting
     pub(crate) text_wrap_mode: TextWrapMode,
     /// Per-cluster white-space collapsing and hanging setting.

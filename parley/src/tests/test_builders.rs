@@ -12,9 +12,9 @@ use peniko::{Blob, color::palette};
 use super::utils::{ColorBrush, asserts::assert_eq_layout_data};
 use crate::{
     FontContext, FontFamily, FontFeatures, FontSynthesis, FontSynthesisStyle, FontVariations,
-    HyphenateCharacter, Layout, LayoutContext, LineBreakMode, LineHeight, OverflowWrap,
-    RangedBuilder, StyleProperty, StyleRunBuilder, TabSize, TextStyle, TextWrapMode, TreeBuilder,
-    WhiteSpaceCollapse, WordBreak,
+    HyphenateCharacter, Layout, LayoutContext, LineBreakMode, LineEndSpace, LineHeight,
+    OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder, TabSize, TextStyle, TextWrapMode,
+    TreeBuilder, WhiteSpaceCollapse, WordBreak,
 };
 
 // TODO: `FONT_FAMILY_LIST`, `load_fonts`, and `create_font_context` are
@@ -263,6 +263,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         word_spacing: 2.,
         letter_spacing: 1.5,
         justify_shrink: 0.25,
+        line_end_space: LineEndSpace::Kept,
         word_break: WordBreak::BreakAll,
         line_break_mode: LineBreakMode::Anywhere,
         overflow_wrap: OverflowWrap::Anywhere,
@@ -312,6 +313,7 @@ fn set_root_style(rb: &mut RangedBuilder<'_, ColorBrush>) {
     rb.push_default(StyleProperty::WordSpacing(2.));
     rb.push_default(StyleProperty::LetterSpacing(1.5));
     rb.push_default(StyleProperty::JustifyShrink(0.25));
+    rb.push_default(StyleProperty::LineEndSpace(LineEndSpace::Kept));
     rb.push_default(StyleProperty::WordBreak(WordBreak::BreakAll));
     rb.push_default(StyleProperty::LineBreakMode(LineBreakMode::Anywhere));
     rb.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));

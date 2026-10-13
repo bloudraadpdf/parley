@@ -464,7 +464,10 @@ impl OverflowingWhitespace {
             Self::NoBreakGlue
         } else if !white_space.wraps() {
             Self::Other
-        } else if white_space.collapses_space(whitespace) {
+        } else if white_space.collapses_space(whitespace)
+            && white_space.terminal_disposition(whitespace)
+                != TerminalWhitespaceDisposition::Measured
+        {
             Self::CollapsibleSoftWrap(SoftWrapOpportunity)
         } else {
             match white_space.terminal_disposition(whitespace) {

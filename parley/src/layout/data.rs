@@ -310,6 +310,7 @@ impl TerminalWhitespace {
 pub(crate) struct WhiteSpaceLayoutMode {
     collapse: WhiteSpaceCollapse,
     wrap: TextWrapMode,
+    line_end_space: crate::LineEndSpace,
 }
 
 impl WhiteSpaceLayoutMode {
@@ -317,6 +318,7 @@ impl WhiteSpaceLayoutMode {
         Self {
             collapse: style.white_space_collapse,
             wrap: style.text_wrap_mode,
+            line_end_space: style.line_end_space,
         }
     }
 
@@ -330,7 +332,10 @@ impl WhiteSpaceLayoutMode {
                 TerminalWhitespaceDisposition::Measured
             }
             (WhiteSpaceCollapse::Collapse, _) if matches!(whitespace, Whitespace::Space) => {
-                TerminalWhitespaceDisposition::Removed
+                match self.line_end_space {
+                    crate::LineEndSpace::Removed => TerminalWhitespaceDisposition::Removed,
+                    crate::LineEndSpace::Kept => TerminalWhitespaceDisposition::Measured,
+                }
             }
             (WhiteSpaceCollapse::Collapse, _)
                 if matches!(whitespace, Whitespace::OtherSpaceSeparator) =>

@@ -17,7 +17,7 @@ use super::style::{
 use crate::font::FontContext;
 use crate::style::TextStyle;
 use crate::util::nearly_eq;
-use crate::{HyphenateCharacter, TabSize, TextWrapMode, WordBreak};
+use crate::{HyphenateCharacter, LineEndSpace, TabSize, TextWrapMode, WordBreak};
 use crate::{LineHeight, OverflowWrap, layout};
 use core::borrow::Borrow;
 use core::ops::Range;
@@ -177,6 +177,7 @@ impl ResolveContext {
             StyleProperty::WordSpacing(value) => WordSpacing(*value * scale),
             StyleProperty::LetterSpacing(value) => LetterSpacing(*value * scale),
             StyleProperty::JustifyShrink(value) => JustifyShrink(*value),
+            StyleProperty::LineEndSpace(value) => LineEndSpace(*value),
             StyleProperty::WordBreak(value) => WordBreak(*value),
             StyleProperty::LineBreakMode(value) => LineBreakMode(*value),
             StyleProperty::OverflowWrap(value) => OverflowWrap(*value),
@@ -233,6 +234,7 @@ impl ResolveContext {
             word_spacing: raw_style.word_spacing * scale,
             letter_spacing: raw_style.letter_spacing * scale,
             justify_shrink: raw_style.justify_shrink,
+            line_end_space: raw_style.line_end_space,
             word_break: raw_style.word_break,
             line_break_mode: raw_style.line_break_mode,
             overflow_wrap: raw_style.overflow_wrap,
@@ -438,6 +440,8 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     LetterSpacing(f32),
     /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
     JustifyShrink(f32),
+    /// Whether a collapsible space at the end of a line is removed or kept.
+    LineEndSpace(LineEndSpace),
     /// Control over where words can wrap.
     WordBreak(WordBreak),
     /// Control over normal line-breaking opportunities and their priority.
@@ -509,6 +513,8 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) letter_spacing: f32,
     /// Fraction of its advance by which a word separator may shrink to fit and justify a line.
     pub(crate) justify_shrink: f32,
+    /// Whether a collapsible space at the end of a line is removed or kept.
+    pub(crate) line_end_space: LineEndSpace,
     /// Control over where words can wrap.
     pub(crate) word_break: WordBreak,
     /// Control over normal line-breaking opportunities and their priority.
@@ -562,6 +568,7 @@ impl<B: Brush> ResolvedStyle<B> {
             WordSpacing(value) => self.word_spacing = value,
             LetterSpacing(value) => self.letter_spacing = value,
             JustifyShrink(value) => self.justify_shrink = value,
+            LineEndSpace(value) => self.line_end_space = value,
             WordBreak(value) => self.word_break = value,
             LineBreakMode(value) => self.line_break_mode = value,
             OverflowWrap(value) => self.overflow_wrap = value,
@@ -607,6 +614,7 @@ impl<B: Brush> ResolvedStyle<B> {
             WordSpacing(value) => nearly_eq(self.word_spacing, *value),
             LetterSpacing(value) => nearly_eq(self.letter_spacing, *value),
             JustifyShrink(value) => nearly_eq(self.justify_shrink, *value),
+            LineEndSpace(value) => self.line_end_space == *value,
             WordBreak(value) => self.word_break == *value,
             LineBreakMode(value) => self.line_break_mode == *value,
             OverflowWrap(value) => self.overflow_wrap == *value,
@@ -627,6 +635,7 @@ impl<B: Brush> ResolvedStyle<B> {
             soft_break_policy: self.soft_break_policy(),
             overflow_wrap: self.overflow_wrap,
             justify_shrink: self.justify_shrink,
+            line_end_space: self.line_end_space,
             text_wrap_mode: self.text_wrap_mode,
             white_space_collapse: self.white_space_collapse,
             tab_size: self.tab_size,
