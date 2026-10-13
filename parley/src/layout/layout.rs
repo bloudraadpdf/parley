@@ -338,8 +338,9 @@ impl<B: Brush> Layout<B> {
     /// Retain a fitted first-line source endpoint after reshaping later content.
     ///
     /// The UTF-8 boundary must come from a line fitted with the same source text.
-    /// This selects an existing soft or emergency break, preserves mandatory
-    /// newlines, and leaves subsequent lines unconstrained. It adds no break
+    /// This retains a fitted soft or emergency endpoint, including one before
+    /// a collapsed space. It preserves mandatory newlines and leaves subsequent
+    /// lines unconstrained. It adds no break
     /// opportunities. `None` clears the endpoint.
     pub fn set_first_line_source_end(&mut self, byte_end: Option<usize>) {
         assert!(byte_end.is_none_or(|end| end > 0 && end <= self.data.text_len));

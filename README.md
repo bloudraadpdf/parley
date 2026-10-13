@@ -76,8 +76,10 @@ positive retained-glyph hit testing. No upstream issue submission is claimed.
 
 Moegoe fits first-line text with its computed font before it selects line
 membership. `Layout::set_first_line_source_end` retains that fitted endpoint
-when later content is reshaped with its normal font. It selects existing regular
-or emergency break snapshots; it does not insert a newline or a break opportunity.
+when later content is reshaped with its normal font. It selects regular or emergency
+break snapshots, or the fitted prefix before a collapsed source space. That prefix
+removes the space's leading advance on the next line through typed whitespace
+state. It does not insert a newline or a break opportunity.
 Mandatory breaks, source owner edges, atomic widths and normal clone replay retain
 their existing models. The endpoint applies only to line zero.
 

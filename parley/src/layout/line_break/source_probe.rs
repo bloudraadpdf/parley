@@ -155,6 +155,41 @@ impl<B: Brush> BreakLines<'_, B> {
     }
     pub(super) fn prefix_ends_at(&self, cursor: SourceCursor) -> bool {
         matches!(self.source_probe, Some(SourceProbe::Prefix(end)) if end == cursor)
+            || self.fitted_end_precedes_collapsible_space(cursor)
+    }
+
+    fn fitted_end_precedes_collapsible_space(&self, cursor: SourceCursor) -> bool {
+        if self.state.lines != 0
+            || self.layout.data.first_line_source_end
+                != Some(cursor.source_offset(&self.layout.data))
+        {
+            return false;
+        }
+        let (item, cluster) = match cursor {
+            SourceCursor::BeforeItem(item) => (item, None),
+            SourceCursor::WithinText { item, cluster } => (item, Some(cluster)),
+        };
+        let Some(item) = self
+            .layout
+            .data
+            .items
+            .get(item)
+            .filter(|item| item.kind == LayoutItemKind::TextRun)
+        else {
+            return false;
+        };
+        let Some(cluster) = self
+            .layout
+            .data
+            .clusters
+            .get(cluster.unwrap_or(item.cluster_range.start))
+        else {
+            return false;
+        };
+        crate::layout::data::WhiteSpaceLayoutMode::from_style(
+            &self.layout.data.styles[cluster.style_index as usize],
+        )
+        .collapses_space(cluster.info.whitespace())
     }
 
     pub(super) fn probes_current_break(&self) -> bool {
@@ -216,6 +251,11 @@ impl<B: Brush> BreakLines<'_, B> {
         if self.state.line.items.is_empty() && self.state.line.clusters.is_empty() {
             return None;
         }
+        let removes_leading_space = self.fitted_end_precedes_collapsible_space(SourceCursor::at(
+            &self.layout.data,
+            self.state.item_idx,
+            self.state.cluster_idx,
+        ));
         super::try_commit_line(
             self.layout,
             &self.cloned_edges,
@@ -225,7 +265,14 @@ impl<B: Brush> BreakLines<'_, B> {
             crate::layout::BreakReason::Regular,
             indent,
         )
-        .then(|| self.start_new_line())
+        .then(|| {
+            let result = self.start_new_line();
+            if removes_leading_space {
+                self.state.line.source_start_whitespace =
+                    super::SourceStartWhitespace::RemoveCollapsible;
+            }
+            result
+        })
         .flatten()
     }
 

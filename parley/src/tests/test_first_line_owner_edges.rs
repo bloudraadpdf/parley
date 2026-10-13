@@ -337,6 +337,27 @@ fn fitted_source_end_preserves_mandatory_breaks_and_normal_lines() {
 }
 
 #[test]
+fn fitted_source_end_retains_the_collapsed_space_resume_boundary() {
+    let text = "A B";
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::new();
+    let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Collapse,
+    ));
+    builder.push(StyleProperty::FontSize(100.0), 0..1);
+    let mut layout = builder.build(text);
+    layout.set_first_line_source_end(Some(1));
+    layout.break_all_lines(Some(75.0));
+    assert_owner_lines(&layout, &[&[], &[]]);
+    assert_eq!(layout.get(1).unwrap().text_range(), 1..3);
+    let normal_glyph = crate::Cluster::from_byte_index(&layout, 2).expect("the normal B cluster");
+    assert_eq!(normal_glyph.visual_offset(), Some(0.0));
+}
+
+#[test]
 fn fitted_source_end_does_not_change_intrinsic_widths_or_terminal_reason() {
     use crate::layout::BreakReason;
     let text = "A B";
