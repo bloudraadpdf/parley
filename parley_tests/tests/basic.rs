@@ -215,6 +215,7 @@ fn leading_whitespace() {
         (WhiteSpaceCollapse::Collapse, "collapse"),
     ] {
         let mut builder = env.tree_builder();
+        builder.push_style_modification_span(&[StyleProperty::WhiteSpaceCollapse(mode)]);
         builder.set_white_space_mode(mode);
         builder.push_text("Line 1");
         builder.push_style_modification_span(None);
