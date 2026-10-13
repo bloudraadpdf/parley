@@ -490,7 +490,7 @@ fn shape_item<'a, B: Brush>(
                 if tag.iter().any(u8::is_ascii_lowercase) {
                     return None;
                 }
-                let tag = std::str::from_utf8(&tag).ok()?.trim_end();
+                let tag = core::str::from_utf8(&tag).ok()?.trim_end();
                 format!("und-x-hbot{tag}")
                     .parse::<harfrust::Language>()
                     .ok()

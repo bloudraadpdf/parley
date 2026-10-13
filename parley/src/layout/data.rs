@@ -12,6 +12,10 @@ use crate::layout::{
 };
 use crate::style::Brush;
 
+#[cfg(feature = "libm")]
+#[allow(unused_imports)]
+use core_maths::CoreFloat;
+
 #[derive(Default)]
 struct IntrinsicLetterSpacing {
     line_index: usize,
