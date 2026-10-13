@@ -103,8 +103,8 @@ fn unquantized_line_box_spans_per_run_half_leading_extents() {
 
     // Expected extents derived from the runs' own resolved metrics, so the
     // assertion pins the MODEL rather than any particular metric table.
-    let mut expected_above = 0.0f32;
-    let mut expected_below = 0.0f32;
+    let mut expected_above = 0.0_f32;
+    let mut expected_below = 0.0_f32;
     for run in line.runs() {
         let m = run.metrics();
         let half_leading = (m.line_height - (m.ascent + m.descent)) * 0.5;

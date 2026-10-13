@@ -1068,6 +1068,7 @@ fn collapsed_terminal_sequence_preserves_interspersed_spaces() {
 }
 
 #[test]
+#[expect(clippy::single_range_in_vec_init, reason = "one removed source range")]
 fn collapsed_terminal_sequence_removes_only_the_collapsible_suffix() {
     let visible_advance = |text| {
         let mut layout = roboto_layout(text, None);
@@ -1507,6 +1508,7 @@ fn selected_line_end_applies_paragraph_level_before_bidi_reordering() {
 }
 
 #[test]
+#[expect(clippy::single_range_in_vec_init, reason = "one visual run range")]
 fn measured_rtl_terminal_space_retains_its_source_run() {
     let text = "XXX X";
     let layout = configured_layout(text, |builder| {

@@ -17,7 +17,7 @@ fn declared_slant_range_limits_high_level_style_selection() {
         .unwrap()
         .tag;
     let ranges = [fontique::AxisRange::new(tag, 0.0, 10.0).unwrap()];
-    let mut collection = fontique::Collection::new(Default::default());
+    let mut collection = fontique::Collection::new(fontique::CollectionOptions::default());
     let registered = collection.register_fonts(
         data.clone(),
         Some(fontique::FontInfoOverride {

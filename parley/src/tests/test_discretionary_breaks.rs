@@ -474,6 +474,7 @@ fn following_material_is_charged_and_positioned_only_after_a_selected_break() {
 }
 
 #[test]
+#[expect(clippy::single_range_in_vec_init, reason = "one omitted source range")]
 fn source_omission_applies_only_at_a_selected_line_start() {
     let text = "ab-cd";
     let boundary = "ab-".len();
@@ -502,6 +503,7 @@ fn source_omission_applies_only_at_a_selected_line_start() {
 }
 
 #[test]
+#[expect(clippy::single_range_in_vec_init, reason = "one omitted source range")]
 fn registered_discretionary_break_precedes_a_punctuation_cluster() {
     use crate::layout::{DiscretionaryBreakShape, LineBreakOverride};
 

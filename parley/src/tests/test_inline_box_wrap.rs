@@ -1478,7 +1478,7 @@ fn reclaimed_trailing_space_keeps_the_following_box_on_the_line() {
     probe_builder.push_default(StyleProperty::FontSize(10.0));
     let mut probe = probe_builder.build(text);
     probe.break_all_lines(None);
-    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let metrics = *probe.lines().next().unwrap().metrics();
     let word = metrics.advance - metrics.trailing_whitespace;
     let space = metrics.trailing_whitespace;
     assert!(space > 0.0, "probe geometry: the text must end in a space");
@@ -1539,7 +1539,7 @@ fn first_line_with_overflowing_trailing_space_and_selection(
 
     let mut probe = build(&mut lcx, &mut fcx);
     probe.break_all_lines(None);
-    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let metrics = *probe.lines().next().unwrap().metrics();
     let word_advance = metrics.advance - metrics.trailing_whitespace;
     let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
 
@@ -1720,7 +1720,7 @@ fn ordinary_inter_word_boundary_does_not_displace_a_fitting_word() {
 
     let mut probe = build(&mut lcx, &mut fcx);
     probe.break_all_lines(None);
-    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let metrics = *probe.lines().next().unwrap().metrics();
     let word_advance = metrics.advance - metrics.trailing_whitespace;
     let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
 
@@ -1748,7 +1748,7 @@ fn inserted_discretionary_hyphen_does_not_displace_a_fitting_word() {
     builder.push_default(StyleProperty::FontSize(10.0));
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    let metrics = layout.lines().next().unwrap().metrics().clone();
+    let metrics = *layout.lines().next().unwrap().metrics();
     let word_advance = metrics.advance - metrics.trailing_whitespace;
     let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
 
@@ -1792,7 +1792,7 @@ fn anywhere_opportunities_are_not_prioritized() {
 
     let mut probe = build(&mut lcx, &mut fcx);
     probe.break_all_lines(None);
-    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let metrics = *probe.lines().next().unwrap().metrics();
     let word_advance = metrics.advance - metrics.trailing_whitespace;
     let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
 
@@ -1866,7 +1866,7 @@ fn explicitly_unprioritized_overrides_are_not_prioritized() {
 
     let mut probe = build(&mut lcx, &mut fcx);
     probe.break_all_lines(None);
-    let metrics = probe.lines().next().unwrap().metrics().clone();
+    let metrics = *probe.lines().next().unwrap().metrics();
     let word_advance = metrics.advance - metrics.trailing_whitespace;
     let max_advance = word_advance + metrics.trailing_whitespace * 0.5;
 
@@ -2497,6 +2497,7 @@ fn negative_margin_layout(
 }
 
 #[test]
+#[expect(clippy::single_range_in_vec_init, reason = "one-line text ranges")]
 fn negative_inline_end_margin_participates_in_terminal_fragment_fitting() {
     for direction in [crate::BaseDirection::Ltr, crate::BaseDirection::Rtl] {
         for (text, edges, width, expected) in [
@@ -2555,6 +2556,7 @@ fn negative_inline_end_margin_participates_in_terminal_fragment_fitting() {
 }
 
 #[test]
+#[expect(clippy::single_range_in_vec_init, reason = "one-line text ranges")]
 fn reverted_negative_margin_fragment_can_select_a_different_width() {
     let mut layout =
         negative_margin_layout("aaaa bbbbbb", &[(11, -30.0)], crate::BaseDirection::Ltr);

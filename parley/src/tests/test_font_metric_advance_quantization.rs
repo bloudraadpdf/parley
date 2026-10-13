@@ -162,7 +162,7 @@ fn fixed_grid_line_fit_is_stable_across_many_clusters() {
     let i_advance = measure_advance(&mut lcx, &mut fcx, "i", quantization, None);
     let pair_advance = measure_advance(&mut lcx, &mut fcx, "i i", quantization, None);
     let repeated_unit = f64::from(pair_advance - i_advance);
-    let repetitions = 100usize;
+    let repetitions = 100_usize;
     let width = (f64::from(i_advance) + repeated_unit * repetitions as f64) as f32;
     let text = format!("{}i", "i ".repeat(repetitions));
 
