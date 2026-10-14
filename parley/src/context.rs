@@ -6,6 +6,10 @@
 use alloc::{vec, vec::Vec};
 use core::num::NonZeroU16;
 
+#[cfg(feature = "libm")]
+#[allow(unused_imports)]
+use core_maths::CoreFloat;
+
 use super::FontContext;
 use super::builder::{RangedBuilder, StyleRunBuilder};
 use super::resolve::tree::TreeStyleBuilder;
@@ -44,6 +48,24 @@ impl FontMetricAdvanceQuantization {
     }
 }
 
+/// The grid to which the ascent, descent and line gap of each run round.
+///
+/// Browsers round these font metrics to whole CSS pixels before they lay out
+/// a line: the `normal` line height is the sum of the 3 rounded metrics.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct VerticalMetricGrid(f32);
+
+impl VerticalMetricGrid {
+    /// A grid of `unit` layout units, if `unit` is finite and positive.
+    pub fn new(unit: f32) -> Option<Self> {
+        (unit.is_finite() && unit > 0.0).then_some(Self(unit))
+    }
+
+    pub(crate) fn round(self, value: f32) -> f32 {
+        (value / self.0).round() * self.0
+    }
+}
+
 /// Shared scratch space used when constructing text layouts.
 ///
 /// This type is designed to be a global resource with only one per-application (or per-thread).
@@ -73,6 +95,7 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     // Whether line fit uses nominal font metrics while glyph positioning and
     // emitted advances retain shaping adjustments such as kerning.
     pub(crate) nominal_font_metric_line_breaks: bool,
+    pub(crate) vertical_metric_grid: Option<VerticalMetricGrid>,
     #[cfg(test)]
     pub(crate) owner_box_reads: usize,
 }
@@ -95,6 +118,7 @@ impl<B: Brush> LayoutContext<B> {
             scx: ShapeContext::default(),
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
+            vertical_metric_grid: None,
             #[cfg(test)]
             owner_box_reads: 0,
         }
@@ -122,6 +146,11 @@ impl<B: Brush> LayoutContext<B> {
     /// advances use that same grid.
     pub fn set_nominal_font_metric_line_breaks(&mut self, enabled: bool) {
         self.nominal_font_metric_line_breaks = enabled;
+    }
+
+    /// Round the ascent, descent and line gap of each run to `grid`.
+    pub fn set_vertical_metric_grid(&mut self, grid: Option<VerticalMetricGrid>) {
+        self.vertical_metric_grid = grid;
     }
 
     fn resolve_style_set(
@@ -272,6 +301,7 @@ impl<B: Brush> Clone for LayoutContext<B> {
         let mut cloned = Self::new();
         cloned.font_metric_advance_quantization = self.font_metric_advance_quantization;
         cloned.nominal_font_metric_line_breaks = self.nominal_font_metric_line_breaks;
+        cloned.vertical_metric_grid = self.vertical_metric_grid;
         cloned
     }
 }

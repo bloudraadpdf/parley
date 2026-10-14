@@ -133,7 +133,7 @@ pub use linebender_resource_handle::FontData;
 pub use util::BoundingBox;
 
 pub use builder::{RangedBuilder, StyleRunBuilder, TreeBuilder};
-pub use context::{FontMetricAdvanceQuantization, LayoutContext};
+pub use context::{FontMetricAdvanceQuantization, LayoutContext, VerticalMetricGrid};
 pub use font::FontContext;
 pub use inline_box::{
     FollowingSourceSpace, InlineBox, InlineBoxBreakAffinity, InlineOwnerEdgeAdvance,

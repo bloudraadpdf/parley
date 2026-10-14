@@ -23,5 +23,6 @@ mod test_physical_shape_plans;
 mod test_physical_shaping;
 mod test_shaping_context;
 mod test_total_fit;
+mod test_vertical_metric_grid;
 mod test_word_spacing;
 mod utils;

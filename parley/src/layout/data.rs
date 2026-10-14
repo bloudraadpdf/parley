@@ -797,7 +797,7 @@ pub struct DiscretionaryBreak {
 use crate::util::nearly_zero;
 use crate::{
     FontData, FontMetricAdvanceQuantization, IndentOptions, IndentStart, LineHeight, OverflowWrap,
-    TextWrapMode,
+    TextWrapMode, VerticalMetricGrid,
 };
 use core::num::NonZeroU16;
 use core::ops::Range;
@@ -1237,6 +1237,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) quantize: bool,
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
     pub(crate) nominal_font_metric_line_breaks: bool,
+    pub(crate) vertical_metric_grid: Option<VerticalMetricGrid>,
     pub(crate) normal_soft_wrap_selection: NormalSoftWrapSelection,
     pub(crate) line_break_strategy: super::LineBreakStrategy,
     /// CSS Text 4 §8.2: letter-spacing is not applied after the last
@@ -1329,6 +1330,7 @@ impl<B: Brush> Default for LayoutData<B> {
             quantize: true,
             font_metric_advance_quantization: None,
             nominal_font_metric_line_breaks: false,
+            vertical_metric_grid: None,
             normal_soft_wrap_selection: NormalSoftWrapSelection::default(),
             line_break_strategy: super::LineBreakStrategy::default(),
             trim_line_end_letter_spacing: true,
@@ -1570,6 +1572,7 @@ impl<B: Brush> LayoutData<B> {
         self.quantize = true;
         self.font_metric_advance_quantization = None;
         self.nominal_font_metric_line_breaks = false;
+        self.vertical_metric_grid = None;
         self.normal_soft_wrap_selection = NormalSoftWrapSelection::default();
         self.line_break_strategy = super::LineBreakStrategy::default();
         self.trim_line_end_letter_spacing = true;
@@ -1747,20 +1750,28 @@ impl<B: Brush> LayoutData<B> {
             let overline_size = underline_size;
             let overline_offset = metrics.ascent;
 
+            let on_grid = |value: f32| {
+                self.vertical_metric_grid
+                    .map_or(value, |grid| grid.round(value))
+            };
+            let (ascent, descent, leading) = (
+                on_grid(metrics.ascent),
+                on_grid(-metrics.descent),
+                on_grid(metrics.leading),
+            );
+
             // Compute line height
             let style = &self.styles[style_index as usize];
             let line_height = match style.line_height {
                 LineHeight::Absolute(value) => value,
                 LineHeight::FontSizeRelative(value) => value * font_size,
-                LineHeight::MetricsRelative(value) => {
-                    (metrics.ascent - metrics.descent + metrics.leading) * value
-                }
+                LineHeight::MetricsRelative(value) => (ascent + descent + leading) * value,
             };
 
             RunMetrics {
-                ascent: metrics.ascent,
-                descent: -metrics.descent,
-                leading: metrics.leading,
+                ascent,
+                descent,
+                leading,
                 underline_offset,
                 underline_size,
                 strikethrough_offset,
