@@ -1,7 +1,7 @@
 // Copyright 2026 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! A collapsible space kept at a line end.
+//! A collapsible space or an other space separator kept at a line end.
 
 use super::{test_builders::create_font_context, utils::ColorBrush};
 use crate::{FontFamily, Layout, LayoutContext, LineEndSpace, StyleProperty};
@@ -42,4 +42,19 @@ fn a_kept_line_end_space_counts_for_the_fit() {
     assert_eq!(first_line_end(None, width), 8);
     assert_eq!(first_line_end(Some(7..8), width), 4);
     assert_eq!(first_line_end(Some(3..4), width), 8);
+}
+
+/// An em space kept at a line end counts for the extent of the line; by default it hangs (Prince 16.2 and PDFreactor
+/// 12.5 keep every other space separator).
+#[test]
+fn a_kept_line_end_em_space_counts_for_the_extent() {
+    let text = "aa\u{2003}";
+    let extent = |kept: Option<core::ops::Range<usize>>| {
+        let mut layout = layout(text, kept);
+        layout.break_all_lines(None);
+        let metrics = *layout.lines().next().expect("a line").metrics();
+        metrics.advance - metrics.trailing_whitespace
+    };
+    assert_eq!(extent(None), natural_width("aa"));
+    assert_eq!(extent(Some(2..text.len())), natural_width(text));
 }

@@ -333,14 +333,17 @@ impl WhiteSpaceLayoutMode {
             }
             (WhiteSpaceCollapse::Collapse, _) if matches!(whitespace, Whitespace::Space) => {
                 match self.line_end_space {
-                    crate::LineEndSpace::Removed => TerminalWhitespaceDisposition::Removed,
+                    crate::LineEndSpace::Excluded => TerminalWhitespaceDisposition::Removed,
                     crate::LineEndSpace::Kept => TerminalWhitespaceDisposition::Measured,
                 }
             }
             (WhiteSpaceCollapse::Collapse, _)
                 if matches!(whitespace, Whitespace::OtherSpaceSeparator) =>
             {
-                TerminalWhitespaceDisposition::Hanging
+                match self.line_end_space {
+                    crate::LineEndSpace::Excluded => TerminalWhitespaceDisposition::Hanging,
+                    crate::LineEndSpace::Kept => TerminalWhitespaceDisposition::Measured,
+                }
             }
             (WhiteSpaceCollapse::Preserve, TextWrapMode::Wrap)
                 if matches!(

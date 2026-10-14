@@ -22,13 +22,15 @@ pub use styleset::StyleSet;
 
 use crate::util::nearly_eq;
 
-/// Whether a collapsible space at the end of a line is removed (CSS Text 3 § 4.1.2) or kept and measured.
+/// Whether a collapsible space or an other space separator at the end of a line is excluded from the line (CSS Text
+/// 3 § 4.1.2) or kept and measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineEndSpace {
-    /// The space is removed and does not count for the fit of the line.
+    /// A collapsible space is removed and an other space separator hangs; neither counts for the fit of the line.
     #[default]
-    Removed,
-    /// The space stays and counts for the fit of the line (Prince 16.2 keeps the space that ends generated content).
+    Excluded,
+    /// The space stays and counts for the fit of the line (Prince 16.2 keeps the space that ends generated content and
+    /// every other space separator).
     Kept,
 }
 
