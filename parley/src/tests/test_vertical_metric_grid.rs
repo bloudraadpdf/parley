@@ -32,7 +32,7 @@ fn run_metrics(layout: &Layout<ColorBrush>) -> RunMetrics {
 #[test]
 fn each_vertical_font_metric_of_a_run_rounds_to_the_grid() {
     let exact = run_metrics(&layout(None));
-    let on_grid = |value: f32| (value / CSS_PIXEL).round() * CSS_PIXEL;
+    let on_grid = |value: f32| (value / CSS_PIXEL - 0.5).ceil() * CSS_PIXEL;
     let (ascent, descent, leading) = (
         on_grid(exact.ascent),
         on_grid(exact.descent),
@@ -58,4 +58,12 @@ fn a_grid_needs_a_finite_positive_unit() {
     assert!(VerticalMetricGrid::new(-0.75).is_none());
     assert!(VerticalMetricGrid::new(f32::NAN).is_none());
     assert!(VerticalMetricGrid::new(CSS_PIXEL).is_some());
+}
+
+#[test]
+fn a_half_rounds_toward_zero() {
+    let grid = VerticalMetricGrid::new(CSS_PIXEL).expect("grid");
+    assert_eq!(grid.round(3.5 * CSS_PIXEL), 3.0 * CSS_PIXEL);
+    assert_eq!(grid.round(3.6 * CSS_PIXEL), 4.0 * CSS_PIXEL);
+    assert_eq!(grid.round(-3.5 * CSS_PIXEL), -3.0 * CSS_PIXEL);
 }

@@ -51,7 +51,9 @@ impl FontMetricAdvanceQuantization {
 /// The grid to which the ascent, descent and line gap of each run round.
 ///
 /// Browsers round these font metrics to whole CSS pixels before they lay out
-/// a line: the `normal` line height is the sum of the 3 rounded metrics.
+/// a line: the `normal` line height is the sum of the 3 rounded metrics. A
+/// half rounds toward zero, as in Chrome 148 on macOS (Ahem at 17.5 px: a
+/// 14 px ascent and a 3 px descent).
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct VerticalMetricGrid(f32);
 
@@ -62,7 +64,8 @@ impl VerticalMetricGrid {
     }
 
     pub(crate) fn round(self, value: f32) -> f32 {
-        (value / self.0).round() * self.0
+        let units = value / self.0;
+        units.signum() * (units.abs() - 0.5).ceil() * self.0
     }
 }
 
