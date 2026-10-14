@@ -45,7 +45,7 @@ fn a_kept_line_end_space_counts_for_the_fit() {
 }
 
 /// An em space kept at a line end counts for the extent of the line; by default it hangs (Prince 16.2 and PDFreactor
-/// 12.5 keep every other space separator).
+/// 12.7.2 keep every other space separator).
 #[test]
 fn a_kept_line_end_em_space_counts_for_the_extent() {
     let text = "aa\u{2003}";
