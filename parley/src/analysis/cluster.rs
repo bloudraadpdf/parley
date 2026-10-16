@@ -346,9 +346,9 @@ impl<'a> Mapper<'a> {
         let mut mapped = 0;
         for (c, g) in self.chars.iter().zip(glyphs.iter_mut()) {
             if !c.contributes_to_font_coverage {
-                *g = f(c.ch);
+                *g = nominal_glyph(f, c.ch);
             } else {
-                let gid = f(c.ch);
+                let gid = nominal_glyph(f, c.ch);
                 *g = gid;
                 if gid != 0 {
                     mapped += 1;
@@ -363,6 +363,22 @@ impl<'a> Mapper<'a> {
         }
         ratio
     }
+}
+
+/// The nominal glyph of `ch`; a space separator the font lacks takes the space glyph, as HarfBuzz shapes it.
+fn nominal_glyph(f: &impl Fn(char) -> u16, ch: char) -> u16 {
+    match f(ch) {
+        0 if has_space_fallback(ch) => f(' '),
+        glyph => glyph,
+    }
+}
+
+/// The space separators HarfBuzz renders with the space glyph of a font that lacks them (`space_fallback`).
+const fn has_space_fallback(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{00A0}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}'
+    )
 }
 
 #[cfg(test)]
@@ -417,6 +433,29 @@ mod tests {
             status,
             Status::Complete,
             "ZWJ and variation selectors are shaping controls, not nominal-glyph coverage requirements",
+        );
+    }
+
+    /// HarfBuzz shapes a space separator that a font lacks with the space glyph of the font, as WeasyPrint and
+    /// Chrome do (weasyprint-samples poster: U+202F in "25 juin" with Archivo Black).
+    #[test]
+    fn a_font_with_a_space_covers_the_space_separators_it_lacks() {
+        let data = AnalysisDataSources::new();
+        let space_only = |ch| u16::from(ch == ' ');
+        for ch in ['\u{00A0}', '\u{2009}', '\u{202F}', '\u{205F}', '\u{3000}'] {
+            assert_eq!(
+                cluster([ch], &data).map(space_only, &data),
+                Status::Complete,
+                "{ch:?}"
+            );
+        }
+        assert_eq!(
+            cluster(['\u{1680}'], &data).map(space_only, &data),
+            Status::Discard
+        );
+        assert_eq!(
+            cluster(['\u{202F}'], &data).map(|_| 0, &data),
+            Status::Discard
         );
     }
 
