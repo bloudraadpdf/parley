@@ -373,8 +373,9 @@ fn nominal_glyph(f: &impl Fn(char) -> u16, ch: char) -> u16 {
     }
 }
 
-/// The space separators `HarfBuzz` renders with the space glyph of a font that lacks them (`space_fallback`).
-const fn has_space_fallback(ch: char) -> bool {
+/// Whether `ch` is a space separator that `HarfBuzz` renders with the space glyph of a font that lacks it
+/// (`space_fallback`); such a font covers it when it maps the space.
+pub const fn has_space_fallback(ch: char) -> bool {
     matches!(
         ch,
         '\u{00A0}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}'

@@ -130,6 +130,7 @@ pub mod style;
 mod tests;
 
 pub use linebender_resource_handle::FontData;
+pub use analysis::cluster::has_space_fallback;
 pub use util::BoundingBox;
 
 pub use builder::{RangedBuilder, StyleRunBuilder, TreeBuilder};
