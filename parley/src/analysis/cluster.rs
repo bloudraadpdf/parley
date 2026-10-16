@@ -365,7 +365,7 @@ impl<'a> Mapper<'a> {
     }
 }
 
-/// The nominal glyph of `ch`; a space separator the font lacks takes the space glyph, as HarfBuzz shapes it.
+/// The nominal glyph of `ch`; a space separator the font lacks takes the space glyph, as `HarfBuzz` shapes it.
 fn nominal_glyph(f: &impl Fn(char) -> u16, ch: char) -> u16 {
     match f(ch) {
         0 if has_space_fallback(ch) => f(' '),
@@ -373,7 +373,7 @@ fn nominal_glyph(f: &impl Fn(char) -> u16, ch: char) -> u16 {
     }
 }
 
-/// The space separators HarfBuzz renders with the space glyph of a font that lacks them (`space_fallback`).
+/// The space separators `HarfBuzz` renders with the space glyph of a font that lacks them (`space_fallback`).
 const fn has_space_fallback(ch: char) -> bool {
     matches!(
         ch,
@@ -436,7 +436,7 @@ mod tests {
         );
     }
 
-    /// HarfBuzz shapes a space separator that a font lacks with the space glyph of the font, as WeasyPrint and
+    /// `HarfBuzz` shapes a space separator that a font lacks with the space glyph of the font, as `WeasyPrint` and
     /// Chrome do (weasyprint-samples poster: U+202F in "25 juin" with Archivo Black).
     #[test]
     fn a_font_with_a_space_covers_the_space_separators_it_lacks() {
