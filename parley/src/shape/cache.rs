@@ -151,14 +151,19 @@ impl<'a> Equivalent<ShapePlanId> for ShapePlanKey<'a> {
             && self.direction == key.direction
             && self.script == key.script
             && self.language == key.language
-            && self.features.len() == key.features.len()
             && self.variations == key.variations.as_deref()
-            && self
-                .features
-                .iter()
-                .zip(key.features.iter())
-                .all(|(a, b)| a == b)
+            && plan_features_equivalent(self.features, &key.features)
     }
+}
+
+/// Features that give the same shape plan: harfrust compiles a plan from the tag, value and globality of each
+/// feature, and applies the range of a ranged feature as a mask when it shapes (`hb_ot_shape_plan_key_t`).
+fn plan_features_equivalent(a: &[harfrust::Feature], b: &[harfrust::Feature]) -> bool {
+    let global = |feature: &harfrust::Feature| feature.start == 0 && feature.end == u32::MAX;
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(a, b)| a.tag == b.tag && a.value == b.value && global(a) == global(b))
 }
 
 impl<'a> From<ShapePlanKey<'a>> for ShapePlanId {
@@ -174,5 +179,25 @@ impl<'a> From<ShapePlanKey<'a>> for ShapePlanId {
             features: key.features.to_vec().into(),
             variations: key.variations.map(|v| v.to_vec().into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plan_features_equivalent;
+
+    #[test]
+    fn ranged_features_with_the_same_tag_and_value_share_a_plan() {
+        let feature = |start, end| harfrust::Feature {
+            tag: harfrust::Tag::new(b"liga"),
+            value: 0,
+            start,
+            end,
+        };
+        assert!(plan_features_equivalent(&[feature(0, 3)], &[feature(5, 9)]));
+        assert!(!plan_features_equivalent(
+            &[feature(0, 3)],
+            &[feature(0, u32::MAX)]
+        ));
     }
 }
