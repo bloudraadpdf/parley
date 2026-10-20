@@ -3,6 +3,7 @@
 
 mod test_analysis;
 mod test_bidi_paragraph_boundaries;
+mod test_build_buffers;
 pub(crate) mod test_bidi_topology;
 mod test_builders;
 mod test_discretionary_breaks;

@@ -56,6 +56,12 @@ impl<B: Brush> RangedStyleBuilder<B> {
         self.root_style.apply(property);
     }
 
+    /// Drops the properties and the scratch styles of the last build.
+    pub(crate) fn release_buffers(&mut self) {
+        self.properties = Vec::new();
+        self.scratch_styles = Vec::new();
+    }
+
     /// Override a property for the specified range of text.
     ///
     /// # Panics

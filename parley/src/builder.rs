@@ -390,6 +390,7 @@ fn build_into_layout<B: Brush>(
     layout
         .data
         .finish(lcx.analysis_data_sources.grapheme_boundaries(text));
+    lcx.release_build_buffers();
 }
 
 fn resolve_range(range: impl RangeBounds<usize>, len: usize) -> Range<usize> {

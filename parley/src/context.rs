@@ -278,6 +278,14 @@ impl<B: Brush> LayoutContext<B> {
         }
     }
 
+    /// Drops the buffers that only a build reads, so a long text does not keep them after its build.
+    pub(crate) fn release_build_buffers(&mut self) {
+        self.ranged_style_builder.release_buffers();
+        self.style_table = Vec::new();
+        self.style_runs = Vec::new();
+        self.info = Vec::new();
+    }
+
     fn begin(&mut self) {
         self.rcx.clear();
         self.style_table.clear();
