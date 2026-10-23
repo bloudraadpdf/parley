@@ -498,7 +498,7 @@ fn shape_item<'a, B: Brush>(
             .or_else(|| {
                 item.locale
                     .as_ref()
-                    .and_then(|lang| lang.language().parse::<harfrust::Language>().ok())
+                    .and_then(|lang| lang.as_str().parse::<harfrust::Language>().ok())
             });
         scx.features.clear();
         for feature in rcx.features(item.features).unwrap_or(&[]) {

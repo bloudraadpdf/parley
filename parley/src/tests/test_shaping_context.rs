@@ -7,6 +7,34 @@ use super::{test_builders::create_font_context, utils::ColorBrush};
 use crate::{FontFamily, InlineBox, LayoutContext, StyleProperty};
 use alloc::{sync::Arc, vec::Vec};
 
+#[test]
+#[ignore = "requires NOTO_CJK_FONT pointing to the original NotoSansCJK-Regular.ttc"]
+fn shaping_preserves_language_script_and_region() {
+    let bytes = std::fs::read(std::env::var("NOTO_CJK_FONT").expect("Noto CJK source path"))
+        .expect("Noto CJK source font");
+    let mut fonts = create_font_context();
+    fonts
+        .collection
+        .register_fonts(fontique::Blob::new(Arc::new(bytes)), None);
+    let mut context = LayoutContext::<ColorBrush>::new();
+    for (language, expected) in [
+        ("cmn-Hant", [15404, 27854, 12017]),
+        ("cmn", [15403, 27853, 12016]),
+        ("zh-TW", [15404, 27854, 12017]),
+        ("zh-CN", [15403, 27853, 12016]),
+    ] {
+        let text = "孫盧吳";
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+            "Noto Sans CJK TC",
+        )));
+        builder.push_default(StyleProperty::Locale(Some(language.parse().unwrap())));
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        assert_eq!(logical_glyph_ids(&layout), expected, "{language}");
+    }
+}
+
 fn naskh_glyph_ids(text: &str, enlarged: Option<core::ops::Range<usize>>) -> Vec<u32> {
     naskh_glyph_ids_with(text, enlarged, None, &[])
 }
