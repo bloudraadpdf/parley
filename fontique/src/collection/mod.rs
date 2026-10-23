@@ -132,6 +132,36 @@ impl Collection {
         self.inner.family_by_name(name)
     }
 
+    /// Selects a system fallback for actual text, using its base face and language.
+    /// `base` contains the font bytes and collection face index.
+    /// Native text fallback is currently provided by CoreText.
+    /// Returns `None` when system fonts or native text fallback are unavailable.
+    pub fn system_fallback_for_text(
+        &mut self,
+        base: Option<(&[u8], u32)>,
+        language: Option<&str>,
+        text: &str,
+    ) -> Option<FamilyId> {
+        if text.is_empty() {
+            return None;
+        }
+        #[cfg(all(feature = "system", target_vendor = "apple"))]
+        {
+            self.inner
+                .system
+                .as_ref()?
+                .fonts
+                .lock()
+                .expect("system font collection poisoned")
+                .fallback_for_text(base, language, text)
+        }
+        #[cfg(not(all(feature = "system", target_vendor = "apple")))]
+        {
+            let _ = (base, language, text);
+            None
+        }
+    }
+
     /// Returns an iterator over the family identifiers for the given
     /// generic family.
     pub fn generic_families(
@@ -867,4 +897,79 @@ fn make_shared_matches_local() {
     let names_after: Vec<String> = collection.family_names().map(String::from).collect();
 
     assert_eq!(names_before.len(), names_after.len());
+}
+
+#[cfg(test)]
+mod system_text_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn disabled_system_fonts_do_not_select_a_native_fallback() {
+        let mut collection = Collection::new(CollectionOptions {
+            shared: false,
+            system_fonts: false,
+        });
+        assert!(
+            collection
+                .system_fallback_for_text(None, Some("ta"), "அ")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn empty_text_does_not_request_a_fallback() {
+        let mut collection = Collection::new(CollectionOptions::default());
+        assert!(
+            collection
+                .system_fallback_for_text(None, None, "")
+                .is_none()
+        );
+    }
+
+    #[cfg(all(feature = "system", target_vendor = "apple"))]
+    #[test]
+    fn native_fallback_covers_the_actual_text() {
+        for (language, text) in [(Some("ta"), "அ"), (Some("ja"), "藤"), (None, "😀")] {
+            let mut collection = Collection::new(CollectionOptions {
+                shared: false,
+                system_fonts: true,
+            });
+            let family = collection
+                .system_fallback_for_text(
+                    Some((parley_dev::fonts::ROBOTO_REGULAR, 0)),
+                    language,
+                    text,
+                )
+                .expect("CoreText must provide the installed script or emoji fallback");
+            let mut cache = SourceCache::default();
+            let mut query = collection.query(&mut cache);
+            query.set_families([family]);
+            let mut covered = false;
+            query.matches_with(|font| {
+                covered = font
+                    .charmap()
+                    .is_some_and(|map| text.chars().all(|ch| map.map(ch).is_some()));
+                QueryStatus::Stop
+            });
+            assert!(covered, "{language:?}: {text}");
+        }
+    }
+
+    #[cfg(all(feature = "system", target_vendor = "apple"))]
+    #[test]
+    fn invalid_base_face_does_not_select_a_different_face() {
+        let mut collection = Collection::new(CollectionOptions {
+            shared: false,
+            system_fonts: true,
+        });
+        assert!(
+            collection
+                .system_fallback_for_text(
+                    Some((parley_dev::fonts::ROBOTO_REGULAR, 1)),
+                    Some("ta"),
+                    "அ"
+                )
+                .is_none()
+        );
+    }
 }

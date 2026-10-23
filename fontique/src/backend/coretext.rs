@@ -12,10 +12,11 @@ use alloc::vec::Vec;
 use core::ptr::{null, null_mut};
 use hashbrown::{HashMap, HashSet};
 use objc2_core_foundation::{
-    CFArray, CFDictionary, CFRange, CFRetained, CFString, CFType, CFURL, CFURLPathStyle,
+    CFArray, CFData, CFDictionary, CFRange, CFRetained, CFString, CFType, CFURL, CFURLPathStyle,
 };
 use objc2_core_text::{
-    CTFont, CTFontCollection, CTFontDescriptor, CTFontUIFontType, kCTFontURLAttribute,
+    CTFont, CTFontCollection, CTFontDescriptor, CTFontManagerCreateFontDescriptorsFromData,
+    CTFontUIFontType, kCTFontURLAttribute,
 };
 use objc2_foundation::{
     NSSearchPathDirectory, NSSearchPathDomainMask, NSSearchPathForDirectoriesInDomains,
@@ -67,7 +68,16 @@ impl SystemFonts {
     pub(crate) fn fallback(&mut self, key: impl Into<FallbackKey>) -> Option<FamilyId> {
         let key = key.into();
         let sample = key.script().sample()?;
-        let font = create_fallback_font_for_text(sample, key.locale_str(), false)?;
+        self.fallback_for_text(None, key.locale_str(), sample)
+    }
+
+    pub(crate) fn fallback_for_text(
+        &mut self,
+        base: Option<(&[u8], u32)>,
+        language: Option<&str>,
+        text: &str,
+    ) -> Option<FamilyId> {
+        let font = create_fallback_font_for_text(text, language, false, base)?;
         let family_name = unsafe { font.family_name() };
         self.name_map.get(&family_name.to_string()).map(|n| n.id())
     }
@@ -174,6 +184,7 @@ fn create_fallback_font_for_text(
     text: &str,
     locale: Option<&str>,
     prefer_ui_font: bool,
+    base: Option<(&[u8], u32)>,
 ) -> Option<CFRetained<CTFont>> {
     let text = CFString::from_str(text);
     let text_range = CFRange {
@@ -181,7 +192,17 @@ fn create_fallback_font_for_text(
         length: text.length(),
     };
     let locale = locale.map(CFString::from_str);
-    let base_font = create_base_font(prefer_ui_font);
+    let base_font = if let Some((bytes, index)) = base {
+        let data = CFData::from_bytes(bytes);
+        // CoreText returns only font descriptors in this array.
+        let descriptors: CFRetained<CFArray<CTFontDescriptor>> = unsafe {
+            CFRetained::cast_unchecked(CTFontManagerCreateFontDescriptorsFromData(&data))
+        };
+        let descriptor = descriptors.get(index as usize)?;
+        unsafe { CTFont::with_font_descriptor(&descriptor, 0.0, null()) }
+    } else {
+        create_base_font(prefer_ui_font)
+    };
     let font = unsafe {
         if let Some(locale) = locale {
             CTFont::for_string_with_language(&base_font, &text, text_range, Some(&locale))
@@ -190,4 +211,49 @@ fn create_fallback_font_for_text(
         }
     };
     Some(font)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Collection, CollectionOptions, QueryStatus, SourceCache};
+    use alloc::string::String;
+    use read_fonts::types::NameId;
+
+    #[test]
+    fn base_collection_face_index_preserves_the_source_face() {
+        let mut collection = Collection::new(CollectionOptions::default());
+        let mut cache = SourceCache::default();
+        let mut query = collection.query(&mut cache);
+        query.set_families([GenericFamily::Serif]);
+        let mut data = None;
+        query.matches_with(|font| {
+            data = Some(font.blob.clone());
+            QueryStatus::Stop
+        });
+        let data = data.expect("the installed serif collection");
+        let mut faces = 0;
+        scan::scan_memory(data.as_ref(), |source| {
+            let expected: String = source
+                .english_or_first_name(NameId::POSTSCRIPT_NAME)
+                .expect("the source PostScript name")
+                .chars()
+                .collect();
+            let font = create_fallback_font_for_text(
+                "A",
+                None,
+                false,
+                Some((data.as_ref(), source.index)),
+            )
+            .expect("CoreText must select the requested source face");
+            assert_eq!(
+                unsafe { font.post_script_name() }.to_string(),
+                expected,
+                "face {}",
+                source.index
+            );
+            faces += 1;
+        });
+        assert!(faces > 1, "the native fixture must exercise a collection");
+    }
 }
