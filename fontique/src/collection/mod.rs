@@ -132,8 +132,9 @@ impl Collection {
         self.inner.family_by_name(name)
     }
 
-    /// Selects a system fallback for actual text, using its base face and language.
+    /// Selects the exact system fallback face for actual text, using its base face and language.
     /// `base` contains the font bytes and collection face index.
+    /// `variations` contains the base instance's OpenType tags and user-space values.
     /// Native text fallback is currently provided by CoreText.
     /// Returns `None` when system fonts or native text fallback are unavailable.
     pub fn system_fallback_for_text(
@@ -141,7 +142,8 @@ impl Collection {
         base: Option<(&[u8], u32)>,
         language: Option<&str>,
         text: &str,
-    ) -> Option<FamilyId> {
+        variations: &[([u8; 4], f32)],
+    ) -> Option<FontInfo> {
         if text.is_empty() {
             return None;
         }
@@ -153,11 +155,11 @@ impl Collection {
                 .fonts
                 .lock()
                 .expect("system font collection poisoned")
-                .fallback_for_text(base, language, text)
+                .fallback_font_for_text(base, language, text, variations)
         }
         #[cfg(not(all(feature = "system", target_vendor = "apple")))]
         {
-            let _ = (base, language, text);
+            let _ = (base, language, text, variations);
             None
         }
     }
@@ -911,7 +913,7 @@ mod system_text_fallback_tests {
         });
         assert!(
             collection
-                .system_fallback_for_text(None, Some("ta"), "அ")
+                .system_fallback_for_text(None, Some("ta"), "அ", &[])
                 .is_none()
         );
     }
@@ -921,7 +923,7 @@ mod system_text_fallback_tests {
         let mut collection = Collection::new(CollectionOptions::default());
         assert!(
             collection
-                .system_fallback_for_text(None, None, "")
+                .system_fallback_for_text(None, None, "", &[])
                 .is_none()
         );
     }
@@ -934,23 +936,19 @@ mod system_text_fallback_tests {
                 shared: false,
                 system_fonts: true,
             });
-            let family = collection
+            let font = collection
                 .system_fallback_for_text(
                     Some((parley_dev::fonts::ROBOTO_REGULAR, 0)),
                     language,
                     text,
+                    &[],
                 )
                 .expect("CoreText must provide the installed script or emoji fallback");
-            let mut cache = SourceCache::default();
-            let mut query = collection.query(&mut cache);
-            query.set_families([family]);
-            let mut covered = false;
-            query.matches_with(|font| {
-                covered = font
-                    .charmap()
-                    .is_some_and(|map| text.chars().all(|ch| map.map(ch).is_some()));
-                QueryStatus::Stop
-            });
+            let bytes = font.load(None).expect("native source bytes");
+            let covered = font
+                .charmap_index()
+                .charmap(bytes.as_ref())
+                .is_some_and(|map| text.chars().all(|ch| map.map(ch).is_some()));
             assert!(covered, "{language:?}: {text}");
         }
     }
@@ -967,7 +965,8 @@ mod system_text_fallback_tests {
                 .system_fallback_for_text(
                     Some((parley_dev::fonts::ROBOTO_REGULAR, 1)),
                     Some("ta"),
-                    "அ"
+                    "அ",
+                    &[],
                 )
                 .is_none()
         );

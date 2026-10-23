@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use super::{
-    FallbackKey, FamilyId, FamilyInfo, FamilyNameMap, GenericFamily, GenericFamilyMap, ScriptExt,
-    scan,
+    FallbackKey, FamilyId, FamilyInfo, FamilyNameMap, FontInfo, GenericFamily, GenericFamilyMap,
+    ScriptExt, scan,
 };
+use crate::source::SourcePathMap;
 use alloc::format;
 use alloc::string::ToString;
 use alloc::sync::Arc;
@@ -12,7 +13,7 @@ use alloc::vec::Vec;
 use core::ptr::{null, null_mut};
 use hashbrown::{HashMap, HashSet};
 use objc2_core_foundation::{
-    CFArray, CFData, CFDictionary, CFRange, CFRetained, CFString, CFType, CFURL, CFURLPathStyle,
+    CFArray, CFData, CFDictionary, CFRange, CFRetained, CFString, CFURL, CFURLPathStyle,
 };
 use objc2_core_text::{
     CTFont, CTFontCollection, CTFontDescriptor, CTFontManagerCreateFontDescriptorsFromData,
@@ -21,6 +22,7 @@ use objc2_core_text::{
 use objc2_foundation::{
     NSSearchPathDirectory, NSSearchPathDomainMask, NSSearchPathForDirectoriesInDomains,
 };
+use read_fonts::types::NameId;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_GENERIC_FAMILIES: &[(GenericFamily, &[&str])] = &[
@@ -38,6 +40,7 @@ pub(crate) struct SystemFonts {
     pub(crate) name_map: Arc<FamilyNameMap>,
     pub(crate) generic_families: Arc<GenericFamilyMap>,
     family_map: HashMap<FamilyId, FamilyInfo>,
+    data_paths: SourcePathMap,
 }
 
 impl SystemFonts {
@@ -58,6 +61,7 @@ impl SystemFonts {
             name_map: Arc::new(name_map),
             generic_families: Arc::new(generic_families),
             family_map: scanned.families,
+            data_paths: scanned.data_paths,
         }
     }
 
@@ -68,18 +72,33 @@ impl SystemFonts {
     pub(crate) fn fallback(&mut self, key: impl Into<FallbackKey>) -> Option<FamilyId> {
         let key = key.into();
         let sample = key.script().sample()?;
-        self.fallback_for_text(None, key.locale_str(), sample)
+        let font = create_fallback_font_for_text(sample, key.locale_str(), false, None, &[])?;
+        let family_name = unsafe { font.family_name() };
+        self.name_map.get(&family_name.to_string()).map(|n| n.id())
     }
 
-    pub(crate) fn fallback_for_text(
+    pub(crate) fn fallback_font_for_text(
         &mut self,
         base: Option<(&[u8], u32)>,
         language: Option<&str>,
         text: &str,
-    ) -> Option<FamilyId> {
-        let font = create_fallback_font_for_text(text, language, false, base)?;
-        let family_name = unsafe { font.family_name() };
-        self.name_map.get(&family_name.to_string()).map(|n| n.id())
+        variations: &[([u8; 4], f32)],
+    ) -> Option<FontInfo> {
+        let font = create_fallback_font_for_text(text, language, false, base, variations)?;
+        let descriptor = unsafe { font.font_descriptor() };
+        let path = font_file_path(&descriptor)?;
+        let postscript_name = unsafe { font.post_script_name() }.to_string();
+        let source = self.data_paths.get_or_insert(&path);
+        let mut selected = None;
+        scan::scan_paths([path], 0, |face| {
+            if face
+                .english_or_first_name(NameId::POSTSCRIPT_NAME)
+                .is_some_and(|name| name.chars().eq(postscript_name.chars()))
+            {
+                selected = FontInfo::from_font_ref(&face.font, source.clone(), face.index);
+            }
+        });
+        selected
     }
 }
 
@@ -99,25 +118,9 @@ fn scan_system_fonts() -> Option<scan::ScannedCollection> {
             continue;
         };
 
-        let Some(url_cf): Option<CFRetained<CFType>> =
-            (unsafe { descriptor.attribute(kCTFontURLAttribute) })
-        else {
+        let Some(path) = font_file_path(&descriptor) else {
             continue;
         };
-
-        // The attribute is typed as CFType; attempt to downcast to CFURL.
-        let Ok(url_cf): Result<CFRetained<CFURL>, _> = url_cf.downcast::<CFURL>() else {
-            continue;
-        };
-
-        // Convert the file URL into a POSIX path.
-        let Some(path_cf): Option<CFRetained<CFString>> =
-            url_cf.file_system_path(CFURLPathStyle::CFURLPOSIXPathStyle)
-        else {
-            continue;
-        };
-
-        let path = PathBuf::from(path_cf.to_string());
         if path.exists() {
             paths.insert(path);
         }
@@ -132,6 +135,16 @@ fn scan_system_fonts() -> Option<scan::ScannedCollection> {
     }
 
     Some(scan::ScannedCollection::from_paths(paths.iter(), 0))
+}
+
+fn font_file_path(descriptor: &CTFontDescriptor) -> Option<PathBuf> {
+    let url = unsafe { descriptor.attribute(kCTFontURLAttribute) }?
+        .downcast::<CFURL>()
+        .ok()?;
+    Some(PathBuf::from(
+        url.file_system_path(CFURLPathStyle::CFURLPOSIXPathStyle)?
+            .to_string(),
+    ))
 }
 
 fn library_font_files() -> Vec<PathBuf> {
@@ -185,6 +198,7 @@ fn create_fallback_font_for_text(
     locale: Option<&str>,
     prefer_ui_font: bool,
     base: Option<(&[u8], u32)>,
+    variations: &[([u8; 4], f32)],
 ) -> Option<CFRetained<CTFont>> {
     let text = CFString::from_str(text);
     let text_range = CFRange {
@@ -198,7 +212,15 @@ fn create_fallback_font_for_text(
         let descriptors: CFRetained<CFArray<CTFontDescriptor>> = unsafe {
             CFRetained::cast_unchecked(CTFontManagerCreateFontDescriptorsFromData(&data))
         };
-        let descriptor = descriptors.get(index as usize)?;
+        let mut descriptor = descriptors.get(index as usize)?;
+        for (tag, value) in variations {
+            descriptor = unsafe {
+                descriptor.copy_with_variation(
+                    &objc2_core_foundation::CFNumber::new_i32(i32::from_be_bytes(*tag)),
+                    f64::from(*value),
+                )
+            };
+        }
         unsafe { CTFont::with_font_descriptor(&descriptor, 0.0, null()) }
     } else {
         create_base_font(prefer_ui_font)
@@ -219,6 +241,118 @@ mod tests {
     use crate::{Collection, CollectionOptions, QueryStatus, SourceCache};
     use alloc::string::String;
     use read_fonts::types::NameId;
+
+    #[test]
+    fn text_fallback_preserves_a_variable_base_instance() {
+        let mut collection = Collection::new(CollectionOptions::default());
+        let mut cache = SourceCache::default();
+        let base = {
+            let mut query = collection.query(&mut cache);
+            query.set_families([GenericFamily::SystemUi]);
+            query.set_attributes(
+                crate::Attributes::new(
+                    crate::FontWidth::NORMAL,
+                    crate::FontStyle::Normal,
+                    crate::FontWeight::BOLD,
+                ),
+                crate::FontStyleSynthesis::Allowed,
+            );
+            let mut selected = None;
+            query.matches_with(|font| {
+                selected = Some(font.clone());
+                QueryStatus::Stop
+            });
+            selected.expect("the installed variable system face")
+        };
+        assert!(!base.synthesis.variation_settings().is_empty());
+        let descriptors = unsafe {
+            CTFontManagerCreateFontDescriptorsFromData(&CFData::from_bytes(base.blob.as_ref()))
+        };
+        let descriptors: CFRetained<CFArray<CTFontDescriptor>> =
+            unsafe { CFRetained::cast_unchecked(descriptors) };
+        let mut descriptor = descriptors.get(base.index as usize).expect("base face");
+        for (tag, value) in base.synthesis.variation_settings() {
+            descriptor = unsafe {
+                descriptor.copy_with_variation(
+                    &objc2_core_foundation::CFNumber::new_i32(i32::from_be_bytes(
+                        tag.to_be_bytes(),
+                    )),
+                    f64::from(*value),
+                )
+            };
+        }
+        let native_base = unsafe { CTFont::with_font_descriptor(&descriptor, 0.0, null()) };
+        let text = CFString::from_str("⑴");
+        let native = unsafe {
+            CTFont::for_string_with_language(
+                &native_base,
+                &text,
+                CFRange {
+                    location: 0,
+                    length: text.length(),
+                },
+                Some(&CFString::from_str("en")),
+            )
+        };
+        let variations: Vec<_> = base
+            .synthesis
+            .variation_settings()
+            .iter()
+            .map(|(tag, value)| (tag.to_be_bytes(), *value))
+            .collect();
+        let actual = create_fallback_font_for_text(
+            "⑴",
+            Some("en"),
+            false,
+            Some((base.blob.as_ref(), base.index)),
+            &variations,
+        )
+        .expect("fallback from variable source");
+        assert_eq!(
+            unsafe { actual.post_script_name() }.to_string(),
+            unsafe { native.post_script_name() }.to_string()
+        );
+    }
+
+    #[test]
+    fn text_fallback_preserves_the_native_face() {
+        let mut collection = Collection::new(CollectionOptions::default());
+        let mut cache = SourceCache::default();
+        let base = {
+            let mut query = collection.query(&mut cache);
+            query.set_families(["Helvetica Neue"]);
+            let mut selected = None;
+            query.matches_with(|font| {
+                selected = Some(font.clone());
+                QueryStatus::Stop
+            });
+            selected.expect("the installed base face")
+        };
+        let native = create_fallback_font_for_text(
+            "⑴",
+            Some("en"),
+            false,
+            Some((base.blob.as_ref(), base.index)),
+            &[],
+        )
+        .expect("native fallback");
+        let expected = unsafe { native.post_script_name() }.to_string();
+        let selected = collection
+            .system_fallback_for_text(Some((base.blob.as_ref(), base.index)), Some("en"), "⑴", &[])
+            .expect("native source face");
+        let data = selected
+            .load(Some(&mut cache))
+            .expect("selected source bytes");
+        let mut actual = None;
+        scan::scan_memory(data.as_ref(), |source| {
+            if source.index == selected.index() {
+                actual = source
+                    .english_or_first_name(NameId::POSTSCRIPT_NAME)
+                    .map(|name| name.chars().collect::<String>());
+            }
+        });
+        assert_eq!(actual.as_deref(), Some(expected.as_str()));
+    }
 
     #[test]
     fn base_collection_face_index_preserves_the_source_face() {
@@ -244,6 +378,7 @@ mod tests {
                 None,
                 false,
                 Some((data.as_ref(), source.index)),
+                &[],
             )
             .expect("CoreText must select the requested source face");
             assert_eq!(
