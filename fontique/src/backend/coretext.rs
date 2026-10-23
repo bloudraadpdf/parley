@@ -238,7 +238,7 @@ fn create_fallback_font_for_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Collection, CollectionOptions, QueryStatus, SourceCache};
+    use crate::{Collection, CollectionOptions, FontInfoOverride, QueryStatus, SourceCache};
     use alloc::string::String;
     use read_fonts::types::NameId;
 
@@ -387,6 +387,25 @@ mod tests {
                 "face {}",
                 source.index
             );
+            for shared in [false, true] {
+                let mut target = Collection::new(CollectionOptions {
+                    shared,
+                    system_fonts: false,
+                });
+                target.register_font(
+                    data.clone(),
+                    source.index,
+                    Some(FontInfoOverride {
+                        family_name: Some("SelectedFace"),
+                        ..Default::default()
+                    }),
+                );
+                let family = target
+                    .family_by_name("SelectedFace")
+                    .expect("selected face family");
+                assert_eq!(family.fonts().len(), 1);
+                assert_eq!(family.fonts()[0].index(), source.index);
+            }
             faces += 1;
         });
         assert!(faces > 1, "the native fixture must exercise a collection");

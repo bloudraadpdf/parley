@@ -236,7 +236,18 @@ impl Collection {
         data: Blob<u8>,
         info_override: Option<FontInfoOverride<'_>>,
     ) -> Vec<(FamilyId, Vec<FontInfo>)> {
-        self.inner.register_fonts(data, info_override)
+        self.inner.register_fonts(data, None, info_override)
+    }
+
+    /// Registers only the specified face, preserving its index in the original data.
+    /// Returns an empty list if that face does not exist.
+    pub fn register_font(
+        &mut self,
+        data: Blob<u8>,
+        index: u32,
+        info_override: Option<FontInfoOverride<'_>>,
+    ) -> Vec<(FamilyId, Vec<FontInfo>)> {
+        self.inner.register_fonts(data, Some(index), info_override)
     }
 
     /// Unregisters the font with the given attributes from the given family.
@@ -534,6 +545,7 @@ impl Inner {
     pub fn register_fonts(
         &mut self,
         data: Blob<u8>,
+        index: Option<u32>,
         info_override: Option<FontInfoOverride<'_>>,
     ) -> Vec<(FamilyId, Vec<FontInfo>)> {
         #[cfg(feature = "std")]
@@ -542,14 +554,14 @@ impl Inner {
                 .data
                 .lock()
                 .unwrap()
-                .register_fonts(data, info_override);
+                .register_fonts(data, index, info_override);
             shared.bump_version();
             result
         } else {
-            self.data.register_fonts(data, info_override)
+            self.data.register_fonts(data, index, info_override)
         }
         #[cfg(not(feature = "std"))]
-        self.data.register_fonts(data, info_override)
+        self.data.register_fonts(data, index, info_override)
     }
 
     /// Unregisters the font with the given attributes from the given family.
@@ -724,6 +736,7 @@ impl CommonData {
             self.register_font_impl(
                 font_data,
                 source,
+                Some(scanned_font.index),
                 None,
                 &mut scratch_family_name,
                 &mut families,
@@ -734,6 +747,7 @@ impl CommonData {
     fn register_fonts(
         &mut self,
         data: Blob<u8>,
+        index: Option<u32>,
         info_override: Option<FontInfoOverride<'_>>,
     ) -> Vec<(FamilyId, Vec<FontInfo>)> {
         let mut families: HashMap<FamilyId, (FamilyName, Vec<FontInfo>)> = HashMap::default();
@@ -747,6 +761,7 @@ impl CommonData {
         self.register_font_impl(
             data.as_ref(),
             source,
+            index,
             info_override,
             &mut scratch_family_name,
             &mut families,
@@ -762,11 +777,15 @@ impl CommonData {
         &mut self,
         font_data: &[u8],
         source: SourceInfo,
+        index: Option<u32>,
         info_override: Option<FontInfoOverride<'_>>,
         scratch_family_name: &mut String,
         families: &mut HashMap<FamilyId, (FamilyName, Vec<FontInfo>)>,
     ) {
         super::scan::scan_memory(font_data, |scanned_font| {
+            if index.is_some_and(|index| index != scanned_font.index) {
+                return;
+            }
             scratch_family_name.clear();
 
             let family_name =
@@ -904,6 +923,23 @@ fn make_shared_matches_local() {
 #[cfg(test)]
 mod system_text_fallback_tests {
     use super::*;
+
+    #[test]
+    fn face_registration_rejects_an_invalid_index_without_registering_other_faces() {
+        for shared in [false, true] {
+            let mut collection = Collection::new(CollectionOptions {
+                shared,
+                system_fonts: false,
+            });
+            let data = Blob::new(Arc::new(parley_dev::fonts::ROBOTO_REGULAR.to_vec()));
+            assert!(collection.register_font(data.clone(), 1, None).is_empty());
+            assert_eq!(collection.family_names().count(), 0);
+            let registered = collection.register_font(data, 0, None);
+            assert_eq!(registered.len(), 1);
+            assert_eq!(registered[0].1.len(), 1);
+            assert_eq!(registered[0].1[0].index(), 0);
+        }
+    }
 
     #[test]
     fn disabled_system_fonts_do_not_select_a_native_fallback() {
