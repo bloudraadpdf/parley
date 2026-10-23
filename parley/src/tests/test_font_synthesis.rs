@@ -12,6 +12,68 @@ use crate::{
 
 const TEST_FAMILY: &str = "Parley style synthesis test";
 
+#[test]
+fn selected_fallback_weight_policy_preserves_other_axes_and_cache_identity() {
+    let blob = Blob::new(Arc::new(parley_dev::fonts::ROBOTO_FLEX.to_vec()));
+    let mut collection = Collection::new(CollectionOptions {
+        shared: false,
+        system_fonts: false,
+    });
+    collection.register_fonts(
+        blob.clone(),
+        Some(FontInfoOverride {
+            family_name: Some(TEST_FAMILY),
+            ..Default::default()
+        }),
+    );
+    let family = collection.family_id(TEST_FAMILY).expect("registered family");
+    collection.set_fallbacks(
+        fontique::FallbackKey::new(fontique::Script::from_bytes(*b"Latn"), None),
+        core::iter::once(family),
+    );
+    let mut fcx = FontContext {
+        collection,
+        source_cache: SourceCache::default(),
+    };
+    let mut lcx = LayoutContext::<ColorBrush>::new();
+    let mut shape = |lcx: &mut LayoutContext<ColorBrush>, settings: &str| {
+        let text = "office Hamburgefonts";
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("absent authored family")));
+        builder.push_default(StyleProperty::FontSize(20.0));
+        builder.push_default(StyleProperty::FontWeight(fontique::FontWeight::new(900.0)));
+        builder.push_default(StyleProperty::FontVariations(settings.into()));
+        builder.push_inline_owner_shaping(super::test_physical_shaping::owner(
+            0..text.len(),
+            crate::layout::PhysicalLineEdge::Left,
+            crate::layout::ShapingEdgePlacement::FirstLine,
+        ));
+        let mut layout = builder.build(text);
+        let run = layout.runs().next().expect("fallback run");
+        assert_eq!(run.font().data.id(), blob.id());
+        let initial = (run.normalized_coords().to_vec(), run.advance());
+        let policy = lcx.use_default_font_weight;
+        lcx.set_use_default_font_weight(!policy);
+        let mut replay = crate::shape::physical::PhysicalShaper::new(&layout.data);
+        let shape = replay.shape_line(&layout.data, &[2], &[], 0, None, false);
+        assert!(replay.work().shaped_source > 0);
+        replay.install(&mut layout.data, &shape);
+        layout.data.inline_owner_shaping.clear();
+        layout.break_all_lines(None);
+        let glyphs = super::utils::visual_glyphs(&layout);
+        lcx.set_use_default_font_weight(policy);
+        (initial, glyphs)
+    };
+    let standard = shape(&mut lcx, "'wght' 900, 'wdth' 75");
+    let default = shape(&mut lcx, "'wght' 400, 'wdth' 75");
+    assert_ne!(standard, default);
+    lcx.set_use_default_font_weight(true);
+    assert_eq!(shape(&mut lcx, "'wght' 900, 'wdth' 75"), default);
+    assert_eq!(shape(&mut lcx.clone(), "'wght' 900, 'wdth' 75"), default);
+    lcx.set_use_default_font_weight(false);
+    assert_eq!(shape(&mut lcx, "'wght' 900, 'wdth' 75"), standard);
+}
+
 fn test_font_context_with_style(second_style: FontStyle) -> (FontContext, u64, u64) {
     let regular = Blob::new(Arc::new(parley_dev::fonts::ROBOTO_REGULAR.to_vec()));
     let italic = Blob::new(Arc::new(parley_dev::fonts::ARIMO_VARIABLE.to_vec()));

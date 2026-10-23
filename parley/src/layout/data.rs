@@ -1239,6 +1239,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) scale: f32,
     pub(crate) quantize: bool,
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
+    pub(crate) use_default_font_weight: bool,
     pub(crate) nominal_font_metric_line_breaks: bool,
     pub(crate) vertical_metric_grid: Option<VerticalMetricGrid>,
     pub(crate) normal_soft_wrap_selection: NormalSoftWrapSelection,
@@ -1332,6 +1333,7 @@ impl<B: Brush> Default for LayoutData<B> {
             scale: 1.,
             quantize: true,
             font_metric_advance_quantization: None,
+            use_default_font_weight: false,
             nominal_font_metric_line_breaks: false,
             vertical_metric_grid: None,
             normal_soft_wrap_selection: NormalSoftWrapSelection::default(),
@@ -1574,6 +1576,7 @@ impl<B: Brush> LayoutData<B> {
         self.scale = 1.;
         self.quantize = true;
         self.font_metric_advance_quantization = None;
+        self.use_default_font_weight = false;
         self.nominal_font_metric_line_breaks = false;
         self.vertical_metric_grid = None;
         self.normal_soft_wrap_selection = NormalSoftWrapSelection::default();

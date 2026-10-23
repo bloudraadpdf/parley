@@ -11,6 +11,7 @@ pub(super) fn source_scratch<B: Brush>(
     let mut scratch = crate::layout::data::LayoutData::default();
     scratch.styles.clone_from(&data.styles);
     scratch.font_metric_advance_quantization = data.font_metric_advance_quantization;
+    scratch.use_default_font_weight = data.use_default_font_weight;
     scratch.nominal_font_metric_line_breaks = data.nominal_font_metric_line_breaks;
     scratch
 }
@@ -140,6 +141,7 @@ impl DeferredSourceShape {
         let analysis = crate::analysis::AnalysisDataSources::new();
         let script = crate::convert::script_to_fontique(self.script, &analysis);
         let shaped = context.shape_segment(super::segment::SegmentShape {
+            use_default_font_weight: data.use_default_font_weight,
             font: data.fonts[run.font_index].clone(),
             synthesis: run.synthesis,
             variations: self.variations.as_deref(),

@@ -7,6 +7,7 @@ use super::{ShapeContext, cache, variations_iter};
 use crate::{FontData, FontVariation};
 
 pub(super) struct SegmentShape<'a> {
+    pub(super) use_default_font_weight: bool,
     pub(super) font: FontData,
     pub(super) synthesis: fontique::Synthesis,
     pub(super) variations: Option<&'a [FontVariation]>,
@@ -30,6 +31,24 @@ impl ShapeContext {
     pub(super) fn shape_segment(&mut self, input: SegmentShape<'_>) -> ShapedSegment {
         let font = harfrust::FontRef::from_index(input.font.data.as_ref(), input.font.index)
             .expect("selected shaping font");
+        let default_variations = input
+            .use_default_font_weight
+            .then(|| {
+                use skrifa::{MetadataProvider, raw::TableProvider};
+                let font = skrifa::FontRef::from_index(input.font.data.as_ref(), input.font.index).ok()?;
+                font.os2().ok()?;
+                let weight = font
+                    .axes()
+                    .iter()
+                    .find(|axis| axis.tag().into_bytes() == *b"wght")?
+                    .default_value();
+                let mut variations = input.variations.unwrap_or_default().to_vec();
+                variations.retain(|variation| variation.tag.to_bytes() != *b"wght");
+                variations.push(FontVariation::new(crate::setting::Tag::from_bytes(*b"wght"), weight));
+                Some(variations)
+            })
+            .flatten();
+        let variations = default_variations.as_deref().or(input.variations);
         let blob_id = input.font.data.id();
         let shaper_data = self
             .shape_data_cache
@@ -37,18 +56,8 @@ impl ShapeContext {
                 harfrust::ShaperData::new(&font)
             });
         let instance = self.shape_instance_cache.entry(
-            cache::ShapeInstanceKey::new(
-                blob_id,
-                input.font.index,
-                &input.synthesis,
-                input.variations,
-            ),
-            || {
-                harfrust::ShaperInstance::from_variations(
-                    &font,
-                    variations_iter(&input.synthesis, input.variations),
-                )
-            },
+            cache::ShapeInstanceKey::new(blob_id, input.font.index, &input.synthesis, variations),
+            || harfrust::ShaperInstance::from_variations(&font, variations_iter(&input.synthesis, variations)),
         );
         let shaper = shaper_data.shaper(&font).instance(Some(instance)).build();
         let plan = self.shape_plan_cache.entry(
@@ -60,7 +69,7 @@ impl ShapeContext {
                 input.script,
                 input.language.clone(),
                 input.features,
-                input.variations,
+                variations,
             ),
             || {
                 harfrust::ShapePlan::new(

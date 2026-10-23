@@ -301,6 +301,7 @@ fn build_into_layout<B: Brush>(
     layout.data.scale = scale;
     layout.data.quantize = quantize;
     layout.data.font_metric_advance_quantization = lcx.font_metric_advance_quantization;
+    layout.data.use_default_font_weight = lcx.use_default_font_weight;
     layout.data.nominal_font_metric_line_breaks = lcx.nominal_font_metric_line_breaks;
     layout.data.vertical_metric_grid = lcx.vertical_metric_grid;
     layout.data.base_level = lcx.bidi.base_level();

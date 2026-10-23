@@ -95,6 +95,7 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
 
     // Optional fixed grid used by consumers when serializing font advances.
     pub(crate) font_metric_advance_quantization: Option<FontMetricAdvanceQuantization>,
+    pub(crate) use_default_font_weight: bool,
     // Whether line fit uses nominal font metrics while glyph positioning and
     // emitted advances retain shaping adjustments such as kerning.
     pub(crate) nominal_font_metric_line_breaks: bool,
@@ -120,11 +121,18 @@ impl<B: Brush> LayoutContext<B> {
             analysis_data_sources: AnalysisDataSources::new(),
             scx: ShapeContext::default(),
             font_metric_advance_quantization: None,
+            use_default_font_weight: false,
             nominal_font_metric_line_breaks: false,
             vertical_metric_grid: None,
             #[cfg(test)]
             owner_box_reads: 0,
         }
+    }
+
+    /// Uses each selected font's default weight coordinate when it has both
+    /// an OS/2 table and a weight axis. Matching and other axes are unchanged.
+    pub fn set_use_default_font_weight(&mut self, enabled: bool) {
+        self.use_default_font_weight = enabled;
     }
 
     /// Projects the base font-metric component of shaped glyph advances onto
@@ -311,6 +319,7 @@ impl<B: Brush> Clone for LayoutContext<B> {
         // caller configuration must survive cloning.
         let mut cloned = Self::new();
         cloned.font_metric_advance_quantization = self.font_metric_advance_quantization;
+        cloned.use_default_font_weight = self.use_default_font_weight;
         cloned.nominal_font_metric_line_breaks = self.nominal_font_metric_line_breaks;
         cloned.vertical_metric_grid = self.vertical_metric_grid;
         cloned

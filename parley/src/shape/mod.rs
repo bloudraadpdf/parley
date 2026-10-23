@@ -536,6 +536,7 @@ fn shape_item<'a, B: Brush>(
             .unwrap_or(text.len());
         let features = mem::take(&mut scx.features);
         let shaped = scx.shape_segment(segment::SegmentShape {
+            use_default_font_weight: layout.data.use_default_font_weight,
             font: FontData::new(font.font.blob.clone(), font.font.index),
             synthesis: font.font.synthesis,
             variations: rcx.variations(item.variations),
