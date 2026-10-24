@@ -1205,7 +1205,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parlance",
  "parley_dev",
- "read-fonts 0.43.3 (git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39)",
+ "read-fonts 0.43.3",
  "roxmltree",
  "smallvec",
  "windows 0.62.2",
@@ -1501,14 +1501,13 @@ dependencies = [
 [[package]]
 name = "harfrust"
 version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "948d0741125ba89cd3e1c23e5642415b6ade7e1d29d67ba25fb925b533e989d6"
+source = "git+ssh://git@git.bloudraad.io/external/harfrust.git?rev=b46112bb470209aa2b912ad2903009f2ce1d34ff#b46112bb470209aa2b912ad2903009f2ce1d34ff"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
  "core_maths",
  "once_cell",
- "read-fonts 0.43.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "read-fonts 0.43.3",
  "smallvec",
 ]
 
@@ -3344,18 +3343,6 @@ dependencies = [
 [[package]]
 name = "read-fonts"
 version = "0.43.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "005c8acf251756c478b0bf402885bfd88a1476020c4c7e6060edc1aa68da38ea"
-dependencies = [
- "bytemuck",
- "core_maths",
- "font-types 0.12.5",
- "once_cell",
-]
-
-[[package]]
-name = "read-fonts"
-version = "0.43.3"
 source = "git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39#c4c9501abff873702bca4b8d04f867cc7742de39"
 dependencies = [
  "bytemuck",
@@ -3683,7 +3670,7 @@ source = "git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff
 dependencies = [
  "bytemuck",
  "core_maths",
- "read-fonts 0.43.3 (git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39)",
+ "read-fonts 0.43.3",
 ]
 
 [[package]]
