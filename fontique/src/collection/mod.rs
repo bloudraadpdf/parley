@@ -136,6 +136,7 @@ impl Collection {
     /// `base` contains the font bytes and collection face index.
     /// `variations` contains the base instance's OpenType tags and user-space values.
     /// Native text fallback is currently provided by CoreText.
+    /// Symbolic last-resort fonts are not treated as character coverage.
     /// Returns `None` when system fonts or native text fallback are unavailable.
     pub fn system_fallback_for_text(
         &mut self,

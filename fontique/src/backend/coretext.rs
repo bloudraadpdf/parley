@@ -22,7 +22,7 @@ use objc2_core_text::{
 use objc2_foundation::{
     NSSearchPathDirectory, NSSearchPathDomainMask, NSSearchPathForDirectoriesInDomains,
 };
-use read_fonts::types::NameId;
+use read_fonts::{TableProvider as _, tables::head::Flags, types::NameId};
 use std::path::{Path, PathBuf};
 
 const DEFAULT_GENERIC_FAMILIES: &[(GenericFamily, &[&str])] = &[
@@ -91,6 +91,14 @@ impl SystemFonts {
         let source = self.data_paths.get_or_insert(&path);
         let mut selected = None;
         scan::scan_paths([path], 0, |face| {
+            if face
+                .font
+                .head()
+                .ok()
+                .is_some_and(|head| head.flags().contains(Flags::LAST_RESORT_FONT))
+            {
+                return;
+            }
             if face
                 .english_or_first_name(NameId::POSTSCRIPT_NAME)
                 .is_some_and(|name| name.chars().eq(postscript_name.chars()))
@@ -241,6 +249,24 @@ mod tests {
     use crate::{Collection, CollectionOptions, FontInfoOverride, QueryStatus, SourceCache};
     use alloc::string::String;
     use read_fonts::types::NameId;
+
+    #[test]
+    fn placeholder_fonts_do_not_provide_character_coverage() {
+        let mut collection = Collection::new(CollectionOptions::default());
+        for text in ["\u{0ba1}", "\u{0ba2}", "\u{0ba6}", "\u{0ba7}"] {
+            assert!(
+                collection
+                    .system_fallback_for_text(
+                        Some((parley_dev::fonts::ROBOTO_REGULAR, 0)),
+                        Some("ta"),
+                        text,
+                        &[],
+                    )
+                    .is_none(),
+                "a symbolic range placeholder is not character support"
+            );
+        }
+    }
 
     #[test]
     fn text_fallback_preserves_a_variable_base_instance() {
