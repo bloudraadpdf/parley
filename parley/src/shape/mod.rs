@@ -415,12 +415,26 @@ fn shape_item<'a, B: Brush>(
     let mut font_selector =
         FontSelector::new(fq, rcx, styles, first_style_index, fb_script, item.locale);
 
-    let grapheme_cluster_boundaries = analysis_data_sources.grapheme_boundaries(item_text);
+    let mut cluster_boundaries: Vec<_> = analysis_data_sources
+        .grapheme_boundaries(item_text)
+        .skip(1)
+        .collect();
+    for ((offset, _), pair) in item_text.char_indices().skip(1).zip(item_infos.windows(2)) {
+        let previous = &styles[usize::from(pair[0].1)];
+        let next = &styles[usize::from(pair[1].1)];
+        if previous.font_family != next.font_family
+            || FontQueryAttributes::from_style(previous) != FontQueryAttributes::from_style(next)
+        {
+            cluster_boundaries.push(offset);
+        }
+    }
+    cluster_boundaries.sort_unstable();
+    cluster_boundaries.dedup();
     let mut item_infos_iter = item_infos.iter();
     let mut code_unit_offset_in_string = text_range.start;
 
     // Build an iterator of boundaries and consume the first segment to seed the loop
-    let mut boundaries_iter = grapheme_cluster_boundaries.skip(1);
+    let mut boundaries_iter = cluster_boundaries.into_iter();
     let mut last_boundary = 0_usize;
     let Some(mut current_boundary) = boundaries_iter.next() else {
         return; // No clusters
@@ -866,6 +880,8 @@ impl SelectedFont {
 
 impl PartialEq for SelectedFont {
     fn eq(&self, other: &Self) -> bool {
-        self.font.family == other.font.family && self.font.synthesis == other.font.synthesis
+        self.font.blob.id() == other.font.blob.id()
+            && self.font.index == other.font.index
+            && self.font.synthesis == other.font.synthesis
     }
 }

@@ -8,6 +8,83 @@ use crate::{FontFamily, InlineBox, LayoutContext, StyleProperty};
 use alloc::{sync::Arc, vec::Vec};
 
 #[test]
+fn equivalent_font_aliases_preserve_ligatures() {
+    let mut fonts = create_font_context();
+    let font = fontique::Blob::new(Arc::new(parley_dev::fonts::ROBOTO_REGULAR.to_vec()));
+    for alias in ["First alias", "Second alias"] {
+        fonts.collection.register_fonts(
+            font.clone(),
+            Some(fontique::FontInfoOverride {
+                family_name: Some(alias),
+                ..Default::default()
+            }),
+        );
+    }
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let text = "fi";
+    let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("First alias")));
+    builder.push(
+        StyleProperty::FontFamily(FontFamily::named("Second alias")),
+        1..2,
+    );
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    assert_eq!(
+        logical_glyph_ids(&layout).len(),
+        1,
+        "the common font must retain its fi ligature"
+    );
+}
+
+#[test]
+fn explicit_mark_font_selection_is_not_replaced_by_the_base_selection() {
+    let mut fonts = create_font_context();
+    let mark_font = fontique::Blob::new(Arc::new(parley_dev::fonts::MARK_ANCHOR_TEST.to_vec()));
+    let mark_id = mark_font.id();
+    fonts.collection.register_fonts(mark_font, None);
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let text = "A\u{301}";
+    for (family, weight) in [
+        ("Roboto", 400.0),
+        ("Roboto", 700.0),
+        ("mark-anchor-test", 400.0),
+    ] {
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push(
+            StyleProperty::FontFamily(FontFamily::named(family)),
+            1..text.len(),
+        );
+        builder.push(
+            StyleProperty::FontWeight(fontique::FontWeight::new(weight)),
+            1..text.len(),
+        );
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        let runs: Vec<_> = layout.lines().flat_map(|line| line.runs()).collect();
+        if family == "Roboto" && weight == 400.0 {
+            assert_eq!(runs.len(), 1);
+        } else {
+            assert_eq!(
+                runs.len(),
+                2,
+                "the explicit mark face must shape its own run"
+            );
+            if family == "mark-anchor-test" {
+                assert_eq!(runs[1].font().data.id(), mark_id);
+            } else {
+                assert_eq!(
+                    runs[1].font_attrs().weight,
+                    fontique::FontWeight::new(weight)
+                );
+            }
+            assert!(logical_glyph_ids(&layout).iter().all(|id| *id != 0));
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires NOTO_CJK_FONT pointing to the original NotoSansCJK-Regular.ttc"]
 fn shaping_preserves_language_script_and_region() {
     let bytes = std::fs::read(std::env::var("NOTO_CJK_FONT").expect("Noto CJK source path"))
