@@ -129,8 +129,8 @@ pub mod style;
 #[cfg(test)]
 mod tests;
 
+pub use analysis::cluster::{cluster_is_supported, has_space_fallback};
 pub use linebender_resource_handle::FontData;
-pub use analysis::cluster::has_space_fallback;
 pub use util::BoundingBox;
 
 pub use builder::{RangedBuilder, StyleRunBuilder, TreeBuilder};

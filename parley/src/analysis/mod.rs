@@ -30,6 +30,11 @@ use parley_data::Properties;
 
 use crate::style::SoftBreakPolicy;
 
+fn force_normalize(ch: char, boundary: GraphemeClusterBreak, is_variation_selector: bool) -> bool {
+    (matches!(boundary, GraphemeClusterBreak::Extend) && ch != '\u{200c}' && !is_variation_selector)
+        || matches!(boundary, GraphemeClusterBreak::SpacingMark)
+}
+
 pub(crate) struct AnalysisDataSources;
 
 impl AnalysisDataSources {
@@ -578,18 +583,8 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
                 boundary
             };
 
-            let force_normalize = {
-                // "Extend" break chars should be normalized first, with two exceptions
-                if matches!(grapheme_cluster_break, GraphemeClusterBreak::Extend) &&
-                    ch as u32 != 0x200C && // Is not a Zero Width Non-Joiner &&
-                    !is_variation_selector
-                {
-                    true
-                } else {
-                    // All spacing mark break chars should be normalized first.
-                    matches!(grapheme_cluster_break, GraphemeClusterBreak::SpacingMark)
-                }
-            };
+            let force_normalize =
+                force_normalize(ch, grapheme_cluster_break, is_variation_selector);
 
             // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
             let bracket = lcx.analysis_data_sources.brackets().get(ch);

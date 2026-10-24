@@ -209,7 +209,7 @@ impl CharCluster {
         if len == 0 {
             return Status::Complete;
         }
-        let mut glyph_ids = vec![0; len];
+        let mut glyph_ids = vec![0; len.max(2)];
         let prev_ratio = self.best_ratio;
         let mut ratio;
         if self.force_normalize && self.composed(analysis_data_sources).is_some() {
@@ -382,23 +382,53 @@ pub const fn has_space_fallback(ch: char) -> bool {
     )
 }
 
+/// Tests nominal cluster coverage with the same canonical and space fallbacks used by font selection.
+pub fn cluster_is_supported(text: &str, glyph_for: impl Fn(char) -> Option<u32>) -> bool {
+    let data = AnalysisDataSources::new();
+    cluster(text.chars(), &data).map(
+        |ch| u16::from(glyph_for(ch).is_some_and(|glyph| glyph != 0)),
+        &data,
+    ) == Status::Complete
+}
+
+fn cluster(chars: impl IntoIterator<Item = char>, data: &AnalysisDataSources) -> CharCluster {
+    let mut cluster = CharCluster::default();
+    for ch in chars {
+        let properties = data.properties(ch);
+        cluster.force_normalize |= super::force_normalize(
+            ch,
+            properties.grapheme_cluster_break(),
+            properties.is_variation_selector(),
+        );
+        let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, data);
+        cluster.map_len += usize::from(contributes_to_font_coverage);
+        cluster.chars.push(Char {
+            ch,
+            contributes_to_font_coverage,
+            glyph_id: 0,
+            style_index: 0,
+        });
+    }
+    cluster
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn cluster(chars: impl IntoIterator<Item = char>, data: &AnalysisDataSources) -> CharCluster {
-        let mut cluster = CharCluster::default();
-        for ch in chars {
-            let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, data);
-            cluster.map_len += usize::from(contributes_to_font_coverage);
-            cluster.chars.push(Char {
-                ch,
-                contributes_to_font_coverage,
-                glyph_id: 0,
-                style_index: 0,
-            });
-        }
-        cluster
+    #[test]
+    fn public_cluster_coverage_preserves_font_matching_rules() {
+        let supports = |text: &str, mapped: &[char]| {
+            cluster_is_supported(text, |ch| mapped.contains(&ch).then_some(1))
+        };
+        assert!(supports("\u{00a0}\u{093c}", &[' ', '\u{093c}']));
+        assert!(!supports("\u{00a0}\u{093c}", &[' ']));
+        assert!(!supports("\u{00a0}\u{093c}", &['\u{093c}']));
+        assert!(supports("e\u{0301}", &['é']));
+        assert!(!supports("e\u{0301}", &['e']));
+        assert!(supports("é", &['e', '\u{0301}']));
+        assert!(supports("a\u{200d}", &['a']));
+        assert!(!cluster_is_supported("a", |_| Some(0)));
     }
 
     #[test]
