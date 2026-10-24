@@ -781,6 +781,8 @@ pub enum DiscretionaryBreakCondition {
     /// Participate with ordinary soft wrap opportunities.
     #[default]
     Normal,
+    /// Participate in paragraph fitting only if the next ordinary boundary overflows.
+    WordOverflow,
     /// Participate only when no ordinary opportunity prevents overflow.
     /// These opportunities do not contribute to min-content sizing.
     Overflow,

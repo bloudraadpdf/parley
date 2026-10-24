@@ -52,6 +52,54 @@ fn total_fit_evens_the_separators_of_a_paragraph() {
 }
 
 #[test]
+fn automatic_and_authored_hyphens_follow_native_prince_line_choices() {
+    use crate::layout::{DiscretionaryBreak, DiscretionaryBreakCondition};
+    let text = "centre; -haf, n. the high sea; -henda, f. = alhenda; -hending, f. full or per\u{ad}fect rhyme, as góð: blóð (opposed to ‘skothending’);";
+    let unbroken = [
+        "centre; -haf, n. the high sea; -henda, f.",
+        "= alhenda; -hending, f. full or perfect",
+        "rhyme, as góð: blóð (opposed to",
+        "‘skothending’);",
+    ];
+    let hyphenated = [
+        "centre; -haf, n. the high sea; -henda,",
+        "f. = alhenda; -hending, f. full or per-",
+        "fect rhyme, as góð: blóð (opposed to",
+        "‘skothending’);",
+    ];
+    let mut hyphen = layout("-", LineBreakStrategy::FirstFit);
+    hyphen.break_all_lines(None);
+    for (condition, width, expected) in [
+        (DiscretionaryBreakCondition::WordOverflow, 200.0, unbroken),
+        (DiscretionaryBreakCondition::WordOverflow, 197.0, hyphenated),
+        (DiscretionaryBreakCondition::Normal, 200.0, hyphenated),
+    ] {
+        let mut paragraph = layout(text, LineBreakStrategy::TotalFit(PRINCE));
+        paragraph.set_discretionary_breaks(alloc::vec![DiscretionaryBreak {
+            byte_index: text.find('\u{ad}').unwrap() + '\u{ad}'.len_utf8(),
+            advance: hyphen.full_width(),
+            max_consecutive_lines: None,
+            condition,
+        }]);
+        paragraph.break_all_lines(Some(width));
+        let lines = paragraph
+            .lines()
+            .map(|line| {
+                text[line.text_range()].trim().replace(
+                    '\u{ad}',
+                    if line.ends_at_discretionary_break() {
+                        "-"
+                    } else {
+                        ""
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(lines, expected, "{condition:?} {width}");
+    }
+}
+
+#[test]
 fn each_segment_between_forced_breaks_has_its_own_plan() {
     let text = alloc::format!("{TEXT}\n{TEXT}");
     assert_eq!(

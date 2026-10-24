@@ -4,6 +4,7 @@
 //! Paragraph-at-a-time line breaking: Knuth and Plass, "Breaking Paragraphs into Lines" (1981), with the
 //! final pass of TeX (§ 863 of "TeX: The Program").
 
+use crate::layout::DiscretionaryBreakCondition;
 use alloc::vec::Vec;
 
 #[cfg(feature = "libm")]
@@ -64,7 +65,7 @@ pub(super) struct Opportunity {
     /// The start of the line that follows the break.
     pub(super) start: Measure,
     /// Whether the break is discretionary.
-    pub(super) discretionary: bool,
+    pub(super) discretionary: Option<DiscretionaryBreakCondition>,
 }
 
 /// The measures of a segment between forced breaks.
@@ -157,7 +158,7 @@ impl Segment {
             point
                 .checked_sub(1)
                 .and_then(|k| self.opportunities.get(k))
-                .is_some_and(|opportunity| opportunity.discretionary)
+                .is_some_and(|opportunity| opportunity.discretionary.is_some())
         };
         let mut nodes = alloc::vec![Node {
             point: 0,
@@ -168,12 +169,25 @@ impl Segment {
         let mut active = alloc::vec![0_usize];
         let mut point = 1;
         while point <= last {
+            let word_end = self.opportunities.get(point - 1).and_then(|opportunity| {
+                (opportunity.discretionary == Some(DiscretionaryBreakCondition::WordOverflow)).then(
+                    || {
+                        (point..self.opportunities.len())
+                            .find(|&next| self.opportunities[next].discretionary.is_none())
+                            .map_or(last, |next| next + 1)
+                    },
+                )
+            });
             let mut best: Option<Node> = None;
             let mut index = 0;
             let mut forced = false;
             while index < active.len() {
                 let node_index = active[index];
                 let node = nodes[node_index];
+                if word_end.is_some_and(|end| !matches!(fit(node.point, end), LineFit::Overfull)) {
+                    index += 1;
+                    continue;
+                }
                 let badness = match fit(node.point, point) {
                     LineFit::Overfull => {
                         active.remove(index);
@@ -274,7 +288,7 @@ mod tests {
                 cursor: (0, index + 1),
                 end,
                 start,
-                discretionary: false,
+                discretionary: None,
             });
         }
         Segment {
@@ -333,13 +347,29 @@ mod tests {
     #[test]
     fn a_discretionary_break_pays_its_penalty() {
         let mut segment = segment(&two_lines(6.0 * SPACE));
-        segment.opportunities[7].discretionary = true;
+        segment.opportunities[7].discretionary = Some(DiscretionaryBreakCondition::Normal);
         assert_eq!(plan_with(segment.clone(), PRINCE, 200.0), [8, 18]);
         let costly = TotalFit {
             hyphen_penalty: 300.0,
             ..PRINCE
         };
         assert_eq!(plan_with(segment, costly, 200.0), [9, 18]);
+    }
+
+    #[test]
+    fn an_automatic_hyphen_waits_until_the_unbroken_word_overflows() {
+        let mut segment = segment(&two_lines(6.0 * SPACE));
+        segment.opportunities[7].discretionary = Some(DiscretionaryBreakCondition::WordOverflow);
+        assert_eq!(plan_with(segment.clone(), PRINCE, 200.0), [9, 18]);
+        assert_eq!(plan_with(segment, PRINCE, 195.0).first(), Some(&8));
+    }
+
+    #[test]
+    fn an_automatic_hyphen_in_the_final_word_uses_the_segment_end() {
+        let mut segment = segment(&[80.0, 10.0]);
+        segment.opportunities[0].discretionary = Some(DiscretionaryBreakCondition::WordOverflow);
+        assert!(plan_with(segment.clone(), PRINCE, 100.0).is_empty());
+        assert_eq!(plan_with(segment, PRINCE, 85.0), [1]);
     }
 
     /// Every line but the last stretches beyond the tolerance: each line ends where the next word overflows.

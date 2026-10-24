@@ -644,7 +644,7 @@ impl BreakerState {
                     ..self.line.content_end
                 },
                 start: self.line.measure(),
-                discretionary: state.discretionary_break,
+                discretionary: state.discretionary_break.then_some(condition),
             });
         }
         self.planned_end_reached |= self.planned_end == Some(cursor);
@@ -681,7 +681,9 @@ impl BreakerState {
             self.restored_normal_boundary = candidate;
         } else {
             match condition {
-                DiscretionaryBreakCondition::Normal => self.prev_boundary = candidate,
+                DiscretionaryBreakCondition::Normal | DiscretionaryBreakCondition::WordOverflow => {
+                    self.prev_boundary = candidate;
+                }
                 DiscretionaryBreakCondition::Overflow => {
                     self.overflow_discretionary_boundary = candidate;
                 }
