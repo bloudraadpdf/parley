@@ -1205,7 +1205,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parlance",
  "parley_dev",
- "read-fonts 0.43.3",
+ "read-fonts 0.43.3 (git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39)",
  "roxmltree",
  "smallvec",
  "windows 0.62.2",
@@ -1508,7 +1508,7 @@ dependencies = [
  "bytemuck",
  "core_maths",
  "once_cell",
- "read-fonts 0.43.3",
+ "read-fonts 0.43.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec",
 ]
 
@@ -3354,6 +3354,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "read-fonts"
+version = "0.43.3"
+source = "git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39#c4c9501abff873702bca4b8d04f867cc7742de39"
+dependencies = [
+ "bytemuck",
+ "core_maths",
+ "font-types 0.12.5",
+ "once_cell",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3668,12 +3679,11 @@ dependencies = [
 [[package]]
 name = "skrifa"
 version = "0.46.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4febebda507fb889c545a37a135517769d1391941013561292897961d1887d6"
+source = "git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39#c4c9501abff873702bca4b8d04f867cc7742de39"
 dependencies = [
  "bytemuck",
  "core_maths",
- "read-fonts 0.43.3",
+ "read-fonts 0.43.3 (git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39)",
 ]
 
 [[package]]
