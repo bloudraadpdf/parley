@@ -605,7 +605,9 @@ impl BreakerState {
         self.line.x = next_x;
         self.line.fit_x = next_fit_x;
         self.add_line_height(box_height);
-        self.line.content_end = self.line.measure();
+        if participation.has_inline_advance() {
+            self.line.content_end = self.line.measure();
+        }
         self.last_appended_authored_unit = AuthoredBreakUnit::Other;
         self.line
             .source_start_whitespace

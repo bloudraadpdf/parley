@@ -52,6 +52,38 @@ fn total_fit_evens_the_separators_of_a_paragraph() {
 }
 
 #[test]
+fn transparent_inline_edges_do_not_include_trailing_space_in_total_fit() {
+    use crate::{InlineBox, InlineBoxBreakAffinity, InlineOwnerEdgeAdvance};
+    let words = "x x x x x x";
+    let text = alloc::format!("{words} yyyyyyyyyyyy");
+    let mut natural = layout(words, LineBreakStrategy::FirstFit);
+    natural.break_all_lines(None);
+    let width = natural.full_width() - 1.0;
+    for inline_box in [
+        InlineBox::transparent_anchor(1, words.len() + 1),
+        InlineBox::inline_start_edge(
+            1,
+            words.len() + 1,
+            InlineOwnerEdgeAdvance::uniform(0.0),
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        ),
+    ] {
+        let mut font_context = create_font_context();
+        let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+        let mut builder = layout_context.ranged_builder(&mut font_context, &text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+        builder.push_inline_box(inline_box);
+        let mut paragraph = builder.build(&text);
+        paragraph.set_line_break_strategy(LineBreakStrategy::TotalFit(PRINCE));
+        paragraph.break_all_lines(Some(width));
+        assert_eq!(words_per_line(&text, &paragraph), [6, 1]);
+    }
+}
+
+#[test]
 fn automatic_and_authored_hyphens_follow_native_prince_line_choices() {
     use crate::layout::{DiscretionaryBreak, DiscretionaryBreakCondition};
     let text = "centre; -haf, n. the high sea; -henda, f. = alhenda; -hending, f. full or per\u{ad}fect rhyme, as góð: blóð (opposed to ‘skothending’);";
