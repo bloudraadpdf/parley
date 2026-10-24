@@ -104,7 +104,20 @@ fn verify_analysis(
         // Apply test-specific configuration
         configure_builder(&mut builder);
 
-        _ = builder.build(text);
+        let context = builder.lcx;
+        context
+            .ranged_style_builder
+            .finish(&mut context.style_table, &mut context.style_runs);
+        if context.style_runs.is_empty() {
+            context
+                .style_table
+                .push(crate::resolve::ResolvedStyle::default());
+            context.style_runs.push(crate::resolve::StyleRun {
+                style_index: 0,
+                range: 0..0,
+            });
+        }
+        crate::analysis::analyze_text(context, text);
     }
 
     test_context
