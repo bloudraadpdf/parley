@@ -28,8 +28,8 @@ pub enum LineBreakStrategy {
 /// break. The line that ends a segment has no badness.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TotalFit {
-    /// The stretch of a word separator, as a fraction of its advance.
-    pub stretch: f32,
+    /// The stretch of a word separator, as a fraction of its font size.
+    pub stretch_em: f32,
     /// The largest badness of a line that does not end its segment.
     pub tolerance: f32,
     /// The demerits that each line adds.
@@ -47,8 +47,8 @@ pub struct TotalFit {
 pub(super) struct Measure {
     /// The fit advance.
     pub(super) advance: f32,
-    /// The fit advance of the word separators.
-    pub(super) separators: f32,
+    /// The sum of the font sizes of the word separators.
+    pub(super) separator_font_sizes: f32,
     /// The advance by which the word separators may shrink.
     pub(super) shrink: f32,
 }
@@ -143,7 +143,8 @@ impl Segment {
             let ratio = if slack < 0.0 {
                 -slack / shrink
             } else {
-                let stretch = params.stretch * (stop.separators - start.separators);
+                let stretch =
+                    params.stretch_em * (stop.separator_font_sizes - start.separator_font_sizes);
                 if stretch > 0.0 {
                     slack / stretch
                 } else if slack > 0.0 {
@@ -159,6 +160,15 @@ impl Segment {
                 .checked_sub(1)
                 .and_then(|k| self.opportunities.get(k))
                 .is_some_and(|opportunity| opportunity.discretionary.is_some())
+        };
+        let line_demerits = |node: Node, point: usize, badness: f32| {
+            let hyphenation = match (node.discretionary, discretionary(point), point == last) {
+                (true, true, _) => params.hyphen_penalty.powi(2) + params.double_hyphen_demerits,
+                (_, true, _) => params.hyphen_penalty.powi(2),
+                (true, false, true) => params.final_hyphen_demerits,
+                _ => 0.0,
+            };
+            node.demerits + (params.line_penalty + badness).powi(2) + hyphenation
         };
         let mut nodes = alloc::vec![Node {
             point: 0,
@@ -179,6 +189,7 @@ impl Segment {
                 )
             });
             let mut best: Option<Node> = None;
+            let mut fallback: Option<Node> = None;
             let mut index = 0;
             let mut forced = false;
             while index < active.len() {
@@ -191,14 +202,23 @@ impl Segment {
                 let badness = match fit(node.point, point) {
                     LineFit::Overfull => {
                         active.remove(index);
+                        let underfull = (point - 1).max(node.point + 1);
+                        let badness = match fit(node.point, underfull) {
+                            LineFit::Badness(value) => value,
+                            LineFit::Overfull => f32::INFINITY,
+                        };
+                        let candidate = Node {
+                            point: underfull,
+                            demerits: line_demerits(node, underfull, badness),
+                            previous: Some(node_index),
+                            discretionary: discretionary(underfull),
+                        };
+                        let candidate = fallback
+                            .filter(|best| best.demerits <= candidate.demerits)
+                            .unwrap_or(candidate);
+                        fallback = Some(candidate);
                         if active.is_empty() && best.is_none() {
-                            let underfull = (point - 1).max(node.point + 1);
-                            nodes.push(Node {
-                                point: underfull,
-                                demerits: node.demerits,
-                                previous: Some(node_index),
-                                discretionary: discretionary(underfull),
-                            });
+                            nodes.push(candidate);
                             active.push(nodes.len() - 1);
                             forced = true;
                             break;
@@ -209,17 +229,7 @@ impl Segment {
                 };
                 if point == last || badness <= params.tolerance {
                     let ends_discretionary = discretionary(point);
-                    let hyphenation = match (node.discretionary, ends_discretionary, point == last)
-                    {
-                        (_, true, _) if node.discretionary => {
-                            params.hyphen_penalty.powi(2) + params.double_hyphen_demerits
-                        }
-                        (_, true, _) => params.hyphen_penalty.powi(2),
-                        (true, false, true) => params.final_hyphen_demerits,
-                        _ => 0.0,
-                    };
-                    let demerits =
-                        node.demerits + (params.line_penalty + badness).powi(2) + hyphenation;
+                    let demerits = line_demerits(node, point, badness);
                     if best.is_none_or(|best| demerits < best.demerits) {
                         best = Some(Node {
                             point,
@@ -264,9 +274,14 @@ mod tests {
 
     /// A segment of words with one space between each two.
     fn segment(words: &[f32]) -> Segment {
+        segment_with_metrics(words, SPACE, 12.0)
+    }
+
+    fn segment_with_metrics(words: &[f32], space: f32, font_size: f32) -> Segment {
         let mut opportunities = Vec::new();
         let mut advance = 0.0;
         let mut separators = 0.0;
+        let mut separator_font_sizes = 0.0;
         for (index, word) in words.iter().enumerate() {
             advance += word;
             if index + 1 == words.len() {
@@ -274,14 +289,15 @@ mod tests {
             }
             let end = Measure {
                 advance,
-                separators,
+                separator_font_sizes,
                 shrink: separators / 6.0,
             };
-            advance += SPACE;
-            separators += SPACE;
+            advance += space;
+            separators += space;
+            separator_font_sizes += font_size;
             let start = Measure {
                 advance,
-                separators,
+                separator_font_sizes,
                 shrink: separators / 6.0,
             };
             opportunities.push(Opportunity {
@@ -296,14 +312,14 @@ mod tests {
             opportunities,
             end: Some(Measure {
                 advance,
-                separators,
+                separator_font_sizes,
                 shrink: separators / 6.0,
             }),
         }
     }
 
     const PRINCE: TotalFit = TotalFit {
-        stretch: 0.5,
+        stretch_em: 0.125,
         tolerance: 800.0,
         line_penalty: 10.0,
         hyphen_penalty: 50.0,
@@ -376,6 +392,19 @@ mod tests {
     #[test]
     fn an_underfull_line_ends_where_no_active_break_reaches_further() {
         assert_eq!(plan(&[90.0; 5], 200.0), [2, 4]);
+    }
+
+    #[test]
+    fn an_underfull_line_keeps_the_lowest_cost_predecessor() {
+        let segment = segment_with_metrics(
+            &[
+                21.0, 6.0, 14.0, 28.0, 27.0, 44.0, 40.0, 9.0, 32.0, 22.0, 19.0, 24.0, 7.0, 33.0,
+                45.0, 47.0, 46.0, 17.0, 54.0, 8.0, 30.0, 34.0,
+            ],
+            10.0 * 229.0 / 1024.0,
+            10.0,
+        );
+        assert_eq!(plan_with(segment, PRINCE, 165.07874), [6, 12, 16, 21]);
     }
 
     #[test]

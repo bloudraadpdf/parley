@@ -130,8 +130,8 @@ struct LineState {
     num_spaces: usize,
     /// The advance by which the word separators of the line may shrink.
     space_shrink: f32,
-    /// The fit advance of the word separators of the line.
-    separator_advance: f32,
+    /// The sum of the font sizes of the word separators of the line.
+    separator_font_sizes: f32,
     /// The measure of the line up to the end of its last content, before its trailing separators.
     content_end: total_fit::Measure,
     /// Of the line currently being built, the maximum line height seen so far.
@@ -214,7 +214,7 @@ impl LineState {
     fn measure(&self) -> total_fit::Measure {
         total_fit::Measure {
             advance: self.fit_x,
-            separators: self.separator_advance,
+            separator_font_sizes: self.separator_font_sizes,
             shrink: self.space_shrink,
         }
     }
@@ -586,7 +586,7 @@ impl BreakerState {
         if let Some(separator) = justification_space {
             self.line.num_spaces += 1;
             self.line.space_shrink += separator.shrink;
-            self.line.separator_advance += separator.advance;
+            self.line.separator_font_sizes += separator.font_size;
         } else {
             self.line.content_end = self.line.measure();
         }
@@ -856,7 +856,7 @@ enum TotalFitState {
 /// A word separator: a justification opportunity.
 #[derive(Clone, Copy)]
 struct Separator {
-    advance: f32,
+    font_size: f32,
     shrink: f32,
 }
 
@@ -1060,6 +1060,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let mut reclaimed = 0.0_f32;
         let mut reclaimed_fit = 0.0_f32;
         let mut reclaimed_shrink = 0.0_f32;
+        let mut reclaimed_font_sizes = 0.0_f32;
         let mut spaces = 0_usize;
         while idx > cluster_start {
             let cluster = &self.layout.data.clusters[idx - 1];
@@ -1068,6 +1069,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 reclaimed_fit += cluster.line_break_advance;
                 reclaimed_shrink +=
                     self.layout.data.justify_shrink(cluster) * cluster.line_break_advance;
+                let run = self
+                    .layout
+                    .data
+                    .runs
+                    .partition_point(|run| run.cluster_range.end < idx);
+                reclaimed_font_sizes += self.layout.data.runs[run].font_size;
                 spaces += 1;
                 idx -= 1;
             } else {
@@ -1097,7 +1104,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.fit_x -= reclaimed_fit;
         self.state.line.num_spaces = self.state.line.num_spaces.saturating_sub(spaces);
         self.state.line.space_shrink -= reclaimed_shrink;
-        self.state.line.separator_advance -= reclaimed_fit;
+        self.state.line.separator_font_sizes -= reclaimed_font_sizes;
         Some(reclaimed)
     }
 
@@ -2071,7 +2078,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 == ProjectedSourceClusterParticipation::Normal
                             && !self.state.line.removes_leading_source_at(byte_index))
                         .then_some(Separator {
-                            advance: fit_advance,
+                            font_size: run.font_size(),
                             shrink: style.justify_shrink * fit_advance,
                         });
                         match line_fit {
@@ -3791,7 +3798,7 @@ fn try_commit_line<B: Brush>(
     // Reset state for the new line
     state.num_spaces = 0;
     state.space_shrink = 0.0;
-    state.separator_advance = 0.0;
+    state.separator_font_sizes = 0.0;
     if committed_text_run {
         state.clusters.start = state.clusters.end;
     }

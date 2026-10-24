@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 const TEXT: &str = "xxxxxx xx x xxxxxxxx xxx xxxxxxxxx xx xxxxxx xxxx xxxxxxxx xxxxxxx xxxx xxxxxxxx xx x xxxx xxx";
 const WIDTH: f32 = 200.0;
 const PRINCE: TotalFit = TotalFit {
-    stretch: 0.5,
+    stretch_em: 0.125,
     tolerance: 800.0,
     line_penalty: 10.0,
     hyphen_penalty: 50.0,
@@ -49,6 +49,51 @@ fn broken(text: &str, strategy: LineBreakStrategy) -> Vec<usize> {
 fn total_fit_evens_the_separators_of_a_paragraph() {
     assert_eq!(broken(TEXT, LineBreakStrategy::FirstFit), [7, 5, 5]);
     assert_eq!(broken(TEXT, LineBreakStrategy::TotalFit(PRINCE)), [6, 6, 5]);
+}
+
+#[test]
+fn total_fit_stretch_uses_font_size_without_added_word_spacing() {
+    use crate::{InlineBox, PositionedLayoutItem};
+    let mut spaced = layout("x x", LineBreakStrategy::FirstFit);
+    spaced.break_all_lines(None);
+    let mut letter = layout("x", LineBreakStrategy::FirstFit);
+    letter.break_all_lines(None);
+    let space_advance = (spaced.full_width() - 2.0 * letter.full_width()) * 10.0 / 12.0;
+    let text = " ".repeat(21);
+    for word_spacing in [0.0, 1.0] {
+        for (delta, expected) in [(-0.01, 9), (0.01, 8)] {
+            let mut widths = [
+                13.0, 7.0, 15.0, 9.0, 9.0, 43.0, 18.0, 19.0, 13.0, 36.0, 41.0, 27.0, 7.0, 49.0,
+                21.0, 42.0, 42.0, 53.0, 20.0, 38.0, 18.0, 31.0,
+            ];
+            widths[0] =
+                165.07874 - 120.0 - 7.0 * (space_advance + word_spacing) - 7.0 * 10.0 / 4.0 + delta;
+            let mut font_context = create_font_context();
+            let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+            let mut builder = layout_context.ranged_builder(&mut font_context, &text, 1.0, false);
+            builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+            builder.push_default(StyleProperty::FontSize(10.0));
+            builder.push_default(StyleProperty::WordSpacing(word_spacing));
+            builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+            for (index, width) in widths.into_iter().enumerate() {
+                builder.push_inline_box(InlineBox::new(index as u64, index, width, 10.0));
+            }
+            let mut paragraph = builder.build(&text);
+            paragraph.set_line_break_strategy(LineBreakStrategy::TotalFit(PRINCE));
+            paragraph.break_all_lines(Some(165.07874));
+            let count = paragraph
+                .lines()
+                .next()
+                .unwrap()
+                .items()
+                .filter(|item| matches!(item, PositionedLayoutItem::InlineBox(_)))
+                .count();
+            assert_eq!(
+                count, expected,
+                "word spacing {word_spacing}, delta {delta}"
+            );
+        }
+    }
 }
 
 #[test]
