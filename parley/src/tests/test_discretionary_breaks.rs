@@ -44,6 +44,81 @@ fn unwrapped_advance(text: &str) -> f32 {
 }
 
 #[test]
+fn selected_discretionary_break_drops_cross_line_kerning() {
+    let text = "AV\u{00ad}AVAV";
+    let mut layout = roboto_layout(text);
+    let mut hyphen = roboto_layout("-");
+    hyphen.break_all_lines(None);
+    layout.set_discretionary_break_shapes(vec![
+        crate::layout::DiscretionaryBreakShape::new("AV\u{00ad}".len(), None, "-".into(), hyphen)
+            .unwrap(),
+    ]);
+    let expected = unwrapped_advance("AV") + unwrapped_advance("-");
+    for strategy in [
+        crate::LineBreakStrategy::FirstFit,
+        crate::LineBreakStrategy::TotalFit(crate::TotalFit {
+            stretch_em: 0.125,
+            tolerance: 800.0,
+            line_penalty: 10.0,
+            hyphen_penalty: 50.0,
+            double_hyphen_demerits: 2500.0,
+            final_hyphen_demerits: 0.0,
+        }),
+    ] {
+        layout.set_line_break_strategy(strategy);
+        for _ in 0..2 {
+            layout.break_all_lines(Some(expected + 0.01));
+            let first = layout.get(0).unwrap();
+            assert!(first.ends_at_discretionary_break());
+            assert!((first.metrics().advance - expected).abs() < 0.001);
+            assert!(
+                (layout.get(1).unwrap().metrics().advance - unwrapped_advance("AVAV")).abs()
+                    < 0.001
+            );
+            layout.break_all_lines(None);
+            assert_eq!(layout.len(), 1);
+            assert!((layout.full_width() - unwrapped_advance("AVAVAV")).abs() < 0.001);
+        }
+    }
+}
+
+#[test]
+fn selected_discretionary_break_preserves_arabic_joining() {
+    let text = "عع\u{00ad}عع";
+    let mut fonts = super::test_shaping_context::naskh_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+        "Noto Naskh Arabic",
+    )));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    let mut layout = builder.build(text);
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: "عع\u{00ad}".len(),
+        advance: 0.0,
+        max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
+    }]);
+    layout.break_all_lines(None);
+    let glyphs = |layout: &Layout<ColorBrush>| {
+        layout
+            .lines()
+            .flat_map(|line| line.runs())
+            .flat_map(|run| {
+                run.clusters()
+                    .flat_map(|cluster| cluster.glyphs().map(|glyph| glyph.id))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = glyphs(&layout);
+    layout.break_all_lines(Some(layout.full_width() * 0.6));
+    assert_eq!(layout.len(), 2);
+    assert!(layout.get(0).unwrap().ends_at_discretionary_break());
+    assert_eq!(glyphs(&layout), expected);
+}
+
+#[test]
 fn restored_normal_breaks_follow_phrases_and_precede_deferred_hyphens() {
     use crate::layout::{DiscretionaryBreakCondition, LineBreakOverride, LineBreakPurpose};
 

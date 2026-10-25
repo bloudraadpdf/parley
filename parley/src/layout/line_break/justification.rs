@@ -218,7 +218,7 @@ pub(super) struct ShapeCandidateBuffers<B: Brush> {
 
 impl<B: Brush> ShapeCandidateBuffers<B> {
     pub(super) fn new(data: &mut LayoutData<B>) -> Option<Self> {
-        if data.line_shape_variants.is_none() && !data.inline_owner_shaping.is_empty() {
+        if data.line_shape_variants.is_none() && !data.deferred_physical_shapes.is_empty() {
             data.line_shape_variants = Some(crate::shape::justification::LineShapeVariants {
                 original: data.clusters.clone(),
                 expanded: data.clusters.clone(),

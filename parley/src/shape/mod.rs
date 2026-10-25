@@ -405,7 +405,8 @@ fn shape_item<'a, B: Brush>(
     let item_text = &text[text_range.clone()];
     let item_infos = &infos[char_range.start..char_range.end]; // Only process current item
     let first_style_index = item_infos[0].1;
-    let retain_physical_shapes = !layout.data.inline_owner_shaping.is_empty();
+    let retain_physical_shapes =
+        !layout.data.inline_owner_shaping.is_empty() || item_text.contains('\u{00ad}');
     let produce_concat_boundaries = retain_physical_shapes
         || item_infos.iter().any(|(_, index)| {
             rcx.features(styles[usize::from(*index)].font_features_for_justification)

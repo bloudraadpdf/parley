@@ -843,8 +843,6 @@ enum TotalFitState {
     /// The next line starts a segment.
     #[default]
     Unplanned,
-    /// A probe line measures the segment.
-    Probing,
     /// The planned line ends of the rest of the segment, last first, for lines of `max_advance`.
     Planned {
         max_advance: f32,
@@ -891,9 +889,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) if edge.is_end())
         });
         let uniform_letter_spacing = uniform_letter_spacing(&layout.data);
-        let physical_shaper = (!layout.data.inline_owner_shaping.is_empty()
-            && !layout.data.deferred_physical_shapes.is_empty())
-        .then(|| crate::shape::physical::PhysicalShaper::new(&layout.data));
+        let physical_shaper = (!layout.data.deferred_physical_shapes.is_empty())
+            .then(|| crate::shape::physical::PhysicalShaper::new(&layout.data));
         Self {
             layout,
             lines,
@@ -1134,6 +1131,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if self.done {
             return None;
         }
+        if self.candidate_mutations.is_some() {
+            return self.break_next_first_fit(max_advance, tab_origin);
+        }
         self.prepare_total_fit(max_advance, tab_origin);
         let line = self.break_next_first_fit(max_advance, tab_origin);
         self.settle_total_fit(line, max_advance, tab_origin)
@@ -1146,7 +1146,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let LineBreakStrategy::TotalFit(params) = self.layout.data.line_break_strategy else {
             return;
         };
-        if self.shape_candidates.is_some() {
+        if self.shape_candidates.is_some()
+            && (!self.layout.data.inline_owner_shaping.is_empty()
+                || !self.layout.data.deferred_justification_shapes.is_empty())
+        {
             return;
         }
         if matches!(self.total_fit, TotalFitState::Unplanned) {
@@ -1179,22 +1182,47 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             } else {
                 0.0
             };
-        self.total_fit = TotalFitState::Probing;
         self.state.line.content_end = self.state.line.measure();
         self.state.probe = Some(total_fit::Segment {
             start: self.state.line.measure(),
             ..Default::default()
         });
-        let probed = self
-            .break_next_first_fit(f32::INFINITY, tab_origin)
-            .is_some();
-        let segment = self.state.probe.take();
-        if probed {
-            self.revert();
-        }
+        let probe = self.preview_shape_candidate_with(|breaker| {
+            breaker
+                .break_next_first_fit(f32::INFINITY, tab_origin)
+                .map(|_| ())
+        });
         self.state.probe = None;
-        segment
-            .and_then(|segment| segment.plan(params, first_width, width))
+        let start = SourceCursor::at(
+            &self.layout.data,
+            self.state.item_idx,
+            self.state.cluster_idx,
+        )
+        .source_offset(&self.layout.data);
+        probe
+            .and_then(|probe| {
+                let end = probe.line.text_range.end;
+                let segment = probe.state.probe?;
+                segment.plan(params, first_width, width, |from, to| {
+                    let offset = |cursor: total_fit::BreakCursor| {
+                        SourceCursor::at(&self.layout.data, cursor.0, cursor.1)
+                            .source_offset(&self.layout.data)
+                    };
+                    let range = from.map_or(start, offset)..to.map_or(end, offset);
+                    let Some(shaper) = &mut self.physical_shaper else {
+                        return 0.0;
+                    };
+                    let shape = shaper.shape_line(
+                        &self.layout.data,
+                        &[],
+                        &[range.start, range.end],
+                        range.start,
+                        None,
+                        false,
+                    );
+                    shape.fit_adjustment(&self.layout.data, range)
+                })
+            })
             .map_or(TotalFitState::Abandoned, |mut ends| {
                 ends.reverse();
                 TotalFitState::Planned { max_advance, ends }

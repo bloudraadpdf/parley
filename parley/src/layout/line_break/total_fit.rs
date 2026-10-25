@@ -122,14 +122,22 @@ impl Segment {
         params: TotalFit,
         first_width: f32,
         width: f32,
+        mut shape_adjustment: impl FnMut(Option<BreakCursor>, Option<BreakCursor>) -> f32,
     ) -> Option<Vec<BreakCursor>> {
         let end = self.end?;
         let last = self.opportunities.len() + 1;
-        let fit = |from: usize, to: usize| -> LineFit {
+        let mut fit = |from: usize, to: usize| -> LineFit {
             let start = self.start_of(from);
             let stop = self.end_of(to, end);
             let available = if from == 0 { first_width } else { width };
-            let slack = available - (stop.advance - start.advance);
+            let cursor = |point: usize| {
+                point
+                    .checked_sub(1)
+                    .and_then(|index| self.opportunities.get(index))
+                    .map(|opportunity| opportunity.cursor)
+            };
+            let slack = available
+                - (stop.advance - start.advance + shape_adjustment(cursor(from), cursor(to)));
             let shrink = stop.shrink - start.shrink;
             if slack < -shrink - SLACK_EPSILON {
                 return if to == from + 1 {
@@ -347,7 +355,7 @@ mod tests {
 
     fn plan_with(segment: Segment, params: TotalFit, width: f32) -> Vec<usize> {
         segment
-            .plan(params, width, width)
+            .plan(params, width, width, |_, _| 0.0)
             .expect("a segment with an end has a plan")
             .into_iter()
             .map(|(_, cluster)| cluster)

@@ -34,8 +34,10 @@ fn retained_layout(
 
 fn glyphs(layout: &mut Layout<ColorBrush>) -> Vec<(u32, f32, f32, f32)> {
     let owners = core::mem::take(&mut layout.data.inline_owner_shaping);
+    let sources = core::mem::take(&mut layout.data.deferred_physical_shapes);
     layout.break_all_lines(None);
     layout.data.inline_owner_shaping = owners;
+    layout.data.deferred_physical_shapes = sources;
     super::utils::visual_glyphs(layout)
         .into_iter()
         .flatten()

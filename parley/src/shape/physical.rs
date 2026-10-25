@@ -67,6 +67,38 @@ pub(crate) struct PhysicalShape {
 }
 
 impl PhysicalShape {
+    pub(crate) fn fit_adjustment<B: Brush>(
+        &self,
+        data: &LayoutData<B>,
+        range: Range<usize>,
+    ) -> f32 {
+        self.segments
+            .iter()
+            .map(|segment| {
+                let run = &data.runs[segment.run];
+                segment
+                    .shape
+                    .clusters
+                    .iter()
+                    .zip(&data.clusters[segment.clusters.clone()])
+                    .filter(|(_, original)| range.contains(&original.text_range(run).start))
+                    .map(|(shaped, original)| {
+                        let offset = original.text_range(run).start;
+                        if data
+                            .source_cluster_fit_advances
+                            .binary_search_by_key(&offset, |entry| entry.byte_index)
+                            .is_ok()
+                        {
+                            0.0
+                        } else {
+                            shaped.line_break_advance - original.line_break_advance
+                        }
+                    })
+                    .sum::<f32>()
+            })
+            .sum()
+    }
+
     /// The shape gives the glyphs of the line up to `offset`.
     pub(crate) fn covers(&self, offset: usize) -> bool {
         self.end.is_none_or(|end| offset <= end)

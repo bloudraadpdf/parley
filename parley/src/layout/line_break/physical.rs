@@ -89,6 +89,18 @@ impl<B: Brush> BreakLines<'_, B> {
         measure: f32,
         tab_origin: LineTabOrigin,
     ) -> Option<LineShapeCandidate> {
+        if let Some((item, cluster)) = self.state.planned_end {
+            let end = SourceCursor::at(&self.layout.data, item, cluster);
+            let prefix = self.preview_source_prefix(end, tab_origin)?;
+            let (shape, _) = self.physical_prefix_shape(&prefix, None, false);
+            let installed = self.install_physical_shape(&shape);
+            let candidate = self.preview_natural_candidate(measure, tab_origin);
+            self.remove_physical_shape(installed);
+            return candidate.map(|mut candidate| {
+                candidate.physical_shape = Some(shape);
+                candidate
+            });
+        }
         let fit = PhysicalFit {
             measure,
             tab_origin,
