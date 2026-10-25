@@ -318,3 +318,38 @@ fn a_line_of_another_measure_breaks_the_rest_of_the_segment_first_fit() {
     breaker.finish();
     assert_eq!(words_per_line(TEXT, &layout), [6, 7, 4]);
 }
+
+#[test]
+fn total_fit_accounts_for_trimmed_terminal_tracking() {
+    let breaks = |text: &str, width: f32, trim: bool, mixed: bool| {
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::<ColorBrush>::new();
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        builder.push_default(StyleProperty::LetterSpacing(0.7));
+        builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+        if mixed {
+            builder.push(StyleProperty::LetterSpacing(1.4), 0..1);
+        }
+        let mut layout = builder.build(text);
+        layout.set_line_break_strategy(LineBreakStrategy::TotalFit(PRINCE));
+        layout.set_line_end_letter_spacing_trim(trim);
+        layout.break_all_lines(Some(width));
+        layout
+            .lines()
+            .map(|line| line.text_range())
+            .collect::<Vec<_>>()
+    };
+    for text in [TEXT, &alloc::format!("AאבB {TEXT}")] {
+        for mixed in [false, true] {
+            for width in 100..250 {
+                assert_eq!(
+                    breaks(text, width as f32, true, mixed),
+                    breaks(text, width as f32 + 0.7, false, mixed),
+                    "width {width}, mixed {mixed}, text {text}"
+                );
+            }
+        }
+    }
+}

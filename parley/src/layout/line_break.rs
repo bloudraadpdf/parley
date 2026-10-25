@@ -1208,14 +1208,32 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             .and_then(|probe| {
                 let end = probe.line.text_range.end;
                 let segment = probe.state.probe?;
+                let mut items = probe.items;
+                items.sort_by_key(|item| item.layout_item_index);
                 segment.plan(params, first_width, width, |from, to| {
                     let offset = |cursor: total_fit::BreakCursor| {
                         SourceCursor::at(&self.layout.data, cursor.0, cursor.1)
                             .source_offset(&self.layout.data)
                     };
                     let range = from.map_or(start, offset)..to.map_or(end, offset);
+                    let spacing = match self.uniform_letter_spacing {
+                        Some(spacing) => {
+                            if self.layout.data.trim_line_end_letter_spacing {
+                                spacing
+                            } else {
+                                0.0
+                            }
+                        }
+                        None => candidate_letter_spacing(
+                            &self.layout.data,
+                            &items,
+                            &probe.line,
+                            from,
+                            to,
+                        ),
+                    };
                     let Some(shaper) = &mut self.physical_shaper else {
-                        return 0.0;
+                        return -spacing;
                     };
                     let shape = shaper.shape_line(
                         &self.layout.data,
@@ -1225,7 +1243,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         None,
                         false,
                     );
-                    shape.fit_adjustment(&self.layout.data, range)
+                    shape.fit_adjustment(&self.layout.data, range) - spacing
                 })
             })
             .map_or(TotalFitState::Abandoned, |mut ends| {
@@ -3454,6 +3472,62 @@ impl LetterSpacingEdges {
             }
         }
     }
+}
+
+fn candidate_letter_spacing<B: Brush>(
+    data: &LayoutData<B>,
+    items: &[LineItemData],
+    line: &LineData,
+    from: Option<total_fit::BreakCursor>,
+    to: Option<total_fit::BreakCursor>,
+) -> f32 {
+    let items = items
+        .iter()
+        .filter_map(|item| {
+            let index = item.layout_item_index?;
+            if from.is_some_and(|cursor| index < cursor.0)
+                || to.is_some_and(|cursor| {
+                    index > cursor.0
+                        || (index == cursor.0 && item.kind == LayoutItemKind::InlineBox)
+                })
+            {
+                return None;
+            }
+            let mut item = item.clone();
+            if item.kind == LayoutItemKind::TextRun {
+                if let Some((_, cluster)) = from.filter(|cursor| cursor.0 == index) {
+                    item.cluster_range.start = item.cluster_range.start.max(cluster);
+                }
+                if let Some((_, cluster)) = to.filter(|cursor| cursor.0 == index) {
+                    item.cluster_range.end = item.cluster_range.end.min(cluster);
+                }
+                if item.cluster_range.is_empty() {
+                    return None;
+                }
+            }
+            Some(item)
+        })
+        .collect::<Vec<_>>();
+    let terminal = collect_terminal_whitespace(&items, data, &line.selected_source_cluster_advance);
+    let mut edges = LetterSpacingEdges::default();
+    for item in &items {
+        let index = item.layout_item_index.unwrap();
+        edges.include_source_item(data, index, None);
+        if item.kind == LayoutItemKind::TextRun {
+            for cluster in &data.clusters[item.cluster_range.clone()] {
+                let offset = cluster.text_range(&data.runs[item.index]).start;
+                if !line
+                    .removed_leading_source_ranges
+                    .iter()
+                    .chain(&terminal.removed_source_ranges)
+                    .any(|range| range.contains(&offset))
+                {
+                    edges.include_source_item(data, index, Some(cluster));
+                }
+            }
+        }
+    }
+    edges.correction(data.trim_line_end_letter_spacing)
 }
 
 fn line_edge_letter_spacing<B: Brush>(
