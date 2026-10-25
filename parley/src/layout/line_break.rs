@@ -1828,11 +1828,25 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             .state
                             .projected_source_boundary
                             .is_some_and(|projection| projection.suppresses(byte_index));
-                        if self
+                        if let Some(projection) = self
                             .state
                             .projected_source_boundary
-                            .is_some_and(|projection| projection.target() <= byte_index)
+                            .filter(|projection| projection.target() <= byte_index)
                         {
+                            let start = self.state.line.measure();
+                            if matches!(
+                                projection.selected_source_cluster_advance(),
+                                SelectedSourceClusterAdvance::Collapsed { .. }
+                            ) {
+                                if let Some(opportunity) = self
+                                    .state
+                                    .probe
+                                    .as_mut()
+                                    .and_then(|segment| segment.opportunities.last_mut())
+                                {
+                                    opportunity.start = start;
+                                }
+                            }
                             self.state.projected_source_boundary = None;
                         }
                         if self

@@ -46,6 +46,59 @@ fn broken(text: &str, strategy: LineBreakStrategy) -> Vec<usize> {
 }
 
 #[test]
+fn inline_word_edges_preserve_total_fit_line_choices() {
+    use crate::{InlineBox, InlineBoxBreakAffinity, InlineOwnerEdgeAdvance};
+    let text = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega";
+    for space in [
+        None,
+        Some(crate::FollowingSourceSpace::CollapsedAfterProjectedBreak),
+        Some(crate::FollowingSourceSpace::RetainedAdvance),
+    ] {
+        let mut fonts = create_font_context();
+        let mut context: LayoutContext<ColorBrush> = LayoutContext::new();
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+        if let Some(space) = space {
+            let mut start = 0;
+            for (id, word) in text.split_whitespace().enumerate() {
+                builder.push_inline_box(InlineBox::inline_start_edge(
+                    2 * id as u64,
+                    start,
+                    InlineOwnerEdgeAdvance::uniform(0.0),
+                    0.0,
+                    InlineBoxBreakAffinity::ToNext,
+                ));
+                builder.push_inline_box(InlineBox::inline_end_edge_with_following_source_space(
+                    2 * id as u64 + 1,
+                    start + word.len(),
+                    InlineOwnerEdgeAdvance::uniform(0.0),
+                    0.0,
+                    space,
+                    InlineBoxBreakAffinity::ToPrevious,
+                ));
+                start += word.len() + 1;
+            }
+        }
+        let mut paragraph = builder.build(text);
+        paragraph.set_line_break_strategy(LineBreakStrategy::TotalFit(PRINCE));
+        paragraph.set_text_indent(5.0, crate::IndentOptions::default());
+        paragraph.break_all_lines(Some(180.0));
+        let expected = if space == Some(crate::FollowingSourceSpace::RetainedAdvance) {
+            [5, 6, 7, 6]
+        } else {
+            [5, 6, 8, 5]
+        };
+        assert_eq!(
+            words_per_line(text, &paragraph),
+            expected,
+            "space={space:?}"
+        );
+    }
+}
+
+#[test]
 fn total_fit_evens_the_separators_of_a_paragraph() {
     assert_eq!(broken(TEXT, LineBreakStrategy::FirstFit), [7, 5, 5]);
     assert_eq!(broken(TEXT, LineBreakStrategy::TotalFit(PRINCE)), [6, 6, 5]);
