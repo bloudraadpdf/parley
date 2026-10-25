@@ -71,11 +71,17 @@ fn a_line_fits_when_its_separators_shrink_within_their_limit() {
     let width = width_at(0.9);
     let mut layout = broken(1.0 / 6.0, width);
     assert_eq!(first_line_xs(&layout), 6);
-    let line = layout.lines().next().expect("a line");
-    assert!(line.measured_advance() > width);
-    assert!(line.measured_advance() - line.word_space_shrink() <= width);
-    let overflowing = layout.lines().nth(1).expect("the unbreakable word");
-    assert!(overflowing.measured_advance() - overflowing.word_space_shrink() > width);
+    let mut breaker = layout.break_lines();
+    for fits in [true, false] {
+        let (advance, _) = breaker
+            .break_next(width, crate::LineTabOrigin::ZERO)
+            .expect("a line");
+        let line = breaker.last_line().expect("the committed line");
+        let measured = advance - line.metrics().trailing_whitespace;
+        assert!(measured > width);
+        assert_eq!(measured - line.word_space_shrink() <= width, fits);
+    }
+    breaker.finish();
     justify(&mut layout, width);
     let advance = first_line_advance(&layout);
     assert!(

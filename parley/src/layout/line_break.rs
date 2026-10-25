@@ -799,6 +799,11 @@ pub struct CommittedLine<'a> {
 }
 
 impl CommittedLine<'_> {
+    /// Word-space shrink available when this line was fitted, before alignment.
+    pub fn word_space_shrink(&self) -> f32 {
+        self.data.space_shrink
+    }
+
     /// Returns the line metrics before paragraph alignment.
     pub fn metrics(&self) -> &LineMetrics {
         &self.data.metrics

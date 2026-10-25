@@ -80,11 +80,6 @@ impl<'a, B: Brush> Line<'a, B> {
         self.data.measured_advance()
     }
 
-    /// Word-space shrink available when this line was fitted, before alignment.
-    pub fn word_space_shrink(&self) -> f32 {
-        self.data.space_shrink
-    }
-
     /// Whether optional shaping could not fit and requires alignment fallback.
     pub fn justification_shape_fallback(&self) -> bool {
         self.data.justification_shape_fallback
