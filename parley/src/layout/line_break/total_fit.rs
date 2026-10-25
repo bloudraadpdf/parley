@@ -193,7 +193,14 @@ impl Segment {
                 )
             });
             if let Some(end) = word_end {
+                let word_start = self.opportunities[..point - 1]
+                    .iter()
+                    .rposition(|opportunity| opportunity.discretionary.is_none())
+                    .map(|index| index + 1);
                 if enabled_word != Some(end)
+                    && !active
+                        .iter()
+                        .any(|&index| Some(nodes[index].point) == word_start)
                     && active
                         .iter()
                         .any(|&index| matches!(fit(nodes[index].point, end), LineFit::Overfull))
@@ -395,6 +402,13 @@ mod tests {
         segment.opportunities[7].discretionary = Some(DiscretionaryBreakCondition::WordOverflow);
         assert_eq!(plan_with(segment.clone(), PRINCE, 200.0), [9, 18]);
         assert_eq!(plan_with(segment, PRINCE, 195.0).first(), Some(&8));
+    }
+
+    #[test]
+    fn an_accepted_word_boundary_defers_automatic_hyphenation() {
+        let mut segment = segment(&[44.0, 47.0, 0.5, 20.0, 70.0]);
+        segment.opportunities[2].discretionary = Some(DiscretionaryBreakCondition::WordOverflow);
+        assert_eq!(plan_with(segment, PRINCE, 97.0), [2]);
     }
 
     #[test]
