@@ -24,7 +24,7 @@ pub enum LineBreakStrategy {
 /// The parameters of total-fit line breaking.
 ///
 /// A line that its separators stretch by `r` of their stretch, or shrink by `r` of their shrink, has the badness
-/// `100 r³` and the demerits `(line_penalty + badness)²`, plus `hyphen_penalty²` when it ends at a discretionary
+/// `100 r³` and the demerits `(line_penalty + badness)²`, plus `hyphen_penalty²` when it ends at a hyphenated
 /// break. The line that ends a segment has no badness.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TotalFit {
@@ -34,11 +34,11 @@ pub struct TotalFit {
     pub tolerance: f32,
     /// The demerits that each line adds.
     pub line_penalty: f32,
-    /// The penalty of a line that ends at a discretionary break.
+    /// The penalty of a line that ends at a written dash or discretionary break.
     pub hyphen_penalty: f32,
-    /// The demerits of a discretionary break that follows a discretionary break.
+    /// The demerits of consecutive hyphenated breaks.
     pub double_hyphen_demerits: f32,
-    /// The demerits of a last line that follows a discretionary break.
+    /// The demerits of a last line that follows a hyphenated break.
     pub final_hyphen_demerits: f32,
 }
 
@@ -66,6 +66,7 @@ pub(super) struct Opportunity {
     pub(super) start: Measure,
     /// Whether the break is discretionary.
     pub(super) discretionary: Option<DiscretionaryBreakCondition>,
+    pub(super) authored_dash: bool,
 }
 
 /// The measures of a segment between forced breaks.
@@ -84,7 +85,7 @@ struct Node {
     point: usize,
     demerits: f32,
     previous: Option<usize>,
-    discretionary: bool,
+    hyphenated: bool,
 }
 
 enum LineFit {
@@ -155,14 +156,16 @@ impl Segment {
             };
             LineFit::Badness(100.0 * ratio * ratio * ratio)
         };
-        let discretionary = |point: usize| {
+        let hyphenated = |point: usize| {
             point
                 .checked_sub(1)
                 .and_then(|k| self.opportunities.get(k))
-                .is_some_and(|opportunity| opportunity.discretionary.is_some())
+                .is_some_and(|opportunity| {
+                    opportunity.discretionary.is_some() || opportunity.authored_dash
+                })
         };
         let line_demerits = |node: Node, point: usize, badness: f32| {
-            let hyphenation = match (node.discretionary, discretionary(point), point == last) {
+            let hyphenation = match (node.hyphenated, hyphenated(point), point == last) {
                 (true, true, _) => params.hyphen_penalty.powi(2) + params.double_hyphen_demerits,
                 (_, true, _) => params.hyphen_penalty.powi(2),
                 (true, false, true) => params.final_hyphen_demerits,
@@ -174,10 +177,11 @@ impl Segment {
             point: 0,
             demerits: 0.0,
             previous: None,
-            discretionary: false,
+            hyphenated: false,
         }];
         let mut active = alloc::vec![0_usize];
         let mut point = 1;
+        let mut enabled_word = None;
         while point <= last {
             let word_end = self.opportunities.get(point - 1).and_then(|opportunity| {
                 (opportunity.discretionary == Some(DiscretionaryBreakCondition::WordOverflow)).then(
@@ -188,6 +192,19 @@ impl Segment {
                     },
                 )
             });
+            if let Some(end) = word_end {
+                if enabled_word != Some(end)
+                    && active
+                        .iter()
+                        .any(|&index| matches!(fit(nodes[index].point, end), LineFit::Overfull))
+                {
+                    enabled_word = Some(end);
+                }
+                if enabled_word != Some(end) {
+                    point += 1;
+                    continue;
+                }
+            }
             let mut best: Option<Node> = None;
             let mut fallback: Option<Node> = None;
             let mut index = 0;
@@ -195,10 +212,6 @@ impl Segment {
             while index < active.len() {
                 let node_index = active[index];
                 let node = nodes[node_index];
-                if word_end.is_some_and(|end| !matches!(fit(node.point, end), LineFit::Overfull)) {
-                    index += 1;
-                    continue;
-                }
                 let badness = match fit(node.point, point) {
                     LineFit::Overfull => {
                         active.remove(index);
@@ -211,7 +224,7 @@ impl Segment {
                             point: underfull,
                             demerits: line_demerits(node, underfull, badness),
                             previous: Some(node_index),
-                            discretionary: discretionary(underfull),
+                            hyphenated: hyphenated(underfull),
                         };
                         let candidate = fallback
                             .filter(|best| best.demerits <= candidate.demerits)
@@ -228,14 +241,14 @@ impl Segment {
                     LineFit::Badness(badness) => badness,
                 };
                 if point == last || badness <= params.tolerance {
-                    let ends_discretionary = discretionary(point);
+                    let ends_hyphenated = hyphenated(point);
                     let demerits = line_demerits(node, point, badness);
                     if best.is_none_or(|best| demerits < best.demerits) {
                         best = Some(Node {
                             point,
                             demerits,
                             previous: Some(node_index),
-                            discretionary: ends_discretionary,
+                            hyphenated: ends_hyphenated,
                         });
                     }
                 }
@@ -305,6 +318,7 @@ mod tests {
                 end,
                 start,
                 discretionary: None,
+                authored_dash: false,
             });
         }
         Segment {
@@ -359,17 +373,20 @@ mod tests {
         assert_eq!(plan(&two_lines(6.0 * SPACE), 200.0), [8, 18]);
     }
 
-    /// The penalty of a discretionary break weighs against the evenness it buys.
     #[test]
-    fn a_discretionary_break_pays_its_penalty() {
-        let mut segment = segment(&two_lines(6.0 * SPACE));
-        segment.opportunities[7].discretionary = Some(DiscretionaryBreakCondition::Normal);
-        assert_eq!(plan_with(segment.clone(), PRINCE, 200.0), [8, 18]);
-        let costly = TotalFit {
-            hyphen_penalty: 300.0,
-            ..PRINCE
-        };
-        assert_eq!(plan_with(segment, costly, 200.0), [9, 18]);
+    fn a_hyphenated_break_pays_its_penalty() {
+        for authored_dash in [false, true] {
+            let mut segment = segment(&two_lines(6.0 * SPACE));
+            segment.opportunities[7].authored_dash = authored_dash;
+            segment.opportunities[7].discretionary =
+                (!authored_dash).then_some(DiscretionaryBreakCondition::Normal);
+            assert_eq!(plan_with(segment.clone(), PRINCE, 200.0), [8, 18]);
+            let costly = TotalFit {
+                hyphen_penalty: 300.0,
+                ..PRINCE
+            };
+            assert_eq!(plan_with(segment, costly, 200.0), [9, 18]);
+        }
     }
 
     #[test]

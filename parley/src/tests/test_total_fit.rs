@@ -177,6 +177,51 @@ fn automatic_and_authored_hyphens_follow_native_prince_line_choices() {
 }
 
 #[test]
+fn an_automatic_hyphen_stays_available_to_alternative_line_starts() {
+    use crate::layout::{DiscretionaryBreak, DiscretionaryBreakCondition, LineBreakOverride};
+    let text = "care; -ligr, a. sad; -ljóð, re\u{ad}fl. to be in low spir\u{ad}its; -sam\u{ad}li\u{ad}ga, adv. sor\u{ad}row\u{ad}ful\u{ad}ly, sad\u{ad}ly; (1) trou\u{ad}ble\u{ad}some (-söm flu\u{ad}ga); (2) de\u{ad}pressed,";
+    let mut hyphen = layout("-", LineBreakStrategy::FirstFit);
+    hyphen.break_all_lines(None);
+    let mut paragraph = layout(text, LineBreakStrategy::TotalFit(PRINCE));
+    paragraph.set_text_indent(5.0, crate::IndentOptions::default());
+    paragraph.set_line_break_overrides(
+        text.match_indices(" -")
+            .map(|(offset, _)| LineBreakOverride::suppress(offset + 2))
+            .collect(),
+    );
+    paragraph.set_discretionary_breaks(
+        text.match_indices('\u{ad}')
+            .map(|(offset, _)| DiscretionaryBreak {
+                byte_index: offset + '\u{ad}'.len_utf8(),
+                advance: hyphen.full_width(),
+                max_consecutive_lines: None,
+                condition: DiscretionaryBreakCondition::WordOverflow,
+            })
+            .collect(),
+    );
+    paragraph.break_all_lines(Some(209.0));
+    let lines = paragraph
+        .lines()
+        .map(|line| {
+            let mut text = text[line.text_range()].trim().replace('\u{ad}', "");
+            if line.ends_at_discretionary_break() {
+                text.push('-');
+            }
+            text
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lines,
+        [
+            "care; -ligr, a. sad; -ljóð, refl. to be in low",
+            "spirits; -samliga, adv. sorrowfully, sad-",
+            "ly; (1) troublesome (-söm fluga); (2) de-",
+            "pressed,",
+        ]
+    );
+}
+
+#[test]
 fn each_segment_between_forced_breaks_has_its_own_plan() {
     let text = alloc::format!("{TEXT}\n{TEXT}");
     assert_eq!(

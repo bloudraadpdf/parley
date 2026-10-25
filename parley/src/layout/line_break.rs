@@ -647,6 +647,7 @@ impl BreakerState {
                 },
                 start: self.line.measure(),
                 discretionary: state.discretionary_break.then_some(condition),
+                authored_dash: matches!(kind, RegularBreakKind::AuthoredDashPunctuation),
             });
         }
         self.planned_end_reached |= self.planned_end == Some(cursor);
