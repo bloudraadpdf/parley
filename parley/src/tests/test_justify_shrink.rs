@@ -71,6 +71,11 @@ fn a_line_fits_when_its_separators_shrink_within_their_limit() {
     let width = width_at(0.9);
     let mut layout = broken(1.0 / 6.0, width);
     assert_eq!(first_line_xs(&layout), 6);
+    let line = layout.lines().next().expect("a line");
+    assert!(line.measured_advance() > width);
+    assert!(line.measured_advance() - line.word_space_shrink() <= width);
+    let overflowing = layout.lines().nth(1).expect("the unbreakable word");
+    assert!(overflowing.measured_advance() - overflowing.word_space_shrink() > width);
     justify(&mut layout, width);
     let advance = first_line_advance(&layout);
     assert!(
