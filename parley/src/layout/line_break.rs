@@ -1151,10 +1151,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let LineBreakStrategy::TotalFit(params) = self.layout.data.line_break_strategy else {
             return;
         };
-        if self.shape_candidates.is_some()
-            && (!self.layout.data.inline_owner_shaping.is_empty()
-                || self.layout.justification_shape_policy().is_some())
-        {
+        if self.shape_candidates.is_some() && self.layout.justification_shape_policy().is_some() {
             return;
         }
         if matches!(self.total_fit, TotalFitState::Unplanned) {

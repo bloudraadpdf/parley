@@ -99,6 +99,28 @@ fn inline_word_edges_preserve_total_fit_line_choices() {
 }
 
 #[test]
+fn physical_inline_edges_do_not_disable_total_fit() {
+    use crate::layout::{PhysicalLineEdge, ShapingEdgePlacement};
+
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, TEXT, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+    let start = TEXT.find("xxxxxxxxx").unwrap();
+    builder.push_inline_owner_shaping(super::test_physical_shaping::owner(
+        start..start + 9,
+        PhysicalLineEdge::Left,
+        ShapingEdgePlacement::FirstLine,
+    ));
+    let mut layout = builder.build(TEXT);
+    layout.set_line_break_strategy(LineBreakStrategy::TotalFit(PRINCE));
+    layout.break_all_lines(Some(WIDTH));
+    assert_eq!(words_per_line(TEXT, &layout), [6, 6, 5]);
+}
+
+#[test]
 fn inactive_justification_features_do_not_disable_total_fit() {
     let text = TEXT.replacen("xxxxxx", "xxx\u{00ad}xxx", 1) + " fi";
     let mut fonts = create_font_context();
