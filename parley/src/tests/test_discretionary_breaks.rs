@@ -44,6 +44,66 @@ fn unwrapped_advance(text: &str) -> f32 {
 }
 
 #[test]
+fn soft_hyphens_split_enabled_discretionary_ligatures() {
+    let build = |text: &str| {
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::<ColorBrush>::new();
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        let features = [crate::setting::FontFeature {
+            tag: crate::setting::Tag::from_bytes(*b"dlig"),
+            value: 1,
+        }];
+        builder.push_default(StyleProperty::FontFeatures((&features).into()));
+        builder.build(text)
+    };
+    let mut layout = build("a a a under\u{00ad}ſ\u{00ad}tanding");
+    let mut hyphen = build("-");
+    hyphen.break_all_lines(None);
+    layout.set_discretionary_break_shapes(
+        [
+            "a a a under\u{00ad}".len(),
+            "a a a under\u{00ad}ſ\u{00ad}".len(),
+        ]
+        .into_iter()
+        .map(|boundary| {
+            crate::layout::DiscretionaryBreakShape::new(boundary, None, "-".into(), hyphen.clone())
+                .unwrap()
+        })
+        .collect(),
+    );
+    let width = unwrapped_advance("a a a underſ") + unwrapped_advance("-");
+    let mut unbroken = layout.clone();
+    unbroken.break_all_lines(None);
+    for strategy in [
+        crate::LineBreakStrategy::FirstFit,
+        crate::LineBreakStrategy::TotalFit(crate::TotalFit {
+            stretch_em: 0.125,
+            tolerance: 800.0,
+            line_penalty: 10.0,
+            hyphen_penalty: 50.0,
+            double_hyphen_demerits: 2500.0,
+            final_hyphen_demerits: 0.0,
+        }),
+    ] {
+        layout.set_line_break_strategy(strategy);
+        layout.break_all_lines(Some(width + 0.01));
+        assert!(layout.get(0).unwrap().ends_at_discretionary_break());
+        assert_eq!(
+            layout.get(0).unwrap().text_range().end,
+            "a a a under\u{00ad}ſ\u{00ad}".len()
+        );
+        assert!((layout.get(0).unwrap().metrics().advance - width).abs() < 0.001);
+        layout.break_all_lines(None);
+        assert_eq!(
+            super::utils::visual_glyphs(&layout),
+            super::utils::visual_glyphs(&unbroken)
+        );
+    }
+}
+
+#[test]
 fn selected_discretionary_break_drops_cross_line_kerning() {
     let text = "AV\u{00ad}AVAV";
     let mut layout = roboto_layout(text);

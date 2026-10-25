@@ -1306,6 +1306,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             return None;
         }
         self.prev_state = Some(self.state.clone());
+        let plans_shaped_lines = self.state.probe.is_some() && self.physical_shaper.is_some();
 
         let line_indent = self.resolve_indent();
         self.state.line.tab_origin = tab_origin.raw() + line_indent;
@@ -1920,11 +1921,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             && !source_boundary_was_projected
                             && (resolved_source_opportunity || text_wrap_mode == TextWrapMode::Wrap)
                         {
-                            // We do not currently handle breaking within a ligature, so we ignore boundaries in such a position.
-                            //
-                            // We also don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
-                            // line breaks. We should accept the overflowing fragment in that scenario.
-                            if (!is_ligature_continuation || breakable_ignorable_after_space)
+                            // Planned boundaries are reshaped before the selected line is committed.
+                            if (!is_ligature_continuation
+                                || breakable_ignorable_after_space
+                                || plans_shaped_lines)
                                 && self.state.line.has_content_advance()
                             {
                                 let candidate_kind = match (
@@ -2036,6 +2036,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         );
                         if is_ligature_start
                             && !self.source_probe.is_some_and(SourceProbe::is_prefix)
+                            && !plans_shaped_lines
                         {
                             while let Some(cluster) = run
                                 .get(self.state.cluster_idx + 1 - run_data.cluster_range.start)
