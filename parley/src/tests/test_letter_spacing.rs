@@ -394,9 +394,9 @@ fn letter_spacing_disables_optional_ligatures() {
 }
 
 #[test]
-fn explicitly_enabled_ligatures_keep_their_grapheme_spacing() {
-    let shape = |spacing| {
-        configured_layout("Roboto", "fi", spacing, |builder| {
+fn explicitly_enabled_ligatures_are_indivisible_spacing_units() {
+    let shape = |text, spacing| {
+        configured_layout("Roboto", text, spacing, |builder| {
             let features = [crate::setting::FontFeature {
                 tag: crate::setting::Tag::from_bytes(*b"liga"),
                 value: 1,
@@ -404,11 +404,23 @@ fn explicitly_enabled_ligatures_keep_their_grapheme_spacing() {
             builder.push_default(StyleProperty::FontFeatures((&features).into()));
         })
     };
-    let plain = shape(0.0);
-    let tracked = shape(5.0);
-    assert_eq!(glyph_count(&plain), 1);
-    assert_eq!(glyph_count(&tracked), 1);
-    assert!((tracked.full_width() - plain.full_width() - 5.0).abs() < 0.001);
+    for (text, glyphs, intervals) in [
+        ("fi", 1, 0.0),
+        ("fifi", 2, 1.0),
+        ("Af iB", 5, 4.0),
+        ("AfiB", 3, 2.0),
+    ] {
+        for spacing in [-2.0, 5.0] {
+            let plain = shape(text, 0.0);
+            let tracked = shape(text, spacing);
+            assert_eq!(glyph_count(&plain), glyphs);
+            assert_eq!(glyph_count(&tracked), glyphs);
+            assert!(
+                (tracked.full_width() - plain.full_width() - spacing * intervals).abs() < 0.001,
+                "{text}, {spacing}"
+            );
+        }
+    }
 }
 
 #[test]

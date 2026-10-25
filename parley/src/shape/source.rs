@@ -182,7 +182,7 @@ impl DeferredSourceShape {
         let offset = range.start - run.text_range.start;
         let first_cluster = source_clusters.partition_point(|cluster| cluster.text_offset < offset);
         let source_flags = crate::layout::data::ClusterData::GRAPHEME_START
-            | crate::layout::data::ClusterData::LETTER_SPACING_BOUNDARY;
+            | crate::layout::data::ClusterData::GRAPHEME_END;
         for (cluster, original) in scratch
             .clusters
             .iter_mut()

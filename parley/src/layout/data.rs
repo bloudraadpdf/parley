@@ -845,6 +845,7 @@ impl ClusterData {
     pub(crate) const LIGATURE_COMPONENT: u16 = 2;
     pub(crate) const LETTER_SPACING_BOUNDARY: u16 = 4;
     pub(crate) const GRAPHEME_START: u16 = 8;
+    pub(crate) const GRAPHEME_END: u16 = 16;
 
     #[inline(always)]
     pub(crate) fn is_ligature_start(self) -> bool {
@@ -1948,7 +1949,7 @@ impl<B: Brush> LayoutData<B> {
                 let mut starts_grapheme = false;
                 while boundaries.peek().is_some_and(|end| *end <= source_start) {
                     if let Some(last) = last_visible.take() {
-                        self.clusters[last].flags |= ClusterData::LETTER_SPACING_BOUNDARY;
+                        self.clusters[last].flags |= ClusterData::GRAPHEME_END;
                     }
                     starts_grapheme |= boundaries.peek().is_some_and(|end| *end == source_start);
                     boundaries.next();
@@ -1962,7 +1963,7 @@ impl<B: Brush> LayoutData<B> {
             }
         }
         if let Some(last) = last_visible {
-            self.clusters[last].flags |= ClusterData::LETTER_SPACING_BOUNDARY;
+            self.clusters[last].flags |= ClusterData::GRAPHEME_END;
         }
     }
 
@@ -1988,6 +1989,20 @@ impl<B: Brush> LayoutData<B> {
 
     pub(crate) fn finish_advances(&mut self) {
         for run in &self.runs {
+            for index in run.cluster_range.clone() {
+                self.clusters[index].flags &= !ClusterData::LETTER_SPACING_BOUNDARY;
+                if self.clusters[index].flags & ClusterData::GRAPHEME_END == 0 {
+                    continue;
+                }
+                let owner = run.spacing_glyph(&self.clusters, index);
+                let continues_ligature = owner.is_some()
+                    && (index + 1..run.cluster_range.end)
+                        .find(|&next| !self.clusters[next].info.is_default_ignorable())
+                        .is_some_and(|next| run.spacing_glyph(&self.clusters, next) == owner);
+                if !continues_ligature {
+                    self.clusters[index].flags |= ClusterData::LETTER_SPACING_BOUNDARY;
+                }
+            }
             let word = run.word_spacing;
             let letter = run.letter_spacing;
             if nearly_zero(word) && nearly_zero(letter) {

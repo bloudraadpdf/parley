@@ -55,20 +55,30 @@ fn apply_boundaries(
 
 #[test]
 fn prepared_boundaries_split_and_restore_ligatures_without_new_source_items() {
-    let mut layout = retained_layout("office", "Roboto", &[], |_| {});
-    let mut shaper = crate::shape::physical::PhysicalShaper::new(&layout.data);
-    let joined = glyphs(&mut layout);
-    let source_items = layout.data.items.clone();
-    let retained_glyphs = layout.data.glyphs.clone();
-    let mut expected = retained_layout("office", "Roboto", &[2, 3], |_| {});
-    let separated = glyphs(&mut expected);
-    assert_ne!(joined, separated);
-    let installed = apply_boundaries(&mut shaper, &mut layout, &[3, 2, 2]);
-    assert_eq!(layout.data.glyphs[..retained_glyphs.len()], retained_glyphs);
-    assert_eq!(glyphs(&mut layout), separated);
-    assert_eq!(layout.data.items, source_items);
-    shaper.remove(&mut layout.data, installed);
-    assert_eq!(glyphs(&mut layout), joined);
+    for spacing in [0.0, 3.0] {
+        let configure = |builder: &mut RangedBuilder<'_, ColorBrush>| {
+            builder.push_default(StyleProperty::LetterSpacing(spacing));
+            let features = [crate::setting::FontFeature {
+                tag: crate::setting::Tag::from_bytes(*b"liga"),
+                value: 1,
+            }];
+            builder.push_default(StyleProperty::FontFeatures((&features).into()));
+        };
+        let mut layout = retained_layout("office", "Roboto", &[], configure);
+        let mut shaper = crate::shape::physical::PhysicalShaper::new(&layout.data);
+        let joined = glyphs(&mut layout);
+        let source_items = layout.data.items.clone();
+        let retained_glyphs = layout.data.glyphs.clone();
+        let mut expected = retained_layout("office", "Roboto", &[2, 3], configure);
+        let separated = glyphs(&mut expected);
+        assert_ne!(joined, separated);
+        let installed = apply_boundaries(&mut shaper, &mut layout, &[3, 2, 2]);
+        assert_eq!(layout.data.glyphs[..retained_glyphs.len()], retained_glyphs);
+        assert_eq!(glyphs(&mut layout), separated);
+        assert_eq!(layout.data.items, source_items);
+        shaper.remove(&mut layout.data, installed);
+        assert_eq!(glyphs(&mut layout), joined);
+    }
 }
 
 #[test]
