@@ -1057,6 +1057,8 @@ pub(crate) struct LineData {
     pub(crate) terminal_whitespace: TerminalWhitespace,
     /// Physical fitting adjustment relative to the selected rendered advance.
     pub(crate) source_fit_delta: f32,
+    /// Word-space shrink available when this line was fitted.
+    pub(crate) space_shrink: f32,
     pub(crate) terminal_fit_whitespace: TerminalWhitespace,
     /// Number of justified clusters on the line.
     pub(crate) num_spaces: usize,

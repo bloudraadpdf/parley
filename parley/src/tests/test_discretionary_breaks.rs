@@ -83,6 +83,26 @@ fn selected_discretionary_break_drops_cross_line_kerning() {
 }
 
 #[test]
+fn a_discretionary_shape_retains_allowed_space_shrink() {
+    let text = "a a a a a\u{00ad}bc";
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+    let mut layout = builder.build(text);
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: "a a a a a\u{00ad}".len(),
+        advance: unwrapped_advance("-"),
+        max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
+    }]);
+    layout.break_all_lines(Some(unwrapped_advance(text) - 0.1));
+    assert_eq!(layout.len(), 1);
+}
+
+#[test]
 fn selected_discretionary_break_preserves_arabic_joining() {
     let text = "عع\u{00ad}عع";
     let mut fonts = super::test_shaping_context::naskh_font_context();

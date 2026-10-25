@@ -3821,6 +3821,7 @@ fn try_commit_line<B: Brush>(
         max_advance,
         break_reason,
         source_fit_delta: state.fit_x - state.x,
+        space_shrink: state.space_shrink,
         num_spaces: state.num_spaces,
         indent: line_indent,
         tab_origin: state.tab_origin,

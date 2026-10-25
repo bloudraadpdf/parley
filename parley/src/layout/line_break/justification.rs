@@ -393,7 +393,8 @@ impl<B: Brush> BreakLines<'_, B> {
             .expect("same retained source");
         self.reject_terminal_candidate = false;
         if !policy.expands(expanded.line.break_reason)
-            || expanded.line.fitting_advance() > expanded.line.max_advance
+            || expanded.line.fitting_advance() - expanded.line.space_shrink
+                > expanded.line.max_advance
         {
             self.select_shape(false);
             let mut natural = natural;

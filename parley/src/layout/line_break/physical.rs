@@ -224,7 +224,7 @@ impl<B: Brush> BreakLines<'_, B> {
                 continue;
             };
             let fits = super::line_advance_fits(
-                candidate.line.fitting_advance(),
+                candidate.line.fitting_advance() - candidate.line.space_shrink,
                 candidate.line.max_advance,
                 candidate
                     .items
