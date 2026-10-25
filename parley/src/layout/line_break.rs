@@ -1148,7 +1148,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         };
         if self.shape_candidates.is_some()
             && (!self.layout.data.inline_owner_shaping.is_empty()
-                || !self.layout.data.deferred_justification_shapes.is_empty())
+                || self.layout.justification_shape_policy().is_some())
         {
             return;
         }

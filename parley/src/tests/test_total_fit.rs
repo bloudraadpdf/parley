@@ -99,6 +99,29 @@ fn inline_word_edges_preserve_total_fit_line_choices() {
 }
 
 #[test]
+fn inactive_justification_features_do_not_disable_total_fit() {
+    let text = TEXT.replacen("xxxxxx", "xxx\u{00ad}xxx", 1) + " fi";
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+    let features = [crate::FontFeature::new(
+        crate::setting::Tag::from_bytes(*b"liga"),
+        0,
+    )];
+    builder.push_default(StyleProperty::FontFeaturesForJustification(
+        (&features).into(),
+    ));
+    let mut layout = builder.build(&text);
+    assert!(layout.has_justification_shape_candidates());
+    layout.set_line_break_strategy(LineBreakStrategy::TotalFit(PRINCE));
+    layout.break_all_lines(Some(WIDTH));
+    assert_eq!(words_per_line(&text, &layout), [6, 6, 6]);
+}
+
+#[test]
 fn total_fit_evens_the_separators_of_a_paragraph() {
     assert_eq!(broken(TEXT, LineBreakStrategy::FirstFit), [7, 5, 5]);
     assert_eq!(broken(TEXT, LineBreakStrategy::TotalFit(PRINCE)), [6, 6, 5]);
