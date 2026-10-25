@@ -25,7 +25,7 @@ pub enum LineBreakStrategy {
 ///
 /// A line that its separators stretch by `r` of their stretch, or shrink by `r` of their shrink, has the badness
 /// `100 r³` and the demerits `(line_penalty + badness)²`, plus `hyphen_penalty²` when it ends at a hyphenated
-/// break. The line that ends a segment has no badness.
+/// break. The line that ends a segment has no stretch badness.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TotalFit {
     /// The stretch of a word separator, as a fraction of its font size.
@@ -146,7 +146,7 @@ impl Segment {
                     LineFit::Overfull
                 };
             }
-            if to == last {
+            if to == last && slack >= 0.0 {
                 return LineFit::Badness(0.0);
             }
             let ratio = if slack < 0.0 {
@@ -433,7 +433,14 @@ mod tests {
     }
 
     #[test]
-    fn the_last_line_has_no_badness() {
+    fn the_last_line_has_no_stretch_badness() {
         assert_eq!(plan(&[27.0; 7], 120.0), [4]);
+    }
+
+    #[test]
+    fn the_last_line_retains_its_shrink_badness() {
+        let mut words = [10.0; 36];
+        words[35] = 11.0;
+        assert_eq!(plan(&words, 149.5), [11, 22, 33]);
     }
 }
