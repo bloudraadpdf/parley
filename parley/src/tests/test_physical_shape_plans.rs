@@ -4,7 +4,8 @@
 use alloc::vec::Vec;
 
 use super::{
-    test_physical_shaping::owner, test_shaping_context::naskh_font_context, utils::ColorBrush,
+    test_builders::create_font_context, test_physical_shaping::owner,
+    test_shaping_context::naskh_font_context, utils::ColorBrush,
 };
 use crate::layout::{PhysicalLineEdge, ShapingEdgePlacement};
 use crate::{FontFamily, Layout, LayoutContext, RangedBuilder, StyleProperty};
@@ -165,4 +166,29 @@ fn a_changed_boundary_replaces_only_context_dependent_glyphs() {
         let mut expected = retained_layout(text, "Roboto", &[boundary], |_| {});
         assert_eq!(glyphs(&mut layout), glyphs(&mut expected));
     }
+}
+
+#[test]
+fn a_segment_of_only_a_deleted_default_ignorable_keeps_its_source_clusters() {
+    let text = "\u{1f389}\u{ad}\u{1f440}";
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+        "Noto Color Emoji",
+    )));
+    let mut layout = builder.build(text);
+    let clusters = |layout: &Layout<ColorBrush>| {
+        layout
+            .data
+            .clusters
+            .iter()
+            .map(|cluster| (cluster.text_offset, cluster.text_len, cluster.advance))
+            .collect::<Vec<_>>()
+    };
+    let source = clusters(&layout);
+    let mut shaper = crate::shape::physical::PhysicalShaper::new(&layout.data);
+    let shape = shaper.shape_line(&layout.data, &[], &["\u{1f389}".len()], 0, None, false);
+    shaper.install(&mut layout.data, &shape);
+    assert_eq!(clusters(&layout), source);
 }

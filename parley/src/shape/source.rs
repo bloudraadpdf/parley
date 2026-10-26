@@ -198,7 +198,22 @@ impl DeferredSourceShape {
         scratch.finish_advances();
         let mut clusters = core::mem::take(&mut scratch.clusters);
         for cluster in &mut clusters {
-            cluster.text_offset += range.start - run.text_range.start;
+            cluster.text_offset += offset;
+        }
+        if clusters.is_empty() {
+            // Without a space glyph, shaping deletes default ignorables; alone in `range`, they have no neighbour to
+            // merge into, so they keep their glyphless source clusters.
+            clusters = source_clusters[first_cluster..]
+                .iter()
+                .take_while(|cluster| cluster.text_offset < offset + range.len())
+                .map(|cluster| {
+                    assert_eq!(cluster.glyph_len, 0, "deleted source cluster glyphs");
+                    crate::layout::data::ClusterData {
+                        glyph_offset: 0,
+                        ..*cluster
+                    }
+                })
+                .collect();
         }
         let result = PreparedSourceShape {
             clusters,
