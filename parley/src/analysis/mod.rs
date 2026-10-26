@@ -147,19 +147,24 @@ fn keep_all_suppresses_boundary(text: &str, boundary: usize) -> bool {
 /// break boundary.
 ///
 /// The line breaker consumes this classification instead of inspecting source
-/// characters. General-category dash punctuation includes both U+002D and
-/// U+2010 without encoding either code point in composition logic.
+/// characters. Unicode B2 dashes retain their break priority without being
+/// treated as written hyphens by paragraph fitting.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum AuthoredBreakUnit {
     DashPunctuation,
+    BreakBothDash,
     #[default]
     Other,
 }
 
 impl AuthoredBreakUnit {
-    fn from_general_category(category: GeneralCategory) -> Self {
+    fn from_character(ch: char, category: GeneralCategory) -> Self {
         if GeneralCategoryGroup::DashPunctuation.contains(category) {
-            Self::DashPunctuation
+            if CodePointMapData::<UnicodeLineBreak>::new().get(ch) == UnicodeLineBreak::BreakBoth {
+                Self::BreakBothDash
+            } else {
+                Self::DashPunctuation
+            }
         } else {
             Self::Other
         }
@@ -596,7 +601,7 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
                     grapheme_cluster_break,
                     bidi_class,
                     bracket,
-                    AuthoredBreakUnit::from_general_category(general_category),
+                    AuthoredBreakUnit::from_character(ch, general_category),
                     is_variation_selector,
                     is_region_indicator,
                     general_category == GeneralCategory::Control,

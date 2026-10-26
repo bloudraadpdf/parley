@@ -13,15 +13,28 @@ const TEXT: &str = "xxxxxx xx x xxxxxxxx xxx xxxxxxxxx xx xxxxxx xxxx xxxxxxxx x
 const WIDTH: f32 = 200.0;
 
 #[test]
-fn total_fit_penalizes_both_sides_of_a_written_dash() {
-    let text = "alpha beta gamma delta—epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau";
-    for (width, unpenalized) in [
-        (130.0, "alpha beta gamma delta"),
-        (140.0, "alpha beta gamma delta—"),
+fn total_fit_penalizes_written_hyphens_but_not_em_dashes() {
+    for (dash, width, unpenalized, penalized) in [
+        (
+            '—',
+            130.0,
+            "alpha beta gamma delta",
+            "alpha beta gamma delta",
+        ),
+        (
+            '—',
+            140.0,
+            "alpha beta gamma delta—",
+            "alpha beta gamma delta—",
+        ),
+        ('-', 140.0, "alpha beta gamma delta-", "alpha beta gamma"),
     ] {
-        for (penalty, expected) in [(0.0, unpenalized), (1_000_000.0, "alpha beta gamma")] {
+        let text = alloc::format!(
+            "alpha beta gamma delta{dash}epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau"
+        );
+        for (penalty, expected) in [(0.0, unpenalized), (1_000_000.0, penalized)] {
             let mut paragraph = layout(
-                text,
+                &text,
                 LineBreakStrategy::TotalFit(TotalFit {
                     tolerance: f32::INFINITY,
                     hyphen_penalty: penalty,
@@ -61,7 +74,8 @@ fn total_fit_preserves_native_dash_paragraph_breaks() {
         let mut paragraph = layout(
             &text,
             LineBreakStrategy::TotalFit(TotalFit {
-                double_hyphen_demerits: 2500.0,
+                line_penalty: 10.5,
+                double_hyphen_demerits: 3000.0,
                 final_hyphen_demerits: 0.0,
                 ..PRINCE
             }),

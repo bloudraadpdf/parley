@@ -386,7 +386,7 @@ impl RegularBreakCandidate {
 #[derive(Clone, Copy)]
 enum RegularBreakKind {
     AuthoredDashPunctuation,
-    BeforeAuthoredDashPunctuation,
+    BreakBothDash,
     InlineBoxEdge,
     ProjectedSource {
         boundary: ProjectedSourceBoundary,
@@ -648,11 +648,7 @@ impl BreakerState {
                 },
                 start: self.line.measure(),
                 discretionary: state.discretionary_break.then_some(condition),
-                authored_dash: matches!(
-                    kind,
-                    RegularBreakKind::AuthoredDashPunctuation
-                        | RegularBreakKind::BeforeAuthoredDashPunctuation
-                ),
+                authored_dash: matches!(kind, RegularBreakKind::AuthoredDashPunctuation),
             });
         }
         self.planned_end_reached |= self.planned_end == Some(cursor);
@@ -663,16 +659,14 @@ impl BreakerState {
             state,
         };
         let candidate = Some(match kind {
-            RegularBreakKind::AuthoredDashPunctuation => {
+            RegularBreakKind::AuthoredDashPunctuation | RegularBreakKind::BreakBothDash => {
                 RegularBreakCandidate::AuthoredDashPunctuation(snapshot)
             }
             RegularBreakKind::InlineBoxEdge => RegularBreakCandidate::InlineBoxEdge(snapshot),
             RegularBreakKind::ProjectedSource { boundary, .. } => {
                 RegularBreakCandidate::ProjectedSource { snapshot, boundary }
             }
-            RegularBreakKind::Ordinary
-            | RegularBreakKind::RestoredNormal
-            | RegularBreakKind::BeforeAuthoredDashPunctuation => {
+            RegularBreakKind::Ordinary | RegularBreakKind::RestoredNormal => {
                 RegularBreakCandidate::Ordinary(snapshot)
             }
             RegularBreakKind::ConditionalMaterial(_) => {
@@ -1977,16 +1971,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                         AuthoredBreakUnit::DashPunctuation => {
                                             RegularBreakKind::AuthoredDashPunctuation
                                         }
-                                        AuthoredBreakUnit::Other => {
-                                            if matches!(
-                                                cluster.info().authored_break_unit(),
-                                                AuthoredBreakUnit::DashPunctuation
-                                            ) {
-                                                RegularBreakKind::BeforeAuthoredDashPunctuation
-                                            } else {
-                                                RegularBreakKind::Ordinary
-                                            }
+                                        AuthoredBreakUnit::BreakBothDash => {
+                                            RegularBreakKind::BreakBothDash
                                         }
+                                        AuthoredBreakUnit::Other => RegularBreakKind::Ordinary,
                                     }),
                                 };
                                 if let Some(candidate_kind) = candidate_kind {
