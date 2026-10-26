@@ -537,3 +537,24 @@ fn a_committed_physical_line_keeps_no_soft_boundary_window() {
     assert!(breaker.break_next(measure, LineTabOrigin::ZERO).is_some());
     assert_eq!(breaker.shaped_line_boundaries(), BTreeSet::new());
 }
+
+#[test]
+fn a_soft_hyphen_line_fit_without_owners_visits_clusters_in_proportion_to_its_lines() {
+    let work = |words: usize| {
+        let text = "a\u{ad}".repeat(words);
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::<ColorBrush>::new();
+        let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        let mut layout = builder.build(&text);
+        let mut breaker = layout.break_lines();
+        while breaker.break_next(0.0, LineTabOrigin::ZERO).is_some() {}
+        breaker.physical_work()
+    };
+    let short = work(80);
+    let long = work(160);
+    assert!(
+        long.visited_clusters * 10 <= short.visited_clusters * 22,
+        "{short:?} to {long:?}"
+    );
+}

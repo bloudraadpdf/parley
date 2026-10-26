@@ -264,6 +264,12 @@ impl<B: Brush> PhysicalShaper<B> {
         self.owners.keeps_boundaries_before(cut, offset)
     }
 
+    /// Whether no longer line gives `shape` a boundary at or after `offset`: it ends before `offset`, or each owner
+    /// edge, the source of each boundary, precedes `offset`.
+    pub(crate) fn bounds_before(&self, shape: &PhysicalShape, offset: usize) -> bool {
+        shape.ends_before(offset) || self.owner_edges.last().is_none_or(|edge| *edge < offset)
+    }
+
     /// The segments of a line from `line_start`: each window of `affected_windows` from the line start to the next
     /// owner edge after its last point, and not after the first boundary at or after `limit`, split at the boundaries
     /// and the soft line boundaries.

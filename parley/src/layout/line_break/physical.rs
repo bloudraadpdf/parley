@@ -172,7 +172,14 @@ impl<B: Brush> BreakLines<'_, B> {
                     limit.filter(|_| bound.is_none()),
                     fit.expanded,
                 );
-                if bound.is_none() && !complete && !shape.ends_before(cut) {
+                if bound.is_none()
+                    && !complete
+                    && !self
+                        .physical_shaper
+                        .as_ref()
+                        .expect("physical source shaper")
+                        .bounds_before(&shape, cut)
+                {
                     return None;
                 }
                 let installed = self.install_physical_shape(&shape);
