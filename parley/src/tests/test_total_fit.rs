@@ -11,6 +11,76 @@ use alloc::vec::Vec;
 /// on the first line by shrinking its separators.
 const TEXT: &str = "xxxxxx xx x xxxxxxxx xxx xxxxxxxxx xx xxxxxx xxxx xxxxxxxx xxxxxxx xxxx xxxxxxxx xx x xxxx xxx";
 const WIDTH: f32 = 200.0;
+
+#[test]
+fn total_fit_penalizes_both_sides_of_a_written_dash() {
+    let text = "alpha beta gamma delta—epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau";
+    for (width, unpenalized) in [
+        (130.0, "alpha beta gamma delta"),
+        (140.0, "alpha beta gamma delta—"),
+    ] {
+        for (penalty, expected) in [(0.0, unpenalized), (1_000_000.0, "alpha beta gamma")] {
+            let mut paragraph = layout(
+                text,
+                LineBreakStrategy::TotalFit(TotalFit {
+                    tolerance: f32::INFINITY,
+                    hyphen_penalty: penalty,
+                    ..PRINCE
+                }),
+            );
+            paragraph.break_all_lines(Some(width));
+            assert_eq!(
+                text[paragraph.lines().next().unwrap().text_range()].trim(),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+fn total_fit_preserves_native_dash_paragraph_breaks() {
+    let expected = [
+        "What an excellent example of the power of dress,",
+        "young Oliver Twist was! Wrapped in the blanket",
+        "which had hitherto formed his only covering, he",
+        "might have been the child of a nobleman or a beggar;",
+        "it would have been hard for the haughtiest stranger to",
+        "have assigned him his proper station in society. But",
+        "now that he was enveloped in the old calico robes",
+        "which had grown yellow in the same service, he was",
+        "badged and ticketed, and fell into his place at",
+        "once—a parish child—the orphan of a workhouse—",
+        "the humble, half-starved drudge—to be cuffed and",
+        "buffeted through the world—despised by all, and",
+        "pitied by none.",
+    ];
+    for (expected, indent) in [(expected.as_slice(), 15.6), (&expected[8..], 0.0)] {
+        let text = expected
+            .join(" ")
+            .replace("workhouse— the", "workhouse—the");
+        let mut paragraph = layout(
+            &text,
+            LineBreakStrategy::TotalFit(TotalFit {
+                double_hyphen_demerits: 2500.0,
+                final_hyphen_demerits: 0.0,
+                ..PRINCE
+            }),
+        );
+        paragraph.set_text_indent(indent, crate::IndentOptions::default());
+        let short_suffix = text.find("—a ").unwrap();
+        paragraph.set_line_break_overrides(alloc::vec![
+            crate::LineBreakOverride::suppress(short_suffix),
+            crate::LineBreakOverride::suppress(short_suffix + '—'.len_utf8()),
+        ]);
+        paragraph.break_all_lines(Some(280.0));
+        let lines: Vec<_> = paragraph
+            .lines()
+            .map(|line| text[line.text_range()].trim())
+            .collect();
+        assert_eq!(lines, expected);
+    }
+}
+
 const PRINCE: TotalFit = TotalFit {
     stretch_em: 0.125,
     tolerance: 800.0,
