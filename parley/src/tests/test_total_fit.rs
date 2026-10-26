@@ -13,6 +13,91 @@ const TEXT: &str = "xxxxxx xx x xxxxxxxx xxx xxxxxxxxx xx xxxxxx xxxx xxxxxxxx x
 const WIDTH: f32 = 200.0;
 
 #[test]
+fn nested_quote_edges_preserve_paragraph_fitting() {
+    use crate::layout::{DiscretionaryBreak, DiscretionaryBreakCondition};
+    use crate::{InlineBox, InlineBoxBreakAffinity, InlineOwnerEdgeAdvance};
+    let text = "‘Mrs. Cor\u{ad}ney,’ said Mr. Bum\u{ad}ble, stoop\u{ad}ing over the ma\u{ad}tron, ‘what is this, ma’am? Has any\u{ad}thing hap\u{ad}pened, ma’am? Pray an\u{ad}swer me: I’m on—on—’ Mr. Bum\u{ad}ble, in his alarm, could not im\u{ad}me\u{ad}di\u{ad}ate\u{ad}ly think of the word ‘ten\u{ad}ter\u{ad}hooks,’ so he said ‘bro\u{ad}ken bot\u{ad}tles.’";
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(12.0));
+    builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+    let closings = text.match_indices('’').filter(|(offset, quote)| {
+        text[offset + quote.len()..]
+            .chars()
+            .next()
+            .is_none_or(char::is_whitespace)
+    });
+    let ranges =
+        text.match_indices('‘')
+            .zip(closings)
+            .flat_map(|((start, opening), (end, closing))| {
+                [
+                    start..end + closing.len(),
+                    start..start + opening.len(),
+                    end..end + closing.len(),
+                ]
+            });
+    for (id, range) in ranges.enumerate() {
+        builder.push_inline_box(InlineBox::inline_start_edge(
+            2 * id as u64,
+            range.start,
+            InlineOwnerEdgeAdvance::uniform(0.0),
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        ));
+        builder.push_inline_box(InlineBox::inline_end_edge_with_following_source_space(
+            2 * id as u64 + 1,
+            range.end,
+            InlineOwnerEdgeAdvance::uniform(0.0),
+            0.0,
+            crate::FollowingSourceSpace::CollapsedAfterProjectedBreak,
+            InlineBoxBreakAffinity::ToPrevious,
+        ));
+    }
+    let mut paragraph = builder.build(text);
+    paragraph.set_line_break_strategy(LineBreakStrategy::TotalFit(TotalFit {
+        line_penalty: 10.5,
+        double_hyphen_demerits: 3000.0,
+        final_hyphen_demerits: 0.0,
+        ..PRINCE
+    }));
+    paragraph.set_text_indent(15.6, crate::IndentOptions::default());
+    let dash = text.find("—’").unwrap();
+    paragraph.set_line_break_overrides(alloc::vec![
+        crate::LineBreakOverride::suppress(dash),
+        crate::LineBreakOverride::suppress(dash + '—'.len_utf8()),
+    ]);
+    let mut hyphen = layout("-", LineBreakStrategy::FirstFit);
+    hyphen.break_all_lines(None);
+    paragraph.set_discretionary_breaks(
+        text.match_indices('\u{ad}')
+            .map(|(offset, _)| DiscretionaryBreak {
+                byte_index: offset + '\u{ad}'.len_utf8(),
+                advance: hyphen.full_width(),
+                max_consecutive_lines: None,
+                condition: DiscretionaryBreakCondition::WordOverflow,
+            })
+            .collect(),
+    );
+    paragraph.break_all_lines(Some(379.0));
+    let lines: Vec<_> = paragraph
+        .lines()
+        .map(|line| text[line.text_range()].trim().replace('\u{ad}', ""))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "‘Mrs. Corney,’ said Mr. Bumble, stooping over the matron, ‘what is this,",
+            "ma’am? Has anything happened, ma’am? Pray answer me: I’m on—on—’",
+            "Mr. Bumble, in his alarm, could not immediately think of the word ‘ten",
+            "terhooks,’ so he said ‘broken bottles.’",
+        ]
+    );
+}
+
+#[test]
 fn total_fit_penalizes_written_hyphens_but_not_em_dashes() {
     for (dash, width, unpenalized, penalized) in [
         (

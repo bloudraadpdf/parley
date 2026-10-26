@@ -60,6 +60,7 @@ pub(super) type BreakCursor = (usize, usize);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Opportunity {
     pub(super) cursor: BreakCursor,
+    pub(super) projected_boundary: Option<usize>,
     /// The end of a line that breaks here: its content without the trailing separators, with any break material.
     pub(super) end: Measure,
     /// The start of the line that follows the break.
@@ -94,10 +95,16 @@ enum LineFit {
 }
 
 impl Segment {
-    /// Records an opportunity; a later record at the same cursor replaces an earlier one.
+    /// Records an opportunity once, including a source boundary shared by nested inline edges.
     pub(super) fn record(&mut self, opportunity: Opportunity) {
         match self.opportunities.last_mut() {
-            Some(last) if last.cursor == opportunity.cursor => *last = opportunity,
+            Some(last)
+                if last.cursor == opportunity.cursor
+                    || (opportunity.projected_boundary.is_some()
+                        && last.projected_boundary == opportunity.projected_boundary) =>
+            {
+                *last = opportunity;
+            }
             _ => self.opportunities.push(opportunity),
         }
     }
@@ -323,6 +330,7 @@ mod tests {
             };
             opportunities.push(Opportunity {
                 cursor: (0, index + 1),
+                projected_boundary: None,
                 end,
                 start,
                 discretionary: None,

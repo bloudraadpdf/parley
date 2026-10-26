@@ -642,6 +642,10 @@ impl BreakerState {
             let material = state.fit_x - self.line.fit_x;
             segment.record(total_fit::Opportunity {
                 cursor,
+                projected_boundary: match kind {
+                    RegularBreakKind::ProjectedSource { boundary, .. } => Some(boundary.target()),
+                    _ => None,
+                },
                 end: total_fit::Measure {
                     advance: self.line.content_end.advance + material,
                     ..self.line.content_end
