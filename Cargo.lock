@@ -2890,6 +2890,7 @@ version = "0.0.0"
 name = "parley_data"
 version = "0.8.0"
 dependencies = [
+ "icu_collections",
  "icu_properties",
 ]
 

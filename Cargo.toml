@@ -40,6 +40,7 @@ hashbrown = { version = "0.16.1", default-features = false, features = [
     "default-hasher",
     "raw-entry",
 ] }
+icu_collections = { version = "2.4.0", default-features = false }
 icu_locale_core = { version = "2.1.1", default-features = false }
 icu_normalizer = { version = "2.1.1", default-features = false }
 icu_properties = { version = "2.1.2", default-features = false }

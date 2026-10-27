@@ -6,6 +6,7 @@
 
 #![no_std]
 
+use icu_collections::codepointtrie::TrieValue;
 use icu_properties::props::{BidiClass, GeneralCategory, GraphemeClusterBreak, Script};
 
 /// Baked data (`PackTab` tables).
@@ -56,10 +57,10 @@ impl Properties {
         is_region_indicator: bool,
         is_mandatory_linebreak: bool,
     ) -> Self {
-        let s = script.to_icu4c_value() as u32;
+        let s = script.to_u32();
         let gc = gc as u32;
-        let gcb = gcb.to_icu4c_value() as u32;
-        let bidi = bidi.to_icu4c_value() as u32;
+        let gcb = gcb.to_u32();
+        let bidi = bidi.to_u32();
 
         Self(
             (s << Self::SCRIPT_SHIFT)
@@ -81,11 +82,7 @@ impl Properties {
     /// Returns the script for the character.
     #[inline(always)]
     pub fn script(&self) -> Script {
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "script data only occupies SCRIPT_BITS bits; we cast to `u16` to fulfil the `from_icu4c_value` contract."
-        )]
-        Script::from_icu4c_value(self.bits(Self::SCRIPT_SHIFT, Self::SCRIPT_BITS) as u16)
+        Script::try_from_u32(self.bits(Self::SCRIPT_SHIFT, Self::SCRIPT_BITS)).unwrap_or_default()
     }
 
     /// Returns the general category for the character.
@@ -101,21 +98,14 @@ impl Properties {
     /// Returns the grapheme cluster break for the character.
     #[inline(always)]
     pub fn grapheme_cluster_break(&self) -> GraphemeClusterBreak {
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "cluster break data only occupies GCB_BITS bits"
-        )]
-        GraphemeClusterBreak::from_icu4c_value(self.bits(Self::GCB_SHIFT, Self::GCB_BITS) as u8)
+        GraphemeClusterBreak::try_from_u32(self.bits(Self::GCB_SHIFT, Self::GCB_BITS))
+            .unwrap_or_default()
     }
 
     /// Returns the bidirectional class for the character.
     #[inline(always)]
     pub fn bidi_class(&self) -> BidiClass {
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "bidi class data only occupies BIDI_BITS bits"
-        )]
-        BidiClass::from_icu4c_value(self.bits(Self::BIDI_SHIFT, Self::BIDI_BITS) as u8)
+        BidiClass::try_from_u32(self.bits(Self::BIDI_SHIFT, Self::BIDI_BITS)).unwrap_or_default()
     }
 
     /// Returns whether the character is an emoji or pictograph.
