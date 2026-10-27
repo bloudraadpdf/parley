@@ -41,6 +41,18 @@ fn arabic_layout(physical: bool, explicit: bool) -> Layout<ColorBrush> {
 }
 
 #[test]
+fn physical_line_fit_keeps_the_configured_tolerance() {
+    for (tolerance, expected_lines) in [(0.0, 2), (0.003, 2), (0.0075, 1)] {
+        let mut layout = arabic_layout(true, false);
+        layout.break_all_lines(None);
+        let measure = layout.width() - 0.004;
+        layout.set_line_fit_tolerance(tolerance);
+        layout.break_all_lines(Some(measure));
+        assert_eq!(layout.len(), expected_lines, "tolerance {tolerance}");
+    }
+}
+
+#[test]
 fn physical_edge_glyphs_match_an_independent_explicit_boundary() {
     let mut actual = arabic_layout(true, false);
     let mut expected = arabic_layout(false, true);
