@@ -294,10 +294,10 @@ impl BidiResolver {
                         isolates -= 1;
                     }
                 }
-                BidiClass::LeftToRight | BidiClass::RightToLeft | BidiClass::ArabicLetter => {
-                    if isolates == 0 {
-                        return Some(if ty == BidiClass::LeftToRight { 0 } else { 1 });
-                    }
+                BidiClass::LeftToRight | BidiClass::RightToLeft | BidiClass::ArabicLetter
+                    if isolates == 0 =>
+                {
+                    return Some(if ty == BidiClass::LeftToRight { 0 } else { 1 });
                 }
                 _ => {}
             }
@@ -320,10 +320,10 @@ impl BidiResolver {
                         return 0;
                     }
                 }
-                BidiClass::LeftToRight | BidiClass::RightToLeft | BidiClass::ArabicLetter => {
-                    if isolates == 0 {
-                        return if ty == BidiClass::LeftToRight { 0 } else { 1 };
-                    }
+                BidiClass::LeftToRight | BidiClass::RightToLeft | BidiClass::ArabicLetter
+                    if isolates == 0 =>
+                {
+                    return if ty == BidiClass::LeftToRight { 0 } else { 1 };
                 }
                 _ => {}
             }
@@ -641,7 +641,7 @@ impl BidiResolver {
                     BidiClass::LeftToRight
                 };
                 let bracket_pairs = &mut self.bracket_pairs[base_brackets..];
-                bracket_pairs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                bracket_pairs.sort_unstable_by_key(|pair| pair.0);
                 for pair in bracket_pairs {
                     let mut pair_dir = BidiClass::OtherNeutral;
                     for i in pair.0 + 1..pair.1 {

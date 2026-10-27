@@ -2626,8 +2626,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
             cluster_glyph_offset = total_glyphs;
 
             // Create ligature component clusters for the remaining characters
-            let mut i = 1;
-            for char in char_indices_iter {
+            for (i, char) in (1..).zip(char_indices_iter) {
                 let component_char_info =
                     char_infos[direction.component_index(cluster_id, num_components, i)];
                 push_cluster(
@@ -2646,7 +2645,6 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
                     ClusterType::LigatureComponent,
                     None,
                 );
-                i += 1;
             }
         } else {
             let is_newline = to_whitespace(cluster_start_char.1) == Whitespace::Newline;
