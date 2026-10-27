@@ -790,6 +790,20 @@ fn assert_first_line_visual_runs(
 }
 
 #[test]
+fn slash_before_number_only_preserves_numeric_sequences() {
+    for (text, expected) in [
+        ("AA/2004", vec!["AA/", "2004"]),
+        ("12/2004", vec!["12/2004"]),
+        ("AA/BBBB", vec!["AA/", "BBBB"]),
+        ("AA-2004", vec!["AA-2004"]),
+    ] {
+        let mut layout = roboto_layout(text, None);
+        layout.break_all_lines(Some(1.0));
+        assert_eq!(line_texts(&layout, text), expected, "{text}");
+    }
+}
+
+#[test]
 fn caller_overrides_replace_unicode_slash_opportunities() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

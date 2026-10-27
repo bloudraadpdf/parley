@@ -43,7 +43,7 @@ hashbrown = { version = "0.16.1", default-features = false, features = [
 icu_locale_core = { version = "2.1.1", default-features = false }
 icu_normalizer = { version = "2.1.1", default-features = false }
 icu_properties = { version = "2.1.2", default-features = false }
-icu_segmenter = { version = "2.1.2", default-features = false }
+icu_segmenter = { version = "2.4.0", default-features = false }
 linebender_resource_handle = { version = "0.1.1", default-features = false }
 packtab = { version = "1.8.0" }
 parlance = { version = "0.1.0", default-features = false, path = "parlance" }

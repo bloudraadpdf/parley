@@ -82,14 +82,14 @@ impl AnalysisDataSources {
                 const {
                     let mut opt = LineBreakOptions::default();
                     opt.word_option = Some(LineBreakWordOption::Normal);
-                    LineSegmenter::new_for_non_complex_scripts(opt)
+                    LineSegmenter::new_17_for_non_complex_scripts(opt)
                 }
             }
             WordBreak::BreakAll => {
                 const {
                     let mut opt = LineBreakOptions::default();
                     opt.word_option = Some(LineBreakWordOption::BreakAll);
-                    LineSegmenter::new_for_non_complex_scripts(opt)
+                    LineSegmenter::new_17_for_non_complex_scripts(opt)
                 }
             }
         }

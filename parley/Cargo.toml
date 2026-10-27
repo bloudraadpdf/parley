@@ -36,7 +36,7 @@ hashbrown = { workspace = true }
 harfrust = { workspace = true }
 icu_normalizer = { workspace = true, features = ["compiled_data"] }
 icu_properties = { workspace = true, features = ["compiled_data"] }
-icu_segmenter = { workspace = true, features = ["compiled_data"] }
+icu_segmenter = { workspace = true, features = ["compiled_data", "unstable"] }
 
 [dev-dependencies]
 parley_dev = { workspace = true }
