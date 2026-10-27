@@ -222,18 +222,6 @@ impl Segment {
             }
             let mut best: Option<Node> = None;
             let mut fallback: Option<Node> = None;
-            let discretionary = self
-                .opportunities
-                .get(point - 1)
-                .and_then(|p| p.discretionary);
-            let earlier_discretionary = discretionary.is_some()
-                && point > 1
-                && self.opportunities[point - 2].discretionary == discretionary;
-            let later_discretionary = discretionary.is_some()
-                && self
-                    .opportunities
-                    .get(point)
-                    .is_some_and(|p| p.discretionary == discretionary);
             let mut index = 0;
             let mut forced = false;
             while index < active.len() {
@@ -265,18 +253,7 @@ impl Segment {
                         }
                         continue;
                     }
-                    LineFit::Badness(badness) => {
-                        if (earlier_discretionary
-                            && point - 1 > node.point
-                            && matches!(fit(node.point, point - 1), LineFit::Badness(previous) if previous < badness))
-                            || (later_discretionary
-                                && matches!(fit(node.point, point + 1), LineFit::Badness(next) if next <= badness))
-                        {
-                            index += 1;
-                            continue;
-                        }
-                        badness
-                    }
+                    LineFit::Badness(badness) => badness,
                 };
                 if point == last || badness <= params.tolerance {
                     let ends_hyphenated = hyphenated(point);
@@ -410,21 +387,6 @@ mod tests {
     fn a_word_moves_when_that_evens_the_separators_of_two_lines() {
         assert_eq!(plan(&two_lines(4.0 * SPACE), 200.0), [9, 18]);
         assert_eq!(plan(&two_lines(6.0 * SPACE), 200.0), [8, 18]);
-    }
-
-    #[test]
-    fn a_word_uses_its_best_fitting_discretionary_break() {
-        for condition in [
-            DiscretionaryBreakCondition::Normal,
-            DiscretionaryBreakCondition::WordOverflow,
-        ] {
-            for (width, expected) in [(200.0, 9), (196.0, 8)] {
-                let mut segment = segment(&two_lines(6.0 * SPACE));
-                segment.opportunities[7].discretionary = Some(condition);
-                segment.opportunities[8].discretionary = Some(condition);
-                assert_eq!(plan_with(segment, PRINCE, width)[0], expected);
-            }
-        }
     }
 
     #[test]
