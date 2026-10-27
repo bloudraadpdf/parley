@@ -539,7 +539,7 @@ fn a_committed_physical_line_keeps_no_soft_boundary_window() {
 }
 
 #[test]
-fn a_soft_hyphen_line_fit_without_owners_visits_clusters_in_proportion_to_its_lines() {
+fn a_soft_hyphen_line_fit_without_owners_or_safe_boundaries_works_in_proportion_to_its_lines() {
     let work = |words: usize| {
         let text = "a\u{ad}".repeat(words);
         let mut fonts = create_font_context();
@@ -553,8 +553,11 @@ fn a_soft_hyphen_line_fit_without_owners_visits_clusters_in_proportion_to_its_li
     };
     let short = work(80);
     let long = work(160);
-    assert!(
-        long.visited_clusters * 10 <= short.visited_clusters * 22,
-        "{short:?} to {long:?}"
-    );
+    for (short, long) in [
+        (short.visited_clusters, long.visited_clusters),
+        (short.shaped_source, long.shaped_source),
+        (short.installed_clusters, long.installed_clusters),
+    ] {
+        assert!(long * 10 <= short * 22, "{short} to {long}");
+    }
 }

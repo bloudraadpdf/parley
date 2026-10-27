@@ -167,11 +167,12 @@ impl<B: Brush> BreakLines<'_, B> {
                 continue;
             };
             let (shape, candidate) = loop {
-                let (shape, boundaries) = self.physical_prefix_shape(
-                    &prefix,
-                    limit.filter(|_| bound.is_none()),
-                    fit.expanded,
-                );
+                let shape_limit = match bound {
+                    Some(bound) => Some(bound.source_offset(&self.layout.data)),
+                    None => limit,
+                };
+                let (shape, boundaries) =
+                    self.physical_prefix_shape(&prefix, shape_limit, fit.expanded);
                 if bound.is_none()
                     && !complete
                     && !self

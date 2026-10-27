@@ -64,11 +64,15 @@ end at a soft line boundary. The other segments stay for later lines.
 
 A candidate installs its segments on the glyphs of the previous lines and
 removes them after its measurement. The candidate keeps its segments, and its
-commit installs them again. The terminal candidate gets new glyphs only up to
-the first boundary after twice its natural line. It measures again with a
-wider limit when its first overflowing word ends after that boundary. The limit
-grows from the source position where the line starts, because a line of inline
-boxes only has no text range.
+commit installs them again. Each candidate gets new glyphs only up to a limit:
+the first boundary at or after its limit position, else the first source
+cluster at or after that position. Thus text without safe positions or owner
+edges does not get new glyphs to the end of its run for each line. The limit
+position of the terminal candidate is twice its natural line. It measures
+again with a wider limit when its first overflowing word ends after the limit.
+The limit grows from the source position where the line starts, because a line
+of inline boxes only has no text range. The limit position of each shorter
+candidate is the end of that first overflowing word.
 
 A shorter terminal line can give the same glyphs, natural break and bound.
 `BreakLines` first uses the natural line at four times the line width as the

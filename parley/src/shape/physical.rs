@@ -166,6 +166,21 @@ fn affected_windows(
         .collect()
 }
 
+/// The first source cluster boundary at or after `offset`.
+fn cluster_boundary_at_or_after<B: Brush>(data: &LayoutData<B>, offset: usize) -> usize {
+    let Some(run) = data.runs[data
+        .runs
+        .partition_point(|run| run.text_range.end <= offset)..]
+        .first()
+    else {
+        return offset;
+    };
+    let clusters = &data.clusters[run.cluster_range.clone()];
+    clusters
+        .get(clusters.partition_point(|cluster| cluster.text_range(run).start < offset))
+        .map_or(run.text_range.end, |cluster| cluster.text_range(run).start)
+}
+
 impl<B: Brush> PhysicalShaper<B> {
     pub(crate) fn new(data: &LayoutData<B>) -> Self {
         let mut owner_edges = data
@@ -271,8 +286,8 @@ impl<B: Brush> PhysicalShaper<B> {
     }
 
     /// The segments of a line from `line_start`: each window of `affected_windows` from the line start to the next
-    /// owner edge after its last point, and not after the first boundary at or after `limit`, split at the boundaries
-    /// and the soft line boundaries.
+    /// owner edge after its last point, and not after the first boundary at or after `limit`, else the first source
+    /// cluster at or after it, split at the boundaries and the soft line boundaries.
     pub(crate) fn shape_line(
         &mut self,
         data: &LayoutData<B>,
@@ -296,10 +311,11 @@ impl<B: Brush> PhysicalShaper<B> {
         let mut boundaries = boundaries.to_vec();
         boundaries.sort_unstable();
         boundaries.dedup();
-        let end = limit.and_then(|limit| {
+        let end = limit.map(|limit| {
             boundaries[boundaries.partition_point(|boundary| *boundary < limit)..]
                 .first()
                 .copied()
+                .unwrap_or_else(|| cluster_boundary_at_or_after(data, limit))
         });
         let mut segments = Vec::new();
         let first = data
