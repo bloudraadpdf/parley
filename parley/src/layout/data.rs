@@ -1719,6 +1719,10 @@ impl<B: Brush> LayoutData<B> {
                     metrics.units_per_em,
                     font_size,
                     quantization.denominator(),
+                    matches!(
+                        quantization,
+                        FontMetricAdvanceQuantization::AlphabeticWithKerning(_)
+                    ),
                 )
             });
         let glyph_advance = |character, fallback| {
@@ -2432,7 +2436,9 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
         Direction::Rtl => char_infos.len() as u32,
     };
 
-    for (glyph_info, glyph_pos) in glyph_infos.iter().zip(glyph_positions.iter()) {
+    for (glyph_index, (glyph_info, glyph_pos)) in
+        glyph_infos.iter().zip(glyph_positions.iter()).enumerate()
+    {
         // Flush previous cluster if we've reached a new cluster
         if cluster_id != glyph_info.cluster {
             run_advance += cluster_advance;
@@ -2536,6 +2542,9 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
             .filter(|_| !nearly_zero(shaped_advance))
             .map_or(shaped_advance, |projection| {
                 projection.project(glyph_id, shaped_advance)
+            })
+            + advance_projection.map_or(0.0, |projection| {
+                projection.kerning_correction(glyph_index, glyph_infos, glyph_positions)
             });
         let line_break_advance = if nominal_font_metric_line_breaks && !nearly_zero(shaped_advance)
         {
@@ -2679,14 +2688,13 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
     run_advance
 }
 
-/// Projects only the base font-metric contribution to a fixed em grid.
-/// Shaping adjustments remain intact because the residual is removed from
-/// the already-shaped advance instead of quantizing that final advance.
+/// Projects base font metrics and optionally applied legacy kerning onto a fixed em grid.
 struct FontMetricAdvanceProjection<'a> {
     glyph_metrics: skrifa::metrics::GlyphMetrics<'a>,
     units_per_em: f64,
     font_size: f64,
     denominator: f64,
+    kern: Option<skrifa::raw::tables::kern::Kern<'a>>,
 }
 
 impl<'a> FontMetricAdvanceProjection<'a> {
@@ -2696,6 +2704,7 @@ impl<'a> FontMetricAdvanceProjection<'a> {
         units_per_em: u16,
         font_size: f32,
         denominator: NonZeroU16,
+        project_kerning: bool,
     ) -> Self {
         Self {
             glyph_metrics: skrifa::metrics::GlyphMetrics::new(
@@ -2706,6 +2715,9 @@ impl<'a> FontMetricAdvanceProjection<'a> {
             units_per_em: f64::from(units_per_em),
             font_size: f64::from(font_size),
             denominator: f64::from(denominator.get()),
+            kern: project_kerning
+                .then(|| skrifa::raw::TableProvider::kern(font).ok())
+                .flatten(),
         }
     }
 
@@ -2726,6 +2738,116 @@ impl<'a> FontMetricAdvanceProjection<'a> {
         let metric_em = f64::from(metric_units) / self.units_per_em;
         let projected_em = (metric_em * self.denominator).floor() / self.denominator;
         (projected_em * self.font_size) as f32
+    }
+
+    fn kerning_correction(
+        &self,
+        index: usize,
+        infos: &[harfrust::GlyphInfo],
+        positions: &[harfrust::GlyphPosition],
+    ) -> f32 {
+        use skrifa::raw::tables::kern::SubtableKind;
+        let Some(kern) = &self.kern else { return 0.0 };
+        let Some(next) = positions.get(index + 1) else {
+            return 0.0;
+        };
+        if next.x_advance == 0 {
+            return 0.0;
+        }
+        let mut start = index;
+        while start > 0 && positions[start].x_advance == 0 {
+            start -= 1;
+        }
+        let first = skrifa::GlyphId::new(infos[start].glyph_id);
+        let second = skrifa::GlyphId::new(infos[index + 1].glyph_id);
+        let adjustment: f64 = kern
+            .subtables()
+            .flatten()
+            .filter(|table| {
+                table.is_horizontal() && !table.is_cross_stream() && !table.is_variable()
+            })
+            .filter_map(|table| match table.kind().ok()? {
+                SubtableKind::Format0(table) => table.kerning(first, second),
+                SubtableKind::Format2(table) => table.kerning(first, second),
+                SubtableKind::Format3(table) => table.kerning(first, second),
+                SubtableKind::Format1(_) => None,
+            })
+            .map(f64::from)
+            .sum();
+        let nominal = self.glyph_metrics.advance_width(first).unwrap_or(0.0);
+        let distance: f64 = positions[start..=index]
+            .iter()
+            .map(|position| f64::from(position.x_advance))
+            .sum();
+        let applied = distance + f64::from(next.x_offset)
+            - f64::from(positions[start].x_offset)
+            - f64::from(nominal);
+        if applied != adjustment {
+            return 0.0;
+        }
+        let em = adjustment / self.units_per_em;
+        (((em * self.denominator).trunc() / self.denominator - em) * self.font_size) as f32
+    }
+}
+
+#[cfg(test)]
+mod legacy_kerning_projection_tests {
+    use super::*;
+    use alloc::vec;
+    use skrifa::{
+        MetadataProvider,
+        raw::{FontData, FontRead},
+    };
+
+    #[test]
+    fn legacy_pairs_round_together_without_moving_intervening_marks() {
+        let font = skrifa::FontRef::new(include_bytes!(
+            "../../../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf"
+        ))
+        .unwrap();
+        let a = font.charmap().map('A').unwrap();
+        let v = font.charmap().map('V').unwrap();
+        let mut infos = [harfrust::GlyphInfo::default(); 3];
+        infos[0].glyph_id = a.to_u32();
+        infos[2].glyph_id = v.to_u32();
+        for (adjustment, correction) in [
+            (-44_i16, 0.0058125),
+            (-45, 0.011671875),
+            (-264, 0.010875),
+            (44, -0.0058125),
+        ] {
+            let mut table = vec![0, 0, 0, 1, 0, 0, 0, 20, 0, 1, 0, 1, 0, 6, 0, 0, 0, 0];
+            table.extend_from_slice(&(a.to_u32() as u16).to_be_bytes());
+            table.extend_from_slice(&(v.to_u32() as u16).to_be_bytes());
+            table.extend_from_slice(&adjustment.to_be_bytes());
+            let mut projection = FontMetricAdvanceProjection::new(
+                &font,
+                &[],
+                2048,
+                12.0,
+                NonZeroU16::new(1000).unwrap(),
+                true,
+            );
+            projection.kern =
+                Some(skrifa::raw::tables::kern::Kern::read(FontData::new(&table)).unwrap());
+            let first = i32::from(adjustment) >> 1;
+            let second = i32::from(adjustment) - first;
+            let mut positions = [harfrust::GlyphPosition::default(); 3];
+            positions[0].x_advance =
+                projection.glyph_metrics.advance_width(a).unwrap() as i32 + first;
+            positions[2].x_advance =
+                projection.glyph_metrics.advance_width(v).unwrap() as i32 + second;
+            positions[2].x_offset = second;
+            assert_eq!(projection.kerning_correction(0, &infos, &positions), 0.0);
+            assert!(
+                (projection.kerning_correction(1, &infos, &positions) - correction).abs()
+                    < 0.000001
+            );
+            positions[0].x_advance -= first;
+            positions[2].x_advance -= second;
+            positions[2].x_offset = 0;
+            assert_eq!(projection.kerning_correction(1, &infos, &positions), 0.0);
+        }
     }
 }
 

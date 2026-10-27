@@ -32,12 +32,16 @@ pub enum FontMetricAdvanceQuantization {
     /// Cyrillic. Common and inherited characters follow the script assigned to
     /// their surrounding run.
     Alphabetic(NonZeroU16),
+    /// Project alphabetic base advances and truncate applied legacy pair kerning.
+    AlphabeticWithKerning(NonZeroU16),
 }
 
 impl FontMetricAdvanceQuantization {
     pub(crate) fn denominator(self) -> NonZeroU16 {
         match self {
-            Self::All(denominator) | Self::Alphabetic(denominator) => denominator,
+            Self::All(denominator)
+            | Self::Alphabetic(denominator)
+            | Self::AlphabeticWithKerning(denominator) => denominator,
         }
     }
 
