@@ -2786,7 +2786,9 @@ impl<'a> FontMetricAdvanceProjection<'a> {
             return 0.0;
         }
         let em = adjustment / self.units_per_em;
-        (((em * self.denominator).trunc() / self.denominator - em) * self.font_size) as f32
+        let projected =
+            (adjustment * self.denominator / self.units_per_em).trunc() / self.denominator;
+        ((projected - em) * self.font_size) as f32
     }
 }
 
@@ -2810,11 +2812,12 @@ mod legacy_kerning_projection_tests {
         let mut infos = [harfrust::GlyphInfo::default(); 3];
         infos[0].glyph_id = a.to_u32();
         infos[2].glyph_id = v.to_u32();
-        for (adjustment, correction) in [
-            (-44_i16, 0.0058125),
-            (-45, 0.011671875),
-            (-264, 0.010875),
-            (44, -0.0058125),
+        for (adjustment, units_per_em, correction) in [
+            (-44_i16, 2048, 0.0058125),
+            (-45, 2048, 0.011671875),
+            (-264, 2048, 0.010875),
+            (44, 2048, -0.0058125),
+            (-1001, 1000, 0.0),
         ] {
             let mut table = vec![0, 0, 0, 1, 0, 0, 0, 20, 0, 1, 0, 1, 0, 6, 0, 0, 0, 0];
             table.extend_from_slice(&(a.to_u32() as u16).to_be_bytes());
@@ -2823,7 +2826,7 @@ mod legacy_kerning_projection_tests {
             let mut projection = FontMetricAdvanceProjection::new(
                 &font,
                 &[],
-                2048,
+                units_per_em,
                 12.0,
                 NonZeroU16::new(1000).unwrap(),
                 true,
