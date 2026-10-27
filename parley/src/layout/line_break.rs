@@ -344,6 +344,7 @@ struct DiscretionaryAdvance {
     rendered: f32,
     fit: f32,
     condition: DiscretionaryBreakCondition,
+    max_consecutive_lines: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -625,6 +626,7 @@ impl BreakerState {
     fn mark_line_break_opportunity(&mut self, kind: RegularBreakKind) {
         let mut state = self.line.clone();
         let mut condition = DiscretionaryBreakCondition::Normal;
+        let mut max_consecutive_lines = None;
         if let RegularBreakKind::ConditionalMaterial(material)
         | RegularBreakKind::ProjectedSource {
             material: Some(material),
@@ -632,6 +634,7 @@ impl BreakerState {
         } = kind
         {
             condition = material.condition;
+            max_consecutive_lines = material.max_consecutive_lines;
             state.x += material.rendered;
             state.fit_x += material.fit;
             state.discretionary_advance = material.rendered;
@@ -652,6 +655,7 @@ impl BreakerState {
                 },
                 start: self.line.measure(),
                 discretionary: state.discretionary_break.then_some(condition),
+                max_consecutive_lines,
                 authored_dash: matches!(kind, RegularBreakKind::AuthoredDashPunctuation),
             });
         }
@@ -1192,6 +1196,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.line.content_end = self.state.line.measure();
         self.state.probe = Some(total_fit::Segment {
             start: self.state.line.measure(),
+            consecutive_discretionary_lines: self.state.consecutive_discretionary_lines,
             ..Default::default()
         });
         let probe = self.preview_shape_candidate_with(|breaker| {
@@ -1267,7 +1272,15 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }
             return line;
         };
-        if line.is_some() && (self.state.item_idx, self.state.cluster_idx) == planned {
+        let trailing_separators = planned.0 <= self.state.item_idx
+            && planned.1 <= self.state.cluster_idx
+            && self.layout.data.items[planned.0..self.state.item_idx]
+                .iter()
+                .all(|item| item.kind == LayoutItemKind::TextRun)
+            && self.layout.data.clusters[planned.1..self.state.cluster_idx]
+                .iter()
+                .all(|cluster| cluster.info.whitespace().is_space_or_nbsp());
+        if line.is_some() && self.state.planned_end_reached && trailing_separators {
             if let TotalFitState::Planned { ends, .. } = &mut self.total_fit {
                 ends.pop();
             }
@@ -1277,6 +1290,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             self.revert();
         }
         self.total_fit = TotalFitState::Abandoned;
+        self.state.planned_end = None;
         self.state.planned_end_reached = false;
         let line = self.break_next_first_fit(max_advance, tab_origin);
         if line.is_some() && self.ends_segment() {
@@ -1956,6 +1970,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                             DiscretionaryAdvance {
                                                 rendered: entry.advance,
                                                 condition: entry.condition,
+                                                max_consecutive_lines: entry.max_consecutive_lines,
                                                 fit: self.layout.discretionary_fit_advance(
                                                     entry.byte_index,
                                                     entry.advance,
@@ -2268,9 +2283,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     }
 
     fn discretionary_break_allowed(&self, entry: DiscretionaryBreak, max_advance: f32) -> bool {
-        entry
-            .max_consecutive_lines
-            .is_none_or(|limit| self.state.consecutive_discretionary_lines < limit)
+        (self.state.probe.is_some()
+            || entry
+                .max_consecutive_lines
+                .is_none_or(|limit| self.state.consecutive_discretionary_lines < limit))
             && (self.advance_fits(
                 self.state.line.fit_x
                     + self
@@ -2305,6 +2321,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     DiscretionaryAdvance {
                         rendered: entry.advance,
                         condition: entry.condition,
+                        max_consecutive_lines: entry.max_consecutive_lines,
                         fit: self
                             .layout
                             .discretionary_fit_advance(byte_index, entry.advance),
@@ -2358,6 +2375,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             entry.map(|entry| DiscretionaryAdvance {
                 rendered: entry.advance,
                 condition: entry.condition,
+                max_consecutive_lines: entry.max_consecutive_lines,
                 fit: self
                     .layout
                     .discretionary_fit_advance(entry.byte_index, entry.advance),

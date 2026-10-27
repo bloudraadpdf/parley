@@ -13,6 +13,58 @@ const TEXT: &str = "xxxxxx xx x xxxxxxxx xxx xxxxxxxxx xx xxxxxx xxxx xxxxxxxx x
 const WIDTH: f32 = 200.0;
 
 #[test]
+fn consecutive_hyphen_limits_preserve_fitting_lines() {
+    use crate::layout::{DiscretionaryBreak, DiscretionaryBreakCondition};
+
+    let text = ["hy\u{ad}phenation"; 6].join(" ");
+    let mut hyphen = layout("-", LineBreakStrategy::FirstFit);
+    hyphen.break_all_lines(None);
+    let mut measure = layout("hyphenation hy-", LineBreakStrategy::FirstFit);
+    measure.break_all_lines(None);
+    let width = measure.full_width();
+    for limit in [1, 2] {
+        for strategy in [
+            LineBreakStrategy::FirstFit,
+            LineBreakStrategy::TotalFit(PRINCE),
+        ] {
+            let mut paragraph = layout(&text, strategy);
+            paragraph.set_discretionary_breaks(
+                text.match_indices('\u{ad}')
+                    .map(|(offset, _)| DiscretionaryBreak {
+                        byte_index: offset + '\u{ad}'.len_utf8(),
+                        advance: hyphen.full_width(),
+                        max_consecutive_lines: Some(limit),
+                        condition: DiscretionaryBreakCondition::WordOverflow,
+                    })
+                    .collect(),
+            );
+            paragraph.break_all_lines(Some(width));
+            let mut consecutive = 0;
+            let mut hyphenated = 0;
+            for line in paragraph.lines() {
+                consecutive = if line.ends_at_discretionary_break() {
+                    hyphenated += 1;
+                    consecutive + 1
+                } else {
+                    0
+                };
+                assert!(consecutive <= limit);
+                let advance = line.metrics().advance - line.metrics().trailing_whitespace;
+                assert!(
+                    advance <= width + 0.001,
+                    "{strategy:?}: {advance} > {width}"
+                );
+            }
+            assert!(hyphenated > 0);
+            assert_eq!(
+                paragraph.lines().last().unwrap().text_range().end,
+                text.len()
+            );
+        }
+    }
+}
+
+#[test]
 fn nested_quote_edges_preserve_paragraph_fitting() {
     use crate::layout::{DiscretionaryBreak, DiscretionaryBreakCondition};
     use crate::{InlineBox, InlineBoxBreakAffinity, InlineOwnerEdgeAdvance};

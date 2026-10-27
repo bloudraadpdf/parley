@@ -67,6 +67,7 @@ pub(super) struct Opportunity {
     pub(super) start: Measure,
     /// Whether the break is discretionary.
     pub(super) discretionary: Option<DiscretionaryBreakCondition>,
+    pub(super) max_consecutive_lines: Option<u32>,
     pub(super) authored_dash: bool,
 }
 
@@ -74,6 +75,7 @@ pub(super) struct Opportunity {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct Segment {
     pub(super) start: Measure,
+    pub(super) consecutive_discretionary_lines: u32,
     pub(super) opportunities: Vec<Opportunity>,
     /// The end of the content of the segment.
     pub(super) end: Option<Measure>,
@@ -87,6 +89,21 @@ struct Node {
     demerits: f32,
     previous: Option<usize>,
     hyphenated: bool,
+    consecutive_discretionary_lines: u32,
+}
+
+impl Node {
+    fn retain_best(self, candidates: &mut Vec<Self>) {
+        if let Some(best) = candidates.iter_mut().find(|node| {
+            node.consecutive_discretionary_lines == self.consecutive_discretionary_lines
+        }) {
+            if self.demerits < best.demerits {
+                *best = self;
+            }
+        } else {
+            candidates.push(self);
+        }
+    }
 }
 
 enum LineFit {
@@ -133,6 +150,32 @@ impl Segment {
     ) -> Option<Vec<BreakCursor>> {
         let end = self.end?;
         let last = self.opportunities.len() + 1;
+        let count_cap = self
+            .opportunities
+            .iter()
+            .filter_map(|opportunity| opportunity.max_consecutive_lines)
+            .max()
+            .unwrap_or(0);
+        let allowed = |node: Node, point: usize| {
+            self.opportunities.get(point - 1).is_none_or(|opportunity| {
+                opportunity
+                    .max_consecutive_lines
+                    .is_none_or(|limit| node.consecutive_discretionary_lines < limit)
+            })
+        };
+        let next_count = |node: Node, point: usize| {
+            if self
+                .opportunities
+                .get(point - 1)
+                .is_some_and(|opportunity| opportunity.discretionary.is_some())
+            {
+                node.consecutive_discretionary_lines
+                    .saturating_add(1)
+                    .min(count_cap)
+            } else {
+                0
+            }
+        };
         let mut fit = |from: usize, to: usize| -> LineFit {
             let start = self.start_of(from);
             let stop = self.end_of(to, end);
@@ -193,6 +236,7 @@ impl Segment {
             demerits: 0.0,
             previous: None,
             hyphenated: false,
+            consecutive_discretionary_lines: self.consecutive_discretionary_lines.min(count_cap),
         }];
         let mut active = alloc::vec![0_usize];
         let mut point = 1;
@@ -220,17 +264,27 @@ impl Segment {
                     continue;
                 }
             }
-            let mut best: Option<Node> = None;
-            let mut fallback: Option<Node> = None;
+            let mut best = Vec::new();
+            let mut fallback = Vec::new();
             let mut index = 0;
-            let mut forced = false;
             while index < active.len() {
                 let node_index = active[index];
                 let node = nodes[node_index];
+                if !allowed(node, point) {
+                    index += 1;
+                    continue;
+                }
                 let badness = match fit(node.point, point) {
+                    LineFit::Overfull
+                        if !(node.point + 1..point).any(|previous| allowed(node, previous)) =>
+                    {
+                        0.0
+                    }
                     LineFit::Overfull => {
                         active.remove(index);
-                        let underfull = (point - 1).max(node.point + 1);
+                        let underfull = (node.point + 1..point)
+                            .rev()
+                            .find(|&previous| allowed(node, previous))?;
                         let badness = match fit(node.point, underfull) {
                             LineFit::Badness(value) => value,
                             LineFit::Overfull => f32::INFINITY,
@@ -240,17 +294,9 @@ impl Segment {
                             demerits: line_demerits(node, underfull, badness),
                             previous: Some(node_index),
                             hyphenated: hyphenated(underfull),
+                            consecutive_discretionary_lines: next_count(node, underfull),
                         };
-                        let candidate = fallback
-                            .filter(|best| best.demerits <= candidate.demerits)
-                            .unwrap_or(candidate);
-                        fallback = Some(candidate);
-                        if active.is_empty() && best.is_none() {
-                            nodes.push(candidate);
-                            active.push(nodes.len() - 1);
-                            forced = true;
-                            break;
-                        }
+                        candidate.retain_best(&mut fallback);
                         continue;
                     }
                     LineFit::Badness(badness) => badness,
@@ -258,21 +304,25 @@ impl Segment {
                 if point == last || badness <= params.tolerance {
                     let ends_hyphenated = hyphenated(point);
                     let demerits = line_demerits(node, point, badness);
-                    if best.is_none_or(|best| demerits < best.demerits) {
-                        best = Some(Node {
-                            point,
-                            demerits,
-                            previous: Some(node_index),
-                            hyphenated: ends_hyphenated,
-                        });
+                    Node {
+                        point,
+                        demerits,
+                        previous: Some(node_index),
+                        hyphenated: ends_hyphenated,
+                        consecutive_discretionary_lines: next_count(node, point),
                     }
+                    .retain_best(&mut best);
                 }
                 index += 1;
             }
-            if forced {
+            if active.is_empty() && best.is_empty() {
+                for candidate in fallback {
+                    nodes.push(candidate);
+                    active.push(nodes.len() - 1);
+                }
                 continue;
             }
-            if let Some(best) = best {
+            for best in best {
                 nodes.push(best);
                 active.push(nodes.len() - 1);
             }
@@ -334,11 +384,13 @@ mod tests {
                 end,
                 start,
                 discretionary: None,
+                max_consecutive_lines: None,
                 authored_dash: false,
             });
         }
         Segment {
             start: Measure::default(),
+            consecutive_discretionary_lines: 0,
             opportunities,
             end: Some(Measure {
                 advance,
@@ -368,6 +420,30 @@ mod tests {
             .into_iter()
             .map(|(_, cluster)| cluster)
             .collect()
+    }
+
+    #[test]
+    fn planned_breaks_obey_the_incoming_and_successive_hyphen_limits() {
+        for (limit, incoming, expected) in [
+            (0, 0, alloc::vec![3]),
+            (1, 0, alloc::vec![2, 3, 5]),
+            (1, 1, alloc::vec![3, 5]),
+            (2, 0, alloc::vec![2, 4]),
+        ] {
+            let mut segment = segment(&[20.0; 6]);
+            segment.consecutive_discretionary_lines = incoming;
+            for (index, opportunity) in segment.opportunities.iter_mut().enumerate() {
+                if index != 2 {
+                    opportunity.discretionary = Some(DiscretionaryBreakCondition::Normal);
+                    opportunity.max_consecutive_lines = Some(limit);
+                }
+            }
+            assert_eq!(
+                plan_with(segment, PRINCE, 43.0),
+                expected,
+                "{limit}, {incoming}"
+            );
+        }
     }
 
     /// Two lines of nine words: the first fills its measure, the second keeps `slack`; the tenth word may move.
