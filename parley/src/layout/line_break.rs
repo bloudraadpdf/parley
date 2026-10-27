@@ -1254,7 +1254,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             })
     }
 
-    /// Accepts a line that ends at its planned end; otherwise reverts it and breaks the rest of the segment first fit.
+    /// Accepts a planned line end, or breaks this line first fit and replans the remainder.
     fn settle_total_fit(
         &mut self,
         line: Option<(f32, f32)>,
@@ -1288,7 +1288,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state.planned_end = None;
         self.state.planned_end_reached = false;
         let line = self.break_next_first_fit(max_advance, tab_origin);
-        if line.is_some() && self.ends_segment() {
+        if line.is_some() {
             self.total_fit = TotalFitState::Unplanned;
         }
         line
@@ -4125,6 +4125,75 @@ mod tests {
         LetterSpacingEdges, SpacingEdgePair, indent_start_is_scope_line, line_advance_fits,
     };
     use crate::IndentStart;
+
+    #[test]
+    fn a_rejected_plan_replans_the_remaining_lines() {
+        use crate::{
+            FontContext, FontFamily, LayoutContext, LineBreakStrategy, StyleProperty, TotalFit,
+        };
+        use fontique::{Blob, Collection, CollectionOptions};
+
+        let mut fonts = FontContext {
+            collection: Collection::new(CollectionOptions {
+                shared: false,
+                system_fonts: false,
+            }),
+            ..Default::default()
+        };
+        fonts.collection.register_fonts(
+            Blob::new(alloc::sync::Arc::new(
+                parley_dev::fonts::ROBOTO_REGULAR.to_vec(),
+            )),
+            None,
+        );
+        let mut context = LayoutContext::<()>::new();
+        let mut build = |text: &str| {
+            let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+            builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+            builder.push_default(StyleProperty::FontSize(12.0));
+            builder.push_default(StyleProperty::JustifyShrink(1.0 / 6.0));
+            let mut layout = builder.build(text);
+            layout.set_line_break_strategy(LineBreakStrategy::TotalFit(TotalFit {
+                stretch_em: 0.125,
+                tolerance: 800.0,
+                line_penalty: 10.0,
+                hyphen_penalty: 50.0,
+                double_hyphen_demerits: 10_000.0,
+                final_hyphen_demerits: 5_000.0,
+            }));
+            layout
+        };
+        let text = alloc::format!(
+            "{} xxxxxx xx x xxxxxxxx xxx xxxxxxxxx xx xxxxxx xxxx xxxxxxxx xxxxxxx xxxx xxxxxxxx xx x xxxx xxx",
+            "x".repeat(100)
+        );
+        let mut layout = build(&text);
+        let mut breaker = layout.break_lines();
+        breaker.state.planned_end = Some((usize::MAX, usize::MAX));
+        let line = breaker.break_next_first_fit(200.0, super::LineTabOrigin::ZERO);
+        breaker
+            .settle_total_fit(line, 200.0, super::LineTabOrigin::ZERO)
+            .unwrap();
+        let end = breaker.last_line().unwrap().text_range().end;
+        while breaker
+            .break_next(200.0, super::LineTabOrigin::ZERO)
+            .is_some()
+        {}
+        breaker.finish();
+        let remainder = &text[end..];
+        let mut expected = build(remainder);
+        expected.break_all_lines(Some(200.0));
+        let actual: alloc::vec::Vec<_> = layout
+            .lines()
+            .skip(1)
+            .map(|line| &text[line.text_range()])
+            .collect();
+        let expected: alloc::vec::Vec<_> = expected
+            .lines()
+            .map(|line| &remainder[line.text_range()])
+            .collect();
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn incremental_spacing_edges_match_nested_bidi_and_owner_attachments() {
