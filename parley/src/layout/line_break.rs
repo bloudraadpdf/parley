@@ -1082,7 +1082,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     .data
                     .runs
                     .partition_point(|run| run.cluster_range.end < idx);
-                reclaimed_font_sizes += self.layout.data.runs[run].font_size;
+                if cluster.info.whitespace() != Whitespace::NoBreakSpace {
+                    reclaimed_font_sizes += self.layout.data.runs[run].font_size;
+                }
                 spaces += 1;
                 idx -= 1;
             } else {
@@ -2159,7 +2161,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 == ProjectedSourceClusterParticipation::Normal
                             && !self.state.line.removes_leading_source_at(byte_index))
                         .then_some(Separator {
-                            font_size: run.font_size(),
+                            font_size: if whitespace == Whitespace::NoBreakSpace {
+                                0.0
+                            } else {
+                                run.font_size()
+                            },
                             shrink: style.justify_shrink * fit_advance,
                         });
                         match line_fit {

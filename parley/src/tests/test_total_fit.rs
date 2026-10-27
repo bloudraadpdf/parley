@@ -596,3 +596,35 @@ fn total_fit_accounts_for_trimmed_terminal_tracking() {
         }
     }
 }
+
+#[test]
+fn nonbreaking_spaces_do_not_add_total_fit_stretch() {
+    use crate::layout::{DiscretionaryBreak, DiscretionaryBreakCondition};
+    let mut hyphen = layout("-", LineBreakStrategy::FirstFit);
+    hyphen.break_all_lines(None);
+    for (separator, hyphenated) in [(" ", false), ("\u{a0}", true)] {
+        let text = alloc::format!("a{separator}a a a a a a a a a a a a a a ab\u{ad}cdef tail");
+        let mut paragraph = layout(
+            &text,
+            LineBreakStrategy::TotalFit(TotalFit {
+                line_penalty: 10.5,
+                double_hyphen_demerits: 3000.0,
+                final_hyphen_demerits: 0.0,
+                ..PRINCE
+            }),
+        );
+        paragraph.set_discretionary_breaks(alloc::vec![DiscretionaryBreak {
+            byte_index: text.find('\u{ad}').unwrap() + '\u{ad}'.len_utf8(),
+            advance: hyphen.full_width(),
+            max_consecutive_lines: None,
+            condition: DiscretionaryBreakCondition::Normal,
+        }]);
+        paragraph.break_all_lines(Some(155.0));
+        assert_eq!(
+            text[paragraph.lines().next().unwrap().text_range()]
+                .trim()
+                .ends_with('\u{ad}'),
+            hyphenated
+        );
+    }
+}
