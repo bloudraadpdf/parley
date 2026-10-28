@@ -105,9 +105,14 @@ impl<'a, B: Brush> Run<'a, B> {
         self.data.bidi_level & 1 != 0
     }
 
+    /// Returns the resolved shaping script of the run.
+    pub fn script(&self) -> icu_properties::props::Script {
+        self.data.script
+    }
+
     /// Returns whether the run's script uses cursive shaping.
     pub fn is_cursive_script(&self) -> bool {
-        self.data.cursive_script
+        self.data.is_cursive_script()
     }
 
     /// Returns the cluster range for the run.

@@ -332,3 +332,28 @@ fn alphabetic_projection_scope_leaves_complex_script_advances_untouched() {
         );
     }
 }
+
+#[test]
+fn resolved_scripts_survive_line_breaking() {
+    use icu_properties::props::Script;
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    for (text, family, script) in [
+        ("123 ABC ABC", "Roboto", Script::Latin),
+        ("123 العربية العربية", "Noto Kufi Arabic", Script::Arabic),
+    ] {
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named(family)));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        let mut layout = builder.build(text);
+        assert!(layout.runs().all(|run| run.script() == script));
+        layout.break_all_lines(Some(30.0));
+        assert!(layout.len() > 1);
+        assert!(
+            layout
+                .lines()
+                .flat_map(|line| line.runs())
+                .all(|run| run.script() == script)
+        );
+    }
+}

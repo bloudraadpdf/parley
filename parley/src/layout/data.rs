@@ -985,13 +985,17 @@ pub(crate) struct RunData {
     pub(crate) word_spacing: f32,
     /// Additional letter spacing.
     pub(crate) letter_spacing: f32,
-    /// CSS Text 4 §8.2.1: letters of a cursive script take no letter spacing.
-    pub(crate) cursive_script: bool,
+    /// The resolved shaping script, including common and inherited characters.
+    pub(crate) script: icu_properties::props::Script,
     /// Total advance of the run.
     pub(crate) advance: f32,
 }
 
 impl RunData {
+    pub(crate) fn is_cursive_script(&self) -> bool {
+        is_cursive_script(self.script)
+    }
+
     /// Glyph receiving a component's spacing. Synthetic ligature components
     /// keep separate layout advances but share the start cluster's glyphs.
     pub(crate) fn spacing_glyph(&self, clusters: &[ClusterData], index: usize) -> Option<usize> {
@@ -1024,7 +1028,7 @@ impl RunData {
     pub(crate) fn cluster_letter_spacing(&self, cluster: &ClusterData) -> f32 {
         if cluster.flags & ClusterData::LETTER_SPACING_BOUNDARY == 0
             || cluster.info.is_default_ignorable()
-            || (self.cursive_script && !cluster.info.is_whitespace())
+            || (self.is_cursive_script() && !cluster.info.is_whitespace())
         {
             0.0
         } else {
@@ -1819,7 +1823,7 @@ impl<B: Brush> LayoutData<B> {
             metrics,
             word_spacing,
             letter_spacing,
-            cursive_script: is_cursive_script(script),
+            script,
             advance: 0.,
         };
 
