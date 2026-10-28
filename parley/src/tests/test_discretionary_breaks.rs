@@ -685,8 +685,17 @@ fn registered_discretionary_break_precedes_a_punctuation_cluster() {
 #[test]
 fn terminal_soft_hyphen_is_not_a_selected_line_break() {
     for physical in [false, true] {
-        for word in ["a", "אב"] {
-            for trailing in ["", " ", "  "] {
+        for word in ["a", "אב", "\u{2066}a", "\u{2067}אב", "\u{2068}a"] {
+            for trailing in [
+                "",
+                " ",
+                "  ",
+                "\u{2069}",
+                "\u{2069} ",
+                "\u{202c} ",
+                "\u{200e} ",
+                "\u{200f} ",
+            ] {
                 let text = alloc::format!("{word}\u{00ad}{trailing}");
                 let mut layout = roboto_layout(&text);
                 if !physical {
@@ -708,4 +717,17 @@ fn terminal_soft_hyphen_is_not_a_selected_line_break() {
             }
         }
     }
+}
+
+#[test]
+fn a_bidi_closer_does_not_hide_visible_content_after_a_soft_hyphen() {
+    let mut layout = roboto_layout("a\u{00ad}bcdef\u{2069}");
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: "a\u{00ad}".len(),
+        advance: unwrapped_advance("="),
+        max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
+    }]);
+    layout.break_all_lines(Some(unwrapped_advance("a=") + 0.01));
+    assert!(layout.get(0).unwrap().ends_at_discretionary_break());
 }
