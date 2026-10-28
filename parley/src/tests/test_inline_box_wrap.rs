@@ -2712,3 +2712,36 @@ fn forced_break_inline_end_padding_participates_in_line_fit() {
     );
     assert_eq!(render(&mut lcx, &mut fcx, 6), expected);
 }
+
+#[test]
+fn zero_width_closing_edge_does_not_hyphenate_a_terminal_word() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "a\u{00ad} \n";
+    let mut layout = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        20.0,
+        None,
+        [InlineBox::inline_end_edge(
+            75,
+            text.len(),
+            crate::InlineOwnerEdgeAdvance::uniform(0.0),
+            0.0,
+            InlineBoxBreakAffinity::ToPrevious,
+        )],
+    );
+    layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+        byte_index: "a\u{00ad}".len(),
+        advance: 10.0,
+        max_consecutive_lines: None,
+        condition: crate::layout::DiscretionaryBreakCondition::Normal,
+    }]);
+    layout.break_all_lines(Some(1.0));
+    assert!(
+        layout
+            .lines()
+            .all(|line| !line.ends_at_discretionary_break())
+    );
+}

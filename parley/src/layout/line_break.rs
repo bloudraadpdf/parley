@@ -1025,12 +1025,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         data: &LayoutData<B>,
         state: &mut BreakerState,
         byte_index: usize,
-    ) -> bool {
+    ) -> f32 {
         if state.cluster_idx + 1 != data.items[state.item_idx].cluster_range.end {
-            return false;
+            return 0.0;
         }
         let mut next = state.item_idx + 1;
         let mut appended = false;
+        let mut advance = 0.0;
         while let Some(item) = data.items.get(next) {
             if item.kind != LayoutItemKind::InlineBox {
                 break;
@@ -1044,6 +1045,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             }
             state.line.cloned_owners.before_edge(inline_box);
             let width = inline_box.width_for_line(state.lines);
+            advance += width;
             state.append_inline_box_to_line(
                 state.line.x + width,
                 state.line.fit_x + width,
@@ -1058,7 +1060,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if appended {
             state.run_idx += 1;
         }
-        appended
+        advance
     }
 
     fn logical_owner_edge_placement(
@@ -2049,18 +2051,18 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 run.metrics().line_height,
                                 cluster.info().authored_break_unit(),
                             );
-                            let appended_end = Self::append_forced_break_end_edges(
+                            let end_advance = Self::append_forced_break_end_edges(
                                 &self.layout.data,
                                 &mut self.state,
                                 cluster.text_range().end,
                             );
                             let fits = self.advance_fits(self.state.line.fit_x, max_advance);
-                            if appended_end && fits {
+                            if end_advance != 0.0 && fits {
                                 self.state.line.fragment_fit = FragmentFit::Fits;
                             }
                             finish_source_fragment!();
                             if (self.reject_terminal_candidate
-                                || appended_end
+                                || end_advance > 0.0
                                     && !fits
                                     && self.state.line.text_wrap_mode == TextWrapMode::Wrap)
                                 && commit_overflow_candidate!()
