@@ -1028,6 +1028,7 @@ impl RunData {
     pub(crate) fn cluster_letter_spacing(&self, cluster: &ClusterData) -> f32 {
         if cluster.flags & ClusterData::LETTER_SPACING_BOUNDARY == 0
             || cluster.info.is_default_ignorable()
+            || cluster.info.whitespace() == Whitespace::Newline
             || (self.is_cursive_script() && !cluster.info.is_whitespace())
         {
             0.0

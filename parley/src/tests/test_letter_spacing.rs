@@ -702,6 +702,40 @@ fn preserved_terminal_space_owns_the_last_tracking_interval() {
 }
 
 #[test]
+fn preserved_line_breaks_have_no_tracking_advance() {
+    for word in ["ab", "אב"] {
+        for ending in ["\n", "\r", "\r\n", "\u{2028}", "\u{2029}"] {
+            let text = alloc::format!("{word}{ending}");
+            for newline_spacing in [0.0, 5.0] {
+                for trim in [false, true] {
+                    let mut reference = configured_unbroken_layout("Roboto", word, 5.0, |_| {});
+                    reference.set_line_end_letter_spacing_trim(trim);
+                    let expected = reference.calculate_content_widths();
+                    let mut layout = configured_unbroken_layout("Roboto", &text, 5.0, |builder| {
+                        builder.push_default(StyleProperty::WhiteSpaceCollapse(WhiteSpaceCollapse::Preserve));
+                        builder.push(StyleProperty::LetterSpacing(newline_spacing), word.len()..text.len());
+                    });
+                    layout.set_line_end_letter_spacing_trim(trim);
+                    for run in layout.runs() {
+                        for cluster in run.clusters() {
+                            if cluster.text_range().start >= word.len() {
+                                assert_eq!(cluster.advance(), 0.0, "{text:?}, spacing={newline_spacing}");
+                                assert_eq!(cluster.fit_advance(), 0.0, "{text:?}, spacing={newline_spacing}");
+                            }
+                        }
+                    }
+                    let widths = layout.calculate_content_widths();
+                    assert!((widths.min - expected.min).abs() < 0.001, "{text:?}: {widths:?}, {expected:?}");
+                    assert!((widths.max - expected.max).abs() < 0.001, "{text:?}: {widths:?}, {expected:?}");
+                    layout.break_all_lines(None);
+                    assert!((layout.lines().next().unwrap().metrics().advance - expected.max).abs() < 0.001);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_line_fragment_keeps_its_trailing_letter_spacing_on_request() {
     // A ruby base is only part of a line, so its last character keeps the
     // tracking that the following fragment continues.
