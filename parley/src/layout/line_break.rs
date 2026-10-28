@@ -588,6 +588,9 @@ impl BreakerState {
             self.line.num_spaces += 1;
             self.line.space_shrink += separator.shrink;
             self.line.separator_font_sizes += separator.font_size;
+            if separator.terminal_disposition == TerminalWhitespaceDisposition::Measured {
+                self.line.content_end = self.line.measure();
+            }
         } else {
             self.line.content_end = self.line.measure();
         }
@@ -867,6 +870,7 @@ enum TotalFitState {
 struct Separator {
     font_size: f32,
     shrink: f32,
+    terminal_disposition: TerminalWhitespaceDisposition,
 }
 
 macro_rules! commit_current_line {
@@ -2167,6 +2171,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 run.font_size()
                             },
                             shrink: style.justify_shrink * fit_advance,
+                            terminal_disposition: WhiteSpaceLayoutMode::from_style(style)
+                                .terminal_disposition(whitespace),
                         });
                         match line_fit {
                             LineFit::Fits | LineFit::TrailingPreservedSpaceOverflow => {

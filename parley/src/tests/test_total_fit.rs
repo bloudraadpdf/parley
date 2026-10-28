@@ -241,6 +241,36 @@ const PRINCE: TotalFit = TotalFit {
     final_hyphen_demerits: 5_000.0,
 };
 
+#[test]
+fn total_fit_counts_kept_terminal_spaces() {
+    let text = "aaa bbb ccc";
+    let width = |text| {
+        let mut paragraph = layout(text, LineBreakStrategy::FirstFit);
+        paragraph.break_all_lines(None);
+        paragraph.full_width()
+    };
+    let available = width("aaa bbb") + (width("a a") - width("aa")) / 2.0;
+    for strategy in [
+        LineBreakStrategy::FirstFit,
+        LineBreakStrategy::TotalFit(PRINCE),
+    ] {
+        let mut fonts = create_font_context();
+        let mut context: LayoutContext<ColorBrush> = LayoutContext::new();
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        builder.push(StyleProperty::LineEndSpace(crate::LineEndSpace::Kept), 7..8);
+        let mut paragraph = builder.build(text);
+        paragraph.set_line_break_strategy(strategy);
+        paragraph.break_all_lines(Some(available));
+        assert_eq!(
+            paragraph.lines().next().unwrap().text_range().end,
+            4,
+            "{strategy:?}"
+        );
+    }
+}
+
 fn layout(text: &str, strategy: LineBreakStrategy) -> Layout<ColorBrush> {
     let mut font_context = create_font_context();
     let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
