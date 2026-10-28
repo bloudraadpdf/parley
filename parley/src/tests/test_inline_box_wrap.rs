@@ -2632,3 +2632,83 @@ fn line_fit_tolerance_keeps_a_line_that_overflows_within_it() {
     assert_eq!(line_count(0.003), 2);
     assert_eq!(line_count(0.0075), 1);
 }
+
+#[test]
+fn inline_end_edge_after_preserved_newline_stays_with_its_owner() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    for text in ["X  \n", "X  \nY"] {
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(20.0));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
+        builder.push_inline_box(InlineBox::inline_end_edge(
+            75,
+            4,
+            crate::InlineOwnerEdgeAdvance::uniform(20.0),
+            0.0,
+            InlineBoxBreakAffinity::ToPrevious,
+        ));
+        let mut layout = builder.build(text);
+        let source_advance = layout
+            .runs()
+            .map(|run| {
+                run.clusters()
+                    .filter(|cluster| cluster.text_range().end <= 4)
+                    .map(|cluster| cluster.advance())
+                    .sum::<f32>()
+            })
+            .sum::<f32>();
+        layout.break_all_lines(None);
+        assert!(
+            (layout.lines().next().unwrap().metrics().advance - source_advance - 20.0).abs()
+                < 0.001
+        );
+        let edge_line = layout.lines().enumerate().find_map(|(line_index, line)| {
+            line.items().find_map(|item| match item {
+                crate::PositionedLayoutItem::InlineBox(inline_box) if inline_box.id == 75 => {
+                    Some(line_index)
+                }
+                _ => None,
+            })
+        });
+        assert_eq!(edge_line, Some(0), "{text:?}");
+    }
+}
+
+#[test]
+fn forced_break_inline_end_padding_participates_in_line_fit() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "XX XX\nY";
+    let render = |lcx: &mut LayoutContext<ColorBrush>, fcx: &mut crate::FontContext, index| {
+        let mut layout = build_inline_box_layout(
+            lcx,
+            fcx,
+            text,
+            20.0,
+            None,
+            [InlineBox::inline_end_edge(
+                75,
+                index,
+                crate::InlineOwnerEdgeAdvance::uniform(20.0),
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            )],
+        );
+        layout.break_all_lines(Some(60.0));
+        layout
+            .lines()
+            .map(|line| (line.text_range(), line.metrics().advance))
+            .collect::<Vec<_>>()
+    };
+    let expected = render(&mut lcx, &mut fcx, 5);
+    assert!(
+        expected.len() >= 3,
+        "padding must force a soft wrap before the explicit break"
+    );
+    assert_eq!(render(&mut lcx, &mut fcx, 6), expected);
+}

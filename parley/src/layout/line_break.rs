@@ -1021,6 +1021,46 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         Some((line.metrics.advance, line.size()))
     }
 
+    fn append_forced_break_end_edges(
+        data: &LayoutData<B>,
+        state: &mut BreakerState,
+        byte_index: usize,
+    ) -> bool {
+        if state.cluster_idx + 1 != data.items[state.item_idx].cluster_range.end {
+            return false;
+        }
+        let mut next = state.item_idx + 1;
+        let mut appended = false;
+        while let Some(item) = data.items.get(next) {
+            if item.kind != LayoutItemKind::InlineBox {
+                break;
+            }
+            let inline_box = &data.inline_boxes[item.index];
+            if inline_box.index != byte_index
+                || !matches!(inline_box.line_break_participation(),
+                    InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) if edge.is_end())
+            {
+                break;
+            }
+            state.line.cloned_owners.before_edge(inline_box);
+            let width = inline_box.width_for_line(state.lines);
+            state.append_inline_box_to_line(
+                state.line.x + width,
+                state.line.fit_x + width,
+                inline_box.height(),
+                inline_box.shaping_participation(),
+            );
+            state.line.cloned_owners.after_edge(inline_box);
+            next += 1;
+            state.item_idx = next;
+            appended = true;
+        }
+        if appended {
+            state.run_idx += 1;
+        }
+        appended
+    }
+
     fn logical_owner_edge_placement(
         &mut self,
         source_projection: LogicalInlineEdgeSourceProjection,
@@ -2003,16 +2043,30 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 // break_opportunity = true;
                             }
                         } else if is_newline {
-                            finish_source_fragment!();
-                            if self.reject_terminal_candidate && commit_overflow_candidate!() {
-                                return self.start_new_line();
-                            }
                             self.state.append_cluster_to_line(
                                 self.state.line.x,
                                 self.state.line.fit_x,
                                 run.metrics().line_height,
                                 cluster.info().authored_break_unit(),
                             );
+                            let appended_end = Self::append_forced_break_end_edges(
+                                &self.layout.data,
+                                &mut self.state,
+                                cluster.text_range().end,
+                            );
+                            let fits = self.advance_fits(self.state.line.fit_x, max_advance);
+                            if appended_end && fits {
+                                self.state.line.fragment_fit = FragmentFit::Fits;
+                            }
+                            finish_source_fragment!();
+                            if (self.reject_terminal_candidate
+                                || appended_end
+                                    && !fits
+                                    && self.state.line.text_wrap_mode == TextWrapMode::Wrap)
+                                && commit_overflow_candidate!()
+                            {
+                                return self.start_new_line();
+                            }
                             self.state.record_segment_end();
                             if commit_current_line!(
                                 self,
