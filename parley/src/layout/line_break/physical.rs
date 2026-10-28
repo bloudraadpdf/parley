@@ -154,7 +154,7 @@ impl<B: Brush> BreakLines<'_, B> {
         }
         let endpoints = self.source_endpoints(terminal);
         let mut limit = fit.limit;
-        let mut fallback = None;
+        let mut fallback: Option<LineShapeCandidate> = None;
         let mut bound = None;
         for end in endpoints.iter().copied().rev() {
             if bound.is_some_and(|bound: SourceCursor| end.key() > bound.key()) {
@@ -231,6 +231,16 @@ impl<B: Brush> BreakLines<'_, B> {
             let Some(mut candidate) = candidate else {
                 continue;
             };
+            if candidate.line.ends_at_discretionary_break
+                && fallback.as_ref().is_some_and(|longer| {
+                    longer
+                        .line
+                        .terminal_justification_start
+                        .is_some_and(|start| candidate.line.text_range.end >= start)
+                })
+            {
+                continue;
+            }
             let fits = super::line_advance_fits(
                 candidate.line.fitting_advance() - candidate.line.space_shrink,
                 candidate.line.max_advance + self.layout.data.line_fit_tolerance,

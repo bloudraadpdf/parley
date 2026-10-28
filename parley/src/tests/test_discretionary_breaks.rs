@@ -681,3 +681,31 @@ fn registered_discretionary_break_precedes_a_punctuation_cluster() {
     layout.break_all_lines(Some(width));
     assert_eq!(layout.lines().count(), 1);
 }
+
+#[test]
+fn terminal_soft_hyphen_is_not_a_selected_line_break() {
+    for physical in [false, true] {
+        for word in ["a", "אב"] {
+            for trailing in ["", " ", "  "] {
+                let text = alloc::format!("{word}\u{00ad}{trailing}");
+                let mut layout = roboto_layout(&text);
+                if !physical {
+                    layout.data.deferred_physical_shapes.clear();
+                }
+                layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+                    byte_index: word.len() + '\u{00ad}'.len_utf8(),
+                    advance: unwrapped_advance("="),
+                    max_consecutive_lines: None,
+                    condition: crate::layout::DiscretionaryBreakCondition::Normal,
+                }]);
+                layout.break_all_lines(Some(1.0));
+                assert!(
+                    layout
+                        .lines()
+                        .all(|line| !line.ends_at_discretionary_break()),
+                    "{text:?}, physical={physical}"
+                );
+            }
+        }
+    }
+}
