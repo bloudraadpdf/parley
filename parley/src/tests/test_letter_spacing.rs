@@ -712,23 +712,45 @@ fn preserved_line_breaks_have_no_tracking_advance() {
                     reference.set_line_end_letter_spacing_trim(trim);
                     let expected = reference.calculate_content_widths();
                     let mut layout = configured_unbroken_layout("Roboto", &text, 5.0, |builder| {
-                        builder.push_default(StyleProperty::WhiteSpaceCollapse(WhiteSpaceCollapse::Preserve));
-                        builder.push(StyleProperty::LetterSpacing(newline_spacing), word.len()..text.len());
+                        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+                            WhiteSpaceCollapse::Preserve,
+                        ));
+                        builder.push(
+                            StyleProperty::LetterSpacing(newline_spacing),
+                            word.len()..text.len(),
+                        );
                     });
                     layout.set_line_end_letter_spacing_trim(trim);
                     for run in layout.runs() {
                         for cluster in run.clusters() {
                             if cluster.text_range().start >= word.len() {
-                                assert_eq!(cluster.advance(), 0.0, "{text:?}, spacing={newline_spacing}");
-                                assert_eq!(cluster.fit_advance(), 0.0, "{text:?}, spacing={newline_spacing}");
+                                assert_eq!(
+                                    cluster.advance(),
+                                    0.0,
+                                    "{text:?}, spacing={newline_spacing}"
+                                );
+                                assert_eq!(
+                                    cluster.fit_advance(),
+                                    0.0,
+                                    "{text:?}, spacing={newline_spacing}"
+                                );
                             }
                         }
                     }
                     let widths = layout.calculate_content_widths();
-                    assert!((widths.min - expected.min).abs() < 0.001, "{text:?}: {widths:?}, {expected:?}");
-                    assert!((widths.max - expected.max).abs() < 0.001, "{text:?}: {widths:?}, {expected:?}");
+                    assert!(
+                        (widths.min - expected.min).abs() < 0.001,
+                        "{text:?}: {widths:?}, {expected:?}"
+                    );
+                    assert!(
+                        (widths.max - expected.max).abs() < 0.001,
+                        "{text:?}: {widths:?}, {expected:?}"
+                    );
                     layout.break_all_lines(None);
-                    assert!((layout.lines().next().unwrap().metrics().advance - expected.max).abs() < 0.001);
+                    assert!(
+                        (layout.lines().next().unwrap().metrics().advance - expected.max).abs()
+                            < 0.001
+                    );
                 }
             }
         }

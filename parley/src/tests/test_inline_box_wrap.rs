@@ -1388,6 +1388,32 @@ fn transparent_anchor_preserves_a_mandatory_break() {
 }
 
 #[test]
+fn transparent_anchor_after_terminal_newline_remains_positioned() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    for text in ["\n", "XXX\n"] {
+        let mut layout = build_inline_box_layout(
+            &mut lcx,
+            &mut fcx,
+            text,
+            10.0,
+            None,
+            [InlineBox::transparent_anchor(75, text.len())],
+        );
+        layout.break_all_lines(None);
+        let anchor_line = layout.lines().enumerate().find_map(|(line_index, line)| {
+            line.items().find_map(|item| match item {
+                crate::PositionedLayoutItem::InlineBox(inline_box) if inline_box.id == 75 => {
+                    Some(line_index)
+                }
+                _ => None,
+            })
+        });
+        assert_eq!(anchor_line, Some(1), "{text:?}");
+    }
+}
+
+#[test]
 fn spaces_between_full_width_inline_boxes_hang_instead_of_wrapping() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
