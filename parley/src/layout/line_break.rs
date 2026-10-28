@@ -2864,6 +2864,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         line.terminal_whitespace = terminal.whitespace;
         line.terminal_fit_whitespace = terminal.fit_whitespace;
         line.terminal_justification_start = terminal.justification_start;
+        line.terminal_source_start = terminal.source_start;
         line.removed_terminal_source_ranges = terminal.removed_source_ranges;
         if line.break_reason == BreakReason::Regular {
             line.num_spaces = line
@@ -4103,6 +4104,7 @@ struct CollectedTerminalWhitespace {
     removed_source_ranges: Vec<Range<usize>>,
     justification_spaces: usize,
     justification_start: Option<usize>,
+    source_start: Option<usize>,
 }
 
 fn collect_terminal_whitespace<B: Brush>(
@@ -4115,6 +4117,7 @@ fn collect_terminal_whitespace<B: Brush>(
     let mut removed_source_ranges: Vec<Range<usize>> = Vec::new();
     let mut justification_spaces = 0;
     let mut justification_start = None;
+    let mut source_start = None;
     'items: for line_item in line_items.iter().rev() {
         match line_item.kind {
             LayoutItemKind::InlineBox => {
@@ -4128,13 +4131,16 @@ fn collect_terminal_whitespace<B: Brush>(
                 for cluster in line_item.logical_clusters_from_end(layout_data) {
                     let style = &layout_data.styles[cluster.style_index as usize];
                     match TerminalSourceUnit::classify(cluster, style) {
-                        TerminalSourceUnit::Bridge => {}
+                        TerminalSourceUnit::Bridge => {
+                            source_start = Some(cluster.text_range(run).start);
+                        }
                         TerminalSourceUnit::Barrier => break 'items,
                         TerminalSourceUnit::Candidate(disposition) => {
                             justification_spaces +=
                                 usize::from(cluster.info.whitespace().is_space_or_nbsp());
                             let range = cluster.text_range(run);
                             justification_start = Some(range.start);
+                            source_start = Some(range.start);
                             let advance = selected_source_cluster_advance
                                 .resolve(range.start, cluster.advance);
                             let removes_source = terminal.removes_source(disposition);
@@ -4166,6 +4172,7 @@ fn collect_terminal_whitespace<B: Brush>(
         removed_source_ranges,
         justification_spaces,
         justification_start,
+        source_start,
     }
 }
 

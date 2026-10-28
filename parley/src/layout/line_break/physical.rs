@@ -2,17 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use super::{
-    BreakLines, LineTabOrigin, TerminalSourceUnit, blocks_source_whitespace,
-    justification::LineShapeCandidate, source_probe::SourceCursor,
+    BreakLines, LineTabOrigin, justification::LineShapeCandidate, source_probe::SourceCursor,
 };
-use crate::{
-    Brush,
-    layout::{
-        BreakReason,
-        data::{LayoutData, LayoutItemKind, LineItemData},
-    },
-    shape::physical::PhysicalShape,
-};
+use crate::{Brush, layout::BreakReason, shape::physical::PhysicalShape};
 
 impl<B: Brush> BreakLines<'_, B> {
     #[cfg(test)]
@@ -241,11 +233,10 @@ impl<B: Brush> BreakLines<'_, B> {
             };
             if candidate.line.ends_at_discretionary_break
                 && fallback.as_ref().is_some_and(|longer| {
-                    terminal_source_suffix(
-                        &longer.items,
-                        &self.layout.data,
-                        candidate.line.text_range.end,
-                    )
+                    longer
+                        .line
+                        .terminal_source_start
+                        .is_some_and(|start| candidate.line.text_range.end >= start)
                 })
             {
                 continue;
@@ -294,36 +285,4 @@ struct PhysicalFit {
     expanded: bool,
     line_start: usize,
     limit: Option<usize>,
-}
-
-fn terminal_source_suffix<B: Brush>(
-    items: &[LineItemData],
-    data: &LayoutData<B>,
-    start: usize,
-) -> bool {
-    for item in items.iter().rev() {
-        match item.kind {
-            LayoutItemKind::InlineBox => {
-                if blocks_source_whitespace(item, data) {
-                    return false;
-                }
-            }
-            LayoutItemKind::TextRun => {
-                let run = &data.runs[item.index];
-                for cluster in item.logical_clusters_from_end(data) {
-                    if cluster.text_range(run).end <= start {
-                        return true;
-                    }
-                    let style = &data.styles[cluster.style_index as usize];
-                    if matches!(
-                        TerminalSourceUnit::classify(cluster, style),
-                        TerminalSourceUnit::Barrier
-                    ) {
-                        return false;
-                    }
-                }
-            }
-        }
-    }
-    true
 }

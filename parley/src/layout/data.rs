@@ -1071,6 +1071,7 @@ pub(crate) struct LineData {
     /// The cluster index and natural advance of each word separator that justification shrank.
     pub(crate) shrunk_separators: Vec<(usize, f32)>,
     pub(crate) terminal_justification_start: Option<usize>,
+    pub(crate) terminal_source_start: Option<usize>,
     pub(crate) justification_side_spacing: alloc::collections::BTreeMap<
         super::justification::JustificationUnitAddress,
         super::justification::JustificationSideSpacing,

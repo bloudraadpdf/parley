@@ -731,3 +731,27 @@ fn a_bidi_closer_does_not_hide_visible_content_after_a_soft_hyphen() {
     layout.break_all_lines(Some(unwrapped_advance("a=") + 0.01));
     assert!(layout.get(0).unwrap().ends_at_discretionary_break());
 }
+
+#[test]
+fn bidi_reordering_does_not_hide_text_after_a_soft_hyphen() {
+    use super::test_bidi_topology::build_layout_with_direction;
+    for direction in [crate::BaseDirection::Ltr, crate::BaseDirection::Rtl] {
+        for word in ["ab", "אב"] {
+            for tail in ["cd", "גד"] {
+                let text = alloc::format!("{word}\u{00ad}{tail}");
+                let mut layout = build_layout_with_direction(&text, [], Some(direction));
+                layout.set_discretionary_breaks(vec![DiscretionaryBreak {
+                    byte_index: word.len() + '\u{00ad}'.len_utf8(),
+                    advance: 5.0,
+                    max_consecutive_lines: None,
+                    condition: crate::layout::DiscretionaryBreakCondition::Normal,
+                }]);
+                layout.break_all_lines(Some(1.0));
+                assert!(
+                    layout.get(0).unwrap().ends_at_discretionary_break(),
+                    "{text:?}, {direction:?}"
+                );
+            }
+        }
+    }
+}
