@@ -131,7 +131,7 @@ fn overflowing_terminal_owner_keeps_preserved_spaces() {
 
 #[test]
 fn atomic_boundary_affinity_survives_a_preserved_child() {
-    for (affinity, reclaim, expected_lines) in [
+    for (affinity, configured_fit, expected_lines) in [
         (InlineBoxBreakAffinity::Independent, false, 2),
         (InlineBoxBreakAffinity::Both, false, 1),
         (InlineBoxBreakAffinity::Independent, true, 2),
@@ -160,8 +160,7 @@ fn atomic_boundary_affinity_survives_a_preserved_child() {
             8, 3, 5.0, 5.0, affinity,
         ));
         let mut value = builder.build(text);
-        value.set_reclaim_space_before_inline_box(reclaim);
-        if reclaim {
+        if configured_fit {
             value.set_normal_soft_wrap_selection(crate::NormalSoftWrapSelection::GreedyLatest);
             value.set_line_fit_tolerance(0.0075);
             value.set_line_end_letter_spacing_trim(false);
@@ -174,7 +173,7 @@ fn atomic_boundary_affinity_survives_a_preserved_child() {
             assert_eq!(
                 value.len(),
                 expected,
-                "{affinity:?}, reclaim={reclaim}, width={available}"
+                "{affinity:?}, configured_fit={configured_fit}, width={available}"
             );
             assert_eq!(edge(&value, 0).1, if expected == 2 { 5.0 } else { 25.0 });
         }

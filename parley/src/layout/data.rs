@@ -1261,11 +1261,6 @@ pub(crate) struct LayoutData<B: Brush> {
     /// character of a line. `false` keeps it, for a paragraph that is only a
     /// fragment of a line (a ruby base or annotation).
     pub(crate) trim_line_end_letter_spacing: bool,
-    /// When `true`, the line breaker reclaims the advance of collapsible
-    /// trailing whitespace when doing so lets the following inline box fit
-    /// on the current line (PDFreactor's model) instead of wrapping the
-    /// box (the browser model). See `BreakLines`.
-    pub(crate) reclaim_space_before_inline_box: bool,
     /// The advance by which a line may exceed its maximum advance and still
     /// fit. See [`Layout::set_line_fit_tolerance`](super::Layout::set_line_fit_tolerance).
     pub(crate) line_fit_tolerance: f32,
@@ -1352,7 +1347,6 @@ impl<B: Brush> Default for LayoutData<B> {
             normal_soft_wrap_selection: NormalSoftWrapSelection::default(),
             line_break_strategy: super::LineBreakStrategy::default(),
             trim_line_end_letter_spacing: true,
-            reclaim_space_before_inline_box: false,
             line_fit_tolerance: 0.0,
             line_break_overrides: Vec::new(),
             first_line_source_end: None,
@@ -1595,7 +1589,6 @@ impl<B: Brush> LayoutData<B> {
         self.normal_soft_wrap_selection = NormalSoftWrapSelection::default();
         self.line_break_strategy = super::LineBreakStrategy::default();
         self.trim_line_end_letter_spacing = true;
-        self.reclaim_space_before_inline_box = false;
         self.line_fit_tolerance = 0.0;
         self.line_break_overrides.clear();
         self.first_line_source_end = None;

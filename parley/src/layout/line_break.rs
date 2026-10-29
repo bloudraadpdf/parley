@@ -1093,82 +1093,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
-    /// PDFreactor-parity space reclaim (gated by
-    /// [`Layout::set_reclaim_space_before_inline_box`]): when the current
-    /// line ends in collapsible whitespace whose removal lets `box_width`
-    /// fit within `max_advance`, zero those clusters' advances (exactly
-    /// what a wrap would do to a trailing space), shrink the line, and
-    /// return the reclaimed advance. Returns `None` when the flag is off,
-    /// the line has no trailing whitespace, or the box still would not
-    /// fit.
-    fn reclaim_trailing_space_for_box(&mut self, box_width: f32, max_advance: f32) -> Option<f32> {
-        if !self.layout.data.reclaim_space_before_inline_box {
-            return None;
-        }
-        let cluster_start = self.state.line.clusters.start;
-        let end = self
-            .state
-            .line
-            .clusters
-            .end
-            .min(self.layout.data.clusters.len());
-        let mut idx = end;
-        let mut reclaimed = 0.0_f32;
-        let mut reclaimed_fit = 0.0_f32;
-        let mut reclaimed_shrink = 0.0_f32;
-        let mut reclaimed_font_sizes = 0.0_f32;
-        let mut spaces = 0_usize;
-        while idx > cluster_start {
-            let cluster = &self.layout.data.clusters[idx - 1];
-            if cluster.info.whitespace().is_space_or_nbsp()
-                && self.layout.data.styles[cluster.style_index as usize].white_space_collapse
-                    == crate::WhiteSpaceCollapse::Collapse
-            {
-                reclaimed += cluster.advance;
-                reclaimed_fit += cluster.line_break_advance;
-                reclaimed_shrink +=
-                    self.layout.data.justify_shrink(cluster) * cluster.line_break_advance;
-                let run = self
-                    .layout
-                    .data
-                    .runs
-                    .partition_point(|run| run.cluster_range.end < idx);
-                if cluster.info.whitespace() != Whitespace::NoBreakSpace {
-                    reclaimed_font_sizes += self.layout.data.runs[run].font_size;
-                }
-                spaces += 1;
-                idx -= 1;
-            } else {
-                break;
-            }
-        }
-        if reclaimed <= 0.0
-            || !self.advance_fits(
-                self.state.line.fit_x - reclaimed_fit + box_width,
-                max_advance,
-            )
-        {
-            return None;
-        }
-        for (offset, cluster) in self.layout.data.clusters[idx..end].iter_mut().enumerate() {
-            CandidateMutations::cluster(
-                &mut self.candidate_mutations,
-                idx + offset,
-                cluster,
-                |cluster| {
-                    cluster.advance = 0.0;
-                    cluster.line_break_advance = 0.0;
-                },
-            );
-        }
-        self.state.line.x -= reclaimed;
-        self.state.line.fit_x -= reclaimed_fit;
-        self.state.line.num_spaces = self.state.line.num_spaces.saturating_sub(spaces);
-        self.state.line.space_shrink -= reclaimed_shrink;
-        self.state.line.separator_font_sizes -= reclaimed_font_sizes;
-        Some(reclaimed)
-    }
-
     /// Returns the y-coordinate of the top of the current line
     pub fn committed_y(&self) -> f64 {
         self.state.committed_y
@@ -1754,33 +1678,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // it, so it overflows with its run exactly like
                             // the tail of an unbreakable word.
                             let (next_x, box_height) = (next_x, height);
-                            self.state.item_idx += 1;
-                            self.state.append_inline_box_to_line(
-                                next_x,
-                                next_fit_x,
-                                box_height,
-                                shaping_participation,
-                            );
-                            self.state.mark_inline_box_break_after(break_affinity);
-                        } else if let Some(reclaimed_x) = {
-                            let (box_width, box_height) = (width, height);
-                            self.reclaim_trailing_space_for_box(box_width, max_advance)
-                                .map(|_| {
-                                    (
-                                        self.state.line.x + box_width,
-                                        self.state.line.fit_x + box_width,
-                                        box_height,
-                                    )
-                                })
-                        } {
-                            // PDFreactor's model: remove the collapsible
-                            // trailing whitespace (its advance is zeroed —
-                            // exactly what a wrap would do to it) and keep
-                            // the box on the line now that it fits.
-                            // `pdfreactor/W8BEN` row 10: `...article:
-                            // <input 46.3%>` fits only without the space;
-                            // the golden keeps the field on the text line.
-                            let (next_x, next_fit_x, box_height) = reclaimed_x;
                             self.state.item_idx += 1;
                             self.state.append_inline_box_to_line(
                                 next_x,
