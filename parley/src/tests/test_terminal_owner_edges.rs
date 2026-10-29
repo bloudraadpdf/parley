@@ -131,9 +131,11 @@ fn overflowing_terminal_owner_keeps_preserved_spaces() {
 
 #[test]
 fn atomic_boundary_affinity_survives_a_preserved_child() {
-    for (affinity, expected_lines) in [
-        (InlineBoxBreakAffinity::Independent, 2),
-        (InlineBoxBreakAffinity::Both, 1),
+    for (affinity, reclaim, expected_lines) in [
+        (InlineBoxBreakAffinity::Independent, false, 2),
+        (InlineBoxBreakAffinity::Both, false, 1),
+        (InlineBoxBreakAffinity::Independent, true, 2),
+        (InlineBoxBreakAffinity::Both, true, 1),
     ] {
         let text = "X  ";
         let mut fonts = create_font_context();
@@ -158,13 +160,23 @@ fn atomic_boundary_affinity_survives_a_preserved_child() {
             8, 3, 5.0, 5.0, affinity,
         ));
         let mut value = builder.build(text);
+        value.set_reclaim_space_before_inline_box(reclaim);
+        if reclaim {
+            value.set_normal_soft_wrap_selection(crate::NormalSoftWrapSelection::GreedyLatest);
+            value.set_line_fit_tolerance(0.0075);
+            value.set_line_end_letter_spacing_trim(false);
+        }
         value.break_all_lines(None);
         let full = value.data.lines[0].fitting_advance();
-        value.break_all_lines(Some(full - 2.0));
-        assert_eq!(value.len(), expected_lines, "{affinity:?}");
-        assert_eq!(
-            edge(&value, 0).1,
-            if expected_lines == 2 { 5.0 } else { 25.0 }
-        );
+        for available in [full - 15.0, full - 5.0, full, full + 15.0] {
+            value.break_all_lines(Some(available));
+            let expected = if available < full { expected_lines } else { 1 };
+            assert_eq!(
+                value.len(),
+                expected,
+                "{affinity:?}, reclaim={reclaim}, width={available}"
+            );
+            assert_eq!(edge(&value, 0).1, if expected == 2 { 5.0 } else { 25.0 });
+        }
     }
 }

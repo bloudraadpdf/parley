@@ -1120,7 +1120,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let mut spaces = 0_usize;
         while idx > cluster_start {
             let cluster = &self.layout.data.clusters[idx - 1];
-            if cluster.info.whitespace().is_space_or_nbsp() {
+            if cluster.info.whitespace().is_space_or_nbsp()
+                && self.layout.data.styles[cluster.style_index as usize].white_space_collapse
+                    == crate::WhiteSpaceCollapse::Collapse
+            {
                 reclaimed += cluster.advance;
                 reclaimed_fit += cluster.line_break_advance;
                 reclaimed_shrink +=
