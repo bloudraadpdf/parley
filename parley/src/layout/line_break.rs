@@ -174,8 +174,10 @@ enum SourceStartWhitespace {
 impl SourceStartWhitespace {
     const fn following_break(break_reason: BreakReason) -> Self {
         match break_reason {
-            BreakReason::Explicit => Self::RemoveCollapsible,
-            BreakReason::None | BreakReason::Regular | BreakReason::Emergency => Self::Retain,
+            BreakReason::Explicit | BreakReason::Regular | BreakReason::Emergency => {
+                Self::RemoveCollapsible
+            }
+            BreakReason::None => Self::Retain,
         }
     }
 

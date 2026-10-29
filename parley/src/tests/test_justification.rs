@@ -127,3 +127,28 @@ fn assert_rtl_interior_expansion(text: &str) {
         "undo uses the same source opportunities"
     );
 }
+
+#[test]
+fn selected_soft_wrap_removes_collapsible_leading_space_before_justification() {
+    for collapse in [WhiteSpaceCollapse::Collapse, WhiteSpaceCollapse::Preserve] {
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::<ColorBrush>::new();
+        let text = "a b c";
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(12.0));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(collapse));
+        let mut layout = builder.build(text);
+        let mut breaker = layout.break_lines();
+        assert!(breaker.break_next_with_length(1).is_some());
+        assert!(breaker.break_next_with_length(4).is_some());
+        breaker.finish();
+        let line = layout.get(1).expect("continuation line");
+        let units: Vec<_> = line.typographic_units().collect();
+        assert_eq!(
+            units.contains(&crate::JustificationUnit::Text(1..2)),
+            collapse == WhiteSpaceCollapse::Preserve,
+            "{collapse:?}: the removed leading space cannot receive expansion",
+        );
+    }
+}

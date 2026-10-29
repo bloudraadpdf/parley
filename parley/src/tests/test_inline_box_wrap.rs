@@ -740,7 +740,7 @@ fn logical_start_geometry_wraps_before_its_owner_fragment() {
     assert_eq!(inline_box_line(&layout, 83), 1);
 }
 
-fn assert_consumer_owner_geometry_retains_following_space() {
+fn assert_consumer_owner_geometry_retains_following_source_boundary() {
     let layout = resolved_source_boundary_layout(
         "XX X XX",
         &[],
@@ -756,21 +756,31 @@ fn assert_consumer_owner_geometry_retains_following_space() {
         .lines()
         .map(|line| line.metrics().advance)
         .collect::<Vec<_>>();
-    assert_eq!(line_advances[2], line_advances[0]);
+    assert_eq!(
+        line_advances[2],
+        line_advances[0] - layout.get(0).unwrap().metrics().trailing_whitespace,
+    );
+    assert!(
+        !layout
+            .get(2)
+            .unwrap()
+            .typographic_units()
+            .any(|unit| { unit == crate::JustificationUnit::Text(4..5) })
+    );
 }
 
 #[test]
-fn consumer_border_owner_geometry_retains_the_following_collapsed_space() {
-    assert_consumer_owner_geometry_retains_following_space();
+fn consumer_border_owner_geometry_retains_the_following_source_boundary() {
+    assert_consumer_owner_geometry_retains_following_source_boundary();
 }
 
 #[test]
-fn consumer_padding_owner_geometry_retains_the_following_collapsed_space() {
-    assert_consumer_owner_geometry_retains_following_space();
+fn consumer_padding_owner_geometry_retains_the_following_source_boundary() {
+    assert_consumer_owner_geometry_retains_following_source_boundary();
 }
 
 #[test]
-fn start_only_geometry_with_available_measure_retains_the_following_space() {
+fn start_only_geometry_with_available_measure_retains_the_following_source_boundary() {
     let layout = resolved_source_boundary_layout(
         "XX X XX",
         &[],
@@ -787,7 +797,17 @@ fn start_only_geometry_with_available_measure_retains_the_following_space() {
         .lines()
         .map(|line| line.metrics().advance)
         .collect::<Vec<_>>();
-    assert_eq!(advances[2], advances[0]);
+    assert_eq!(
+        advances[2],
+        advances[0] - layout.get(0).unwrap().metrics().trailing_whitespace,
+    );
+    assert!(
+        !layout
+            .get(2)
+            .unwrap()
+            .typographic_units()
+            .any(|unit| { unit == crate::JustificationUnit::Text(4..5) })
+    );
 }
 
 #[test]
