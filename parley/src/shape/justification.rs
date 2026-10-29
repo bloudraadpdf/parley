@@ -63,7 +63,7 @@ pub(crate) struct DeferredJustificationShape {
 }
 
 impl DeferredJustificationShape {
-    pub(super) fn eligible_pair_kerning<'a>(
+    pub(crate) fn eligible_pair_kerning<'a>(
         &self,
         boundaries: impl Iterator<Item = (&'a Range<usize>, &'a Range<usize>)>,
     ) -> Vec<usize> {

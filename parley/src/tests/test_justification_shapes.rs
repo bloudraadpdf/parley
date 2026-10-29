@@ -817,3 +817,59 @@ fn justification_removes_only_the_pair_kerning_at_an_eligible_boundary() {
         assert_eq!(cluster.advance, expected, "pair advance at {index}");
     }
 }
+
+#[test]
+fn pair_kerning_alternatives_are_prepared_for_filled_lines() {
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let features = [crate::FontFeature::new(
+        crate::setting::Tag::from_bytes(*b"kern"),
+        0,
+    )];
+    let mut builder = context.ranged_builder(&mut fonts, "AVAV", 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(24.0));
+    builder.push_default(StyleProperty::FontFeaturesForJustification(
+        features.as_slice().into(),
+    ));
+    let mut original = builder.build("AVAV");
+    original.break_all_lines(None);
+    let width = original.width();
+    for spare in [0.0, -0.001] {
+        let mut layout = original.clone();
+        prepare(&mut context, &mut layout, &[2]);
+        layout.break_all_lines(Some(width + spare));
+        assert_eq!(layout.len(), 1);
+        assert!(
+            layout.needs_justification_shape_preparation(crate::JustificationShapePolicy {
+                regular_lines: true,
+                terminal_lines: true,
+            }),
+            "spare width {spare}"
+        );
+        assert!(
+            !layout.needs_justification_shape_preparation(crate::JustificationShapePolicy {
+                regular_lines: true,
+                terminal_lines: false,
+            })
+        );
+        layout.set_justification_opportunities(Vec::new());
+        assert!(
+            !layout.needs_justification_shape_preparation(crate::JustificationShapePolicy {
+                regular_lines: true,
+                terminal_lines: true,
+            })
+        );
+    }
+    let mut ligature = office_layout(&mut context, &mut fonts, "office", false);
+    prepare(&mut context, &mut ligature, &[2]);
+    ligature.break_all_lines(None);
+    let width = ligature.width();
+    ligature.break_all_lines(Some(width));
+    assert!(
+        !ligature.needs_justification_shape_preparation(crate::JustificationShapePolicy {
+            regular_lines: true,
+            terminal_lines: true,
+        })
+    );
+}

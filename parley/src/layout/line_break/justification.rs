@@ -448,10 +448,17 @@ pub(crate) fn line_needs_justification_shape<B: Brush>(
     {
         return false;
     }
-    line.max_advance - line.fitting_advance() > 0.0
-        && data
-            .justification_opportunities
-            .text_boundaries(line.text_range.clone())
-            .next()
-            .is_some()
+    data.justification_opportunities
+        .text_boundaries(line.text_range.clone())
+        .next()
+        .is_some()
+        && (line.max_advance - line.fitting_advance() > 0.0
+            || data.deferred_justification_shapes.iter().any(|shape| {
+                !shape
+                    .eligible_pair_kerning(
+                        data.justification_opportunities
+                            .text_boundaries(line.text_range.clone()),
+                    )
+                    .is_empty()
+            }))
 }
