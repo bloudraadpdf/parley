@@ -12,6 +12,7 @@ pub(super) struct SegmentShape<'a> {
     pub(super) synthesis: fontique::Synthesis,
     pub(super) variations: Option<&'a [FontVariation]>,
     pub(super) features: &'a [harfrust::Feature],
+    pub(super) disabled_pair_kerning: &'a [u32],
     pub(super) size: f32,
     pub(super) direction: harfrust::Direction,
     pub(super) script: harfrust::Script,
@@ -35,7 +36,8 @@ impl ShapeContext {
             .use_default_font_weight
             .then(|| {
                 use skrifa::{MetadataProvider, raw::TableProvider};
-                let font = skrifa::FontRef::from_index(input.font.data.as_ref(), input.font.index).ok()?;
+                let font =
+                    skrifa::FontRef::from_index(input.font.data.as_ref(), input.font.index).ok()?;
                 font.os2().ok()?;
                 let weight = font
                     .axes()
@@ -44,7 +46,10 @@ impl ShapeContext {
                     .default_value();
                 let mut variations = input.variations.unwrap_or_default().to_vec();
                 variations.retain(|variation| variation.tag.to_bytes() != *b"wght");
-                variations.push(FontVariation::new(crate::setting::Tag::from_bytes(*b"wght"), weight));
+                variations.push(FontVariation::new(
+                    crate::setting::Tag::from_bytes(*b"wght"),
+                    weight,
+                ));
                 Some(variations)
             })
             .flatten();
@@ -57,7 +62,12 @@ impl ShapeContext {
             });
         let instance = self.shape_instance_cache.entry(
             cache::ShapeInstanceKey::new(blob_id, input.font.index, &input.synthesis, variations),
-            || harfrust::ShaperInstance::from_variations(&font, variations_iter(&input.synthesis, variations)),
+            || {
+                harfrust::ShaperInstance::from_variations(
+                    &font,
+                    variations_iter(&input.synthesis, variations),
+                )
+            },
         );
         let shaper = shaper_data.shaper(&font).instance(Some(instance)).build();
         let plan = self.shape_plan_cache.entry(
@@ -107,6 +117,7 @@ impl ShapeContext {
                 harfrust::ShapeOptions::new()
                     .plan(Some(plan))
                     .features(input.features)
+                    .disable_pair_kerning_at(input.disabled_pair_kerning)
                     .point_size(Some(input.size)),
             ),
             coords: shaper.coords().to_vec(),

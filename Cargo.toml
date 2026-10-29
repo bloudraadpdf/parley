@@ -34,7 +34,7 @@ repository = "https://github.com/linebender/parley"
 accesskit = "0.24.0"
 bytemuck = { version = "1.25.0", default-features = false }
 fontique = { version = "0.8.0", default-features = false, path = "fontique" }
-harfrust = { git = "ssh://git@git.bloudraad.io/external/harfrust.git", rev = "b46112bb470209aa2b912ad2903009f2ce1d34ff", default-features = false }
+harfrust = { git = "ssh://git@git.bloudraad.io/external/harfrust.git", rev = "06343ae50bcf830c9d8f6861ad9d326f198a847c", default-features = false }
 foldhash = { version = "0.2.0", default-features = false }
 hashbrown = { version = "0.16.1", default-features = false, features = [
     "default-hasher",

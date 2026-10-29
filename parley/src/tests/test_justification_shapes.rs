@@ -762,3 +762,58 @@ fn narrower_alternative_cannot_turn_emergency_line_into_unexpanded_terminal_line
     );
     assert_eq!(line_glyph_count(&layout, 1), 1);
 }
+
+#[test]
+fn justification_removes_only_the_pair_kerning_at_an_eligible_boundary() {
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let features = [crate::FontFeature::new(
+        crate::setting::Tag::from_bytes(*b"kern"),
+        0,
+    )];
+    let text = "AVAV";
+    let mut build = |disable: bool| {
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(24.0));
+        builder.push_default(StyleProperty::FontFeaturesForJustification(
+            features.as_slice().into(),
+        ));
+        if disable {
+            builder.push_default(StyleProperty::FontFeatures(features.as_slice().into()));
+        }
+        builder.build(text)
+    };
+    let mut layout = build(false);
+    let unkerned = build(true);
+    let original = layout.data.clusters.clone();
+    assert_ne!(original[1].advance, unkerned.data.clusters[1].advance);
+    prepare(&mut context, &mut layout, &[2]);
+    assert_eq!(layout.data.clusters, original);
+    let prepared = layout
+        .data
+        .deferred_justification_shapes
+        .first()
+        .and_then(|candidate| candidate.prepared.as_ref())
+        .expect("kerning alternative at the eligible V/A boundary");
+    assert_eq!(prepared.clusters.len(), original.len());
+    assert_eq!(
+        prepared
+            .clusters
+            .iter()
+            .map(|cluster| cluster.text_offset)
+            .collect::<Vec<_>>(),
+        original
+            .iter()
+            .map(|cluster| cluster.text_offset)
+            .collect::<Vec<_>>(),
+    );
+    for (index, cluster) in prepared.clusters.iter().enumerate() {
+        let expected = if index == 1 {
+            unkerned.data.clusters[index].advance
+        } else {
+            original[index].advance
+        };
+        assert_eq!(cluster.advance, expected, "pair advance at {index}");
+    }
+}

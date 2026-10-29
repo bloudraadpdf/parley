@@ -556,6 +556,7 @@ fn shape_item<'a, B: Brush>(
             synthesis: font.font.synthesis,
             variations: rcx.variations(item.variations),
             features: &features,
+            disabled_pair_kerning: &[],
             size: item.size,
             direction,
             script: hb_script,
@@ -605,21 +606,19 @@ fn shape_item<'a, B: Brush>(
             segment_inline_boxes,
         );
 
-        let alternatives = if layout.data.runs.get(run_index).is_some_and(|run| {
+        let has_ligatures = layout.data.runs.get(run_index).is_some_and(|run| {
             layout.data.clusters[run.cluster_range.clone()]
                 .iter()
                 .any(|cluster| cluster.is_ligature_start())
-        }) {
-            justification::SourceFontFeatures::for_segment(
-                rcx,
-                styles,
-                segment_text,
-                segment_text_range.start,
-                segment_infos,
-            )
-        } else {
-            Vec::new()
-        };
+        });
+        let mut alternatives = justification::SourceFontFeatures::for_segment(
+            rcx,
+            styles,
+            segment_text,
+            segment_text_range.start,
+            segment_infos,
+        );
+        alternatives.retain(|alternative| has_ligatures || alternative.disables_pair_kerning());
         if layout.data.runs.get(run_index).is_some()
             && (retain_physical_shapes || !alternatives.is_empty())
         {

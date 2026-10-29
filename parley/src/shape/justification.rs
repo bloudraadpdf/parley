@@ -16,7 +16,18 @@ pub(crate) struct SourceFontFeatures {
     pub(crate) features: Vec<FontFeature>,
 }
 
+fn disables_pair_kerning(feature: FontFeature) -> bool {
+    feature.value == 0 && feature.tag.to_bytes() == *b"kern"
+}
+
 impl SourceFontFeatures {
+    pub(super) fn disables_pair_kerning(&self) -> bool {
+        self.features
+            .iter()
+            .rfind(|feature| feature.tag.to_bytes() == *b"kern")
+            .is_some_and(|feature| feature.value == 0)
+    }
+
     pub(super) fn for_segment<B: Brush>(
         context: &ResolveContext,
         styles: &[ResolvedStyle<B>],
@@ -52,6 +63,25 @@ pub(crate) struct DeferredJustificationShape {
 }
 
 impl DeferredJustificationShape {
+    pub(super) fn eligible_pair_kerning<'a>(
+        &self,
+        boundaries: impl Iterator<Item = (&'a Range<usize>, &'a Range<usize>)>,
+    ) -> Vec<usize> {
+        boundaries
+            .filter_map(|(before, after)| {
+                let boundary = before.start.max(after.start);
+                self.alternatives
+                    .iter()
+                    .any(|alternative| {
+                        alternative.source.start < boundary
+                            && boundary < alternative.source.end
+                            && alternative.disables_pair_kerning()
+                    })
+                    .then_some(boundary)
+            })
+            .collect()
+    }
+
     pub(super) fn eligible_features(
         &self,
         run: &crate::layout::data::RunData,
@@ -106,13 +136,19 @@ impl DeferredJustificationShape {
                     .character_offsets
                     .binary_search(&(end - run.text_range.start))
                     .expect("retained character boundary");
-                features.extend(alternative.features.iter().map(|feature| {
-                    harfrust::Feature::new(
-                        harfrust::Tag::new(&feature.tag.to_bytes()),
-                        feature.value as u32,
-                        first..last,
-                    )
-                }));
+                features.extend(
+                    alternative
+                        .features
+                        .iter()
+                        .filter(|feature| !disables_pair_kerning(**feature))
+                        .map(|feature| {
+                            harfrust::Feature::new(
+                                harfrust::Tag::new(&feature.tag.to_bytes()),
+                                feature.value as u32,
+                                first..last,
+                            )
+                        }),
+                );
             }
         }
         features
@@ -150,7 +186,15 @@ impl<B: Brush> crate::LayoutContext<B> {
                         .is_some()
                 },
             );
-            let prepared = (features != deferred.source.features).then(|| {
+            let disabled_pair_kerning = deferred.eligible_pair_kerning(
+                layout
+                    .data
+                    .justification_opportunities
+                    .text_boundaries(run.text_range.clone()),
+            );
+            let prepared = (features != deferred.source.features
+                || !disabled_pair_kerning.is_empty())
+            .then(|| {
                 deferred.source.shape_source_range(
                     &mut self.scx,
                     &mut scratch,
@@ -159,6 +203,7 @@ impl<B: Brush> crate::LayoutContext<B> {
                     run.text_range.clone(),
                     deferred.source.context.clone(),
                     &features,
+                    &disabled_pair_kerning,
                 )
             });
             layout.data.deferred_justification_shapes[index].prepared = prepared;
@@ -294,6 +339,7 @@ impl<B: Brush> SourceSuffixShaper<B> {
                 source_start..end,
                 deferred.source.context.clone(),
                 &deferred.source.features,
+                &[],
             );
             if splice == run.text_range.end
                 || shape.safe_concat_boundaries.binary_search(&splice).is_ok()

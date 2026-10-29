@@ -133,11 +133,25 @@ impl DeferredSourceShape {
         range: Range<usize>,
         source_context: Range<usize>,
         features: &[harfrust::Feature],
+        disabled_pair_kerning: &[usize],
     ) -> PreparedSourceShape {
         let run = &data.runs[self.run_index];
         let text = &source[range.clone()];
         let infos = &self.character_infos[self.characters(run, &range)];
         let features = self.range_features(run, &range, features);
+        let first_character = self.characters(run, &range).start;
+        let disabled_pair_kerning = disabled_pair_kerning
+            .iter()
+            .copied()
+            .filter(|boundary| range.start < *boundary && *boundary < range.end)
+            .map(|boundary| {
+                (self
+                    .character_offsets
+                    .binary_search(&(boundary - run.text_range.start))
+                    .expect("retained pair boundary")
+                    - first_character) as u32
+            })
+            .collect::<Vec<_>>();
         let analysis = crate::analysis::AnalysisDataSources::new();
         let script = crate::convert::script_to_fontique(self.script, &analysis);
         let shaped = context.shape_segment(super::segment::SegmentShape {
@@ -146,6 +160,7 @@ impl DeferredSourceShape {
             synthesis: run.synthesis,
             variations: self.variations.as_deref(),
             features: &features,
+            disabled_pair_kerning: &disabled_pair_kerning,
             size: run.font_size,
             direction: if run.bidi_level & 1 == 0 {
                 harfrust::Direction::LeftToRight

@@ -19,6 +19,7 @@ mod test_line_break_overrides;
 mod test_line_end_space;
 mod test_line_metrics;
 mod test_no_break_space;
+mod test_pair_kerning;
 mod test_physical_line_fit;
 mod test_physical_shape_plans;
 mod test_physical_shaping;

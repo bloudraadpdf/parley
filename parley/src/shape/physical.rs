@@ -22,6 +22,7 @@ struct SegmentKey {
     source: (usize, usize),
     context: (usize, usize),
     features: Vec<(harfrust::Tag, u32, u32, u32)>,
+    disabled_pair_kerning: Vec<usize>,
 }
 
 /// The justification alternative of a run, with the safe concatenation boundaries of both shapes when it is prepared.
@@ -403,6 +404,7 @@ impl<B: Brush> PhysicalShaper<B> {
                         start..end,
                         segment_context.clone(),
                         &deferred.features,
+                        &[],
                         &line_boundaries,
                     );
                     let shape = match alternative {
@@ -414,7 +416,10 @@ impl<B: Brush> PhysicalShaper<B> {
                                         .next()
                                         .is_some()
                                 });
-                            if features == deferred.features {
+                            let disabled_pair_kerning = alternative.eligible_pair_kerning(
+                                data.justification_opportunities.text_boundaries(start..end),
+                            );
+                            if features == deferred.features && disabled_pair_kerning.is_empty() {
                                 natural
                             } else {
                                 self.segment(
@@ -423,6 +428,7 @@ impl<B: Brush> PhysicalShaper<B> {
                                     start..end,
                                     segment_context,
                                     &features,
+                                    &disabled_pair_kerning,
                                     &line_boundaries,
                                 )
                             }
@@ -453,9 +459,11 @@ impl<B: Brush> PhysicalShaper<B> {
         range: Range<usize>,
         context: Range<usize>,
         features: &[harfrust::Feature],
+        disabled_pair_kerning: &[usize],
         line_boundaries: &[usize],
     ) -> Arc<PreparedSourceShape> {
         let key = SegmentKey {
+            disabled_pair_kerning: disabled_pair_kerning.to_vec(),
             run: deferred.run_index,
             source: (range.start, range.end),
             context: (context.start, context.end),
@@ -487,6 +495,7 @@ impl<B: Brush> PhysicalShaper<B> {
                 range,
                 context,
                 features,
+                disabled_pair_kerning,
             ),
         );
         let store = if line_boundaries.is_empty() {
