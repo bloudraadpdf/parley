@@ -28,3 +28,5 @@ mod test_total_fit;
 mod test_vertical_metric_grid;
 mod test_word_spacing;
 mod utils;
+
+mod test_terminal_owner_edges;

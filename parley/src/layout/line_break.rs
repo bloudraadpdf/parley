@@ -2832,6 +2832,59 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
+    fn trim_terminal_owner_edges(&mut self, line_idx: usize) {
+        let range = self.lines.lines[line_idx].item_range.clone();
+        let mut edges = Vec::new();
+        let mut preserved_space = None;
+        'items: for index in range.rev() {
+            let item = &self.lines.line_items[index];
+            match item.kind {
+                LayoutItemKind::InlineBox => {
+                    let inline_box = &self.layout.data.inline_boxes[item.index];
+                    if let Some((owner_start, reduction)) =
+                        inline_box.terminal_owner_edge_reduction(line_idx)
+                    {
+                        if reduction != 0.0 {
+                            edges.push((index, owner_start, reduction));
+                        }
+                    } else if blocks_source_whitespace(item, &self.layout.data) {
+                        break;
+                    }
+                }
+                LayoutItemKind::TextRun => {
+                    for cluster in item.logical_clusters_from_end(&self.layout.data) {
+                        if cluster.info.whitespace() == Whitespace::Newline
+                            || cluster.info.is_default_ignorable()
+                        {
+                            continue;
+                        }
+                        if cluster.info.whitespace() == Whitespace::Space
+                            && self.layout.data.styles[cluster.style_index as usize]
+                                .white_space_collapse
+                                == crate::WhiteSpaceCollapse::Preserve
+                        {
+                            preserved_space =
+                                Some(cluster.text_range(&self.layout.data.runs[item.index]).start);
+                        }
+                        break 'items;
+                    }
+                }
+            }
+        }
+        if let Some(space_start) = preserved_space {
+            for (index, owner_start, reduction) in edges {
+                if space_start < owner_start {
+                    continue;
+                }
+                let item = &mut self.lines.line_items[index];
+                item.terminal_owner_edge_reduction = reduction;
+                item.advance -= reduction;
+                self.lines.lines[line_idx].metrics.advance -= reduction;
+                self.lines.lines[line_idx].source_fit_delta += reduction;
+            }
+        }
+    }
+
     fn finish_line(
         &mut self,
         line_idx: usize,
@@ -2853,6 +2906,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             self.state.items = self.lines.line_items.len();
         }
         self.trim_line_end_letter_spacing(line_idx);
+        self.trim_terminal_owner_edges(line_idx);
         let item_range = self.lines.lines[line_idx].item_range.clone();
         let selected_source_cluster_advance = self.lines.lines[line_idx]
             .selected_source_cluster_advance
@@ -3184,6 +3238,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         layout_item_index: None,
                         advance: 0.,
                         letter_spacing_offset: 0.0,
+                        terminal_owner_edge_reduction: 0.0,
                         is_whitespace: false,
                         has_trailing_whitespace: false,
                         cluster_range: cluster..cluster,
@@ -3937,6 +3992,7 @@ fn try_commit_line<B: Brush>(
                     layout_item_index: Some(state.items.start + i),
                     advance: 0.,
                     letter_spacing_offset: 0.0,
+                    terminal_owner_edge_reduction: 0.0,
                     is_whitespace: false,
                     has_trailing_whitespace: false,
                     cluster_range,

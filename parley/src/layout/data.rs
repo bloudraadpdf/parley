@@ -1158,6 +1158,7 @@ pub(crate) struct LineItemData {
     pub(crate) advance: f32,
     /// Placement between the outgoing and incoming tracking halves.
     pub(crate) letter_spacing_offset: f32,
+    pub(crate) terminal_owner_edge_reduction: f32,
 
     // Fields that only apply to text runs (Ignored for boxes)
     // TODO: factor this out?
@@ -1180,6 +1181,7 @@ impl LineItemData {
             layout_item_index: source,
             advance,
             letter_spacing_offset: 0.0,
+            terminal_owner_edge_reduction: 0.0,
             is_whitespace: false,
             has_trailing_whitespace: false,
             cluster_range: 0..0,

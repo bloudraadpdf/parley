@@ -76,6 +76,8 @@ enum InlineBoxParticipation {
 pub struct InlineOwnerEdgeAdvance {
     normal: f32,
     first_line: f32,
+    terminal_reduction: [f32; 2],
+    terminal_owner_start: usize,
 }
 
 impl InlineOwnerEdgeAdvance {
@@ -84,12 +86,36 @@ impl InlineOwnerEdgeAdvance {
         Self {
             normal: width,
             first_line: width,
+            terminal_reduction: [0.0; 2],
+            terminal_owner_start: 0,
         }
     }
 
     /// Uses separate computed first-line and normal-line advances.
     pub const fn first_line(normal: f32, first_line: f32) -> Self {
-        Self { normal, first_line }
+        Self {
+            normal,
+            first_line,
+            terminal_reduction: [0.0; 2],
+            terminal_owner_start: 0,
+        }
+    }
+
+    /// Omits this part of an end edge after terminal preserved spaces, while
+    /// retaining its full advance for line fitting.
+    pub const fn with_terminal_preserved_space_reduction(
+        mut self,
+        normal: f32,
+        first_line: f32,
+        owner_start: usize,
+    ) -> Self {
+        self.terminal_owner_start = owner_start;
+        self.terminal_reduction = [normal, first_line];
+        self
+    }
+
+    pub(crate) const fn terminal_reduction_for_line(self, line_index: usize) -> f32 {
+        self.terminal_reduction[if line_index == 0 { 1 } else { 0 }]
     }
 
     pub(crate) const fn for_line(self, line_index: usize) -> f32 {
@@ -493,6 +519,19 @@ impl InlineBox {
             InlineBoxParticipation::LogicalOwnerStart { width, .. }
             | InlineBoxParticipation::LogicalOwnerEnd { width, .. } => width.for_line(line_index),
             _ => self.width(),
+        }
+    }
+
+    pub(crate) const fn terminal_owner_edge_reduction(
+        &self,
+        line_index: usize,
+    ) -> Option<(usize, f32)> {
+        match self.participation {
+            InlineBoxParticipation::LogicalOwnerEnd { width, .. } => Some((
+                width.terminal_owner_start,
+                width.terminal_reduction_for_line(line_index),
+            )),
+            _ => None,
         }
     }
 
