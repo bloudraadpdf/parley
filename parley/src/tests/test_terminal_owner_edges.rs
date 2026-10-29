@@ -117,3 +117,54 @@ fn preceding_sibling_space_does_not_trim_an_empty_owner() {
     value.break_all_lines(None);
     assert_eq!(edge(&value, 0).1, 25.0);
 }
+
+#[test]
+fn overflowing_terminal_owner_keeps_preserved_spaces() {
+    let mut value = layout("X  ", 20.0, false);
+    value.break_all_lines(None);
+    let full = value.data.lines[0].fitting_advance();
+    value.break_all_lines(Some(full - 10.0));
+    assert_eq!(value.len(), 1);
+    assert_eq!(value.lines().next().unwrap().text_range(), 0..3);
+    assert_eq!(edge(&value, 0).1, 5.0);
+}
+
+#[test]
+fn atomic_boundary_affinity_survives_a_preserved_child() {
+    for (affinity, expected_lines) in [
+        (InlineBoxBreakAffinity::Independent, 2),
+        (InlineBoxBreakAffinity::Both, 1),
+    ] {
+        let text = "X  ";
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::<ColorBrush>::new();
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(20.0));
+        builder.push(
+            StyleProperty::WhiteSpaceCollapse(WhiteSpaceCollapse::Preserve),
+            1..3,
+        );
+        builder.push(StyleProperty::TextWrapMode(TextWrapMode::NoWrap), 1..3);
+        builder.push_inline_box(InlineBox::inline_end_edge(
+            7,
+            3,
+            InlineOwnerEdgeAdvance::uniform(25.0)
+                .with_terminal_preserved_space_reduction(20.0, 20.0, 0),
+            0.0,
+            InlineBoxBreakAffinity::ToPrevious,
+        ));
+        builder.push_inline_box(InlineBox::atomic_with_break_affinity(
+            8, 3, 5.0, 5.0, affinity,
+        ));
+        let mut value = builder.build(text);
+        value.break_all_lines(None);
+        let full = value.data.lines[0].fitting_advance();
+        value.break_all_lines(Some(full - 2.0));
+        assert_eq!(value.len(), expected_lines, "{affinity:?}");
+        assert_eq!(
+            edge(&value, 0).1,
+            if expected_lines == 2 { 5.0 } else { 25.0 }
+        );
+    }
+}

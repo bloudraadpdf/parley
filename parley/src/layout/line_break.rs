@@ -1653,10 +1653,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let height = inline_box.height();
                     if break_affinity.allows_break_before() {
                         finish_source_fragment!();
-                        if self.probes_current_break()
-                            && self.state.line.has_content_advance()
-                            && self.state.line.text_wrap_mode == TextWrapMode::Wrap
-                        {
+                        if self.probes_current_break() && self.state.line.has_content_advance() {
                             self.state
                                 .mark_line_break_opportunity(RegularBreakKind::Ordinary);
                             commit_probed_candidate!();
@@ -1704,7 +1701,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         resolved_contribution,
                         next_fit_x - tracking_correction,
                         max_advance,
-                    ) || self.state.line.text_wrap_mode != TextWrapMode::Wrap
+                    ) || (break_affinity == InlineBoxBreakAffinity::SourceText
+                        && self.state.line.text_wrap_mode != TextWrapMode::Wrap)
                     {
                         // println!("BOX FITS");
 
