@@ -1578,7 +1578,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     };
                     let width = inline_box.advance_for_line(self.state.lines);
                     let height = inline_box.height();
-                    if break_affinity.allows_break_before() {
+                    let joins_owner_start = self.state.item_idx > self.state.line.items.start
+                        && self.layout.data.items.get(self.state.item_idx - 1).is_some_and(|previous| {
+                            if previous.kind != LayoutItemKind::InlineBox { return false; }
+                            let previous = &self.layout.data.inline_boxes[previous.index];
+                            previous.index == inline_box.index
+                                && matches!(previous.line_break_participation(), InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge)
+                                    if edge.source_projection(previous.width_for_line(self.state.lines)) == LogicalInlineEdgeSourceProjection::BeforeGeometry)
+                        });
+                    let allows_break_before =
+                        break_affinity.allows_break_before() && !joins_owner_start;
+                    if allows_break_before {
                         finish_source_fragment!();
                         if self.probes_current_break() && self.state.line.has_content_advance() {
                             self.state
@@ -1587,6 +1597,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         }
                     }
                     if break_affinity == InlineBoxBreakAffinity::SourceText
+                        && !joins_owner_start
                         && self.state.line.text_wrap_mode == TextWrapMode::Wrap
                         && self.state.line.has_content_advance()
                         && self.layout.data.source_soft_wrap_before_inline_box(
@@ -1663,8 +1674,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 shaping_participation,
                             );
                             self.state.mark_inline_box_break_after(break_affinity);
-                        } else if !break_affinity.allows_break_before() {
-                            if break_affinity == InlineBoxBreakAffinity::SourceText
+                        } else if !allows_break_before {
+                            if (break_affinity == InlineBoxBreakAffinity::SourceText
+                                || joins_owner_start)
                                 && self.state.line.fragment_fit != FragmentFit::PendingOverflow
                             {
                                 if let Some(candidate) = self.state.take_overflow_candidate() {

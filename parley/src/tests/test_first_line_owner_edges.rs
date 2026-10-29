@@ -7,7 +7,7 @@ use crate::{
     FollowingSourceSpace, FontFamily, InlineBox, InlineBoxBreakAffinity, InlineOwnerEdgeAdvance,
     Layout, LayoutContext, PositionedLayoutItem, StyleProperty, WhiteSpaceCollapse,
 };
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 fn owner_layout(
     text: &str,
@@ -392,4 +392,108 @@ fn uniform_cloned_owner_edges_keep_the_same_advances() {
         &layout,
         &[&[(801, 3.0), (802, 4.0)], &[(801, 3.0), (802, 4.0)]],
     );
+}
+
+#[test]
+fn a_leading_owner_start_edge_stays_with_its_first_atomic() {
+    for edge_width in [0.0, 80.0, 90.0] {
+        let layout = owner_layout(
+            "",
+            [
+                InlineBox::inline_start_edge(
+                    901,
+                    0,
+                    InlineOwnerEdgeAdvance::uniform(edge_width),
+                    0.0,
+                    InlineBoxBreakAffinity::ToNext,
+                ),
+                InlineBox::new(902, 0, 24.0, 16.0),
+            ],
+            Some(80.0),
+        );
+        assert_eq!(layout.len(), 1, "owner advance {edge_width}");
+        let items: Vec<_> = layout
+            .get(0)
+            .unwrap()
+            .items()
+            .filter_map(|item| match item {
+                PositionedLayoutItem::InlineBox(item) => Some((item.id, item.x, item.width)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(items, [(901, 0.0, edge_width), (902, edge_width, 24.0)]);
+    }
+}
+
+#[test]
+fn owner_start_atomic_group_preserves_surrounding_breaks() {
+    let start = |width| {
+        InlineBox::inline_start_edge(
+            901,
+            0,
+            InlineOwnerEdgeAdvance::uniform(width),
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        )
+    };
+    let atomic = || InlineBox::new(902, 0, 24.0, 16.0);
+    for (edges, expected) in [
+        (
+            vec![InlineBox::new(900, 0, 20.0, 16.0), start(80.0), atomic()],
+            vec![vec![900], vec![901, 902]],
+        ),
+        (
+            vec![InlineBox::new(900, 0, 80.0, 16.0), atomic()],
+            vec![vec![900], vec![902]],
+        ),
+        (
+            vec![
+                start(0.0),
+                InlineBox::inline_end_edge(
+                    903,
+                    0,
+                    InlineOwnerEdgeAdvance::uniform(0.0),
+                    0.0,
+                    InlineBoxBreakAffinity::ToPrevious,
+                ),
+                atomic(),
+            ],
+            vec![vec![901, 903, 902]],
+        ),
+    ] {
+        let layout = owner_layout("", edges, Some(80.0));
+        let actual: Vec<Vec<_>> = layout
+            .lines()
+            .map(|line| {
+                line.items()
+                    .filter_map(|item| match item {
+                        PositionedLayoutItem::InlineBox(item) => Some(item.id),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .collect();
+        assert_eq!(actual, expected);
+    }
+    let layout = owner_layout(
+        "\u{200b}",
+        [start(80.0), InlineBox::new(902, 3, 24.0, 16.0)],
+        Some(80.0),
+    );
+    assert_eq!(layout.len(), 2);
+    let layout = owner_layout(
+        "A",
+        [
+            InlineBox::inline_end_edge(
+                903,
+                1,
+                InlineOwnerEdgeAdvance::uniform(80.0),
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ),
+            InlineBox::new(902, 1, 24.0, 16.0),
+        ],
+        Some(80.0),
+    );
+    assert_eq!(layout.len(), 2);
 }
