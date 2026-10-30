@@ -159,8 +159,9 @@ impl<B: Brush> BreakLines<'_, B> {
         let measured = measure(self);
         let mutations = self.candidate_mutations.take().expect("active candidate");
         mutations.restore(&mut self.layout.data);
+        let measured_state = core::mem::replace(&mut self.state, state);
         let candidate = measured.map(|_| LineShapeCandidate {
-            state: self.state.clone(),
+            state: measured_state,
             line: self.lines.lines.pop().expect("measured line"),
             items: self.lines.line_items.split_off(item_start),
             mutations,
@@ -169,7 +170,6 @@ impl<B: Brush> BreakLines<'_, B> {
         });
         self.lines.lines.truncate(line_start);
         self.lines.line_items.truncate(item_start);
-        self.state = state;
         self.prev_state = previous;
         self.done = done;
         self.letter_spacing_edges.clear();
@@ -461,4 +461,40 @@ pub(crate) fn line_needs_justification_shape<B: Brush>(
                     )
                     .is_empty()
             }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BaseDirection;
+    use crate::tests::test_bidi_topology::build_layout_with_direction;
+
+    #[test]
+    fn shape_preview_keeps_measured_opportunity_storage() {
+        let text = "Amber birch cedar dogwood";
+        let mut layout = build_layout_with_direction(text, [], Some(BaseDirection::Ltr));
+        let mut breaker = layout.break_lines();
+        breaker.state.probe = Some(super::super::total_fit::Segment::default());
+        let mut measured_storage = None;
+        let candidate = breaker
+            .preview_shape_candidate_with(|breaker| {
+                breaker.break_next(f32::MAX, LineTabOrigin::ZERO)?;
+                let probe = breaker.state.probe.as_ref().unwrap();
+                assert!(!probe.opportunities.is_empty());
+                measured_storage = Some(probe.opportunities.as_ptr());
+                Some(())
+            })
+            .unwrap();
+
+        let restored_probe = breaker.state.probe.as_ref().unwrap();
+        let measured_probe = candidate.state.probe.as_ref().unwrap();
+        assert!(breaker.lines.lines.is_empty());
+        assert!(restored_probe.opportunities.is_empty());
+        assert_eq!(candidate.line.text_range, 0..text.len());
+        assert_eq!(
+            Some(measured_probe.opportunities.as_ptr()),
+            measured_storage,
+            "the candidate must retain the measured storage without cloning it"
+        );
+    }
 }
