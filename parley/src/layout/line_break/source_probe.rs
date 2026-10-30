@@ -135,17 +135,31 @@ impl<B: Brush> BreakLines<'_, B> {
             if before.key() > start.key() {
                 endpoints.push(before);
             }
+            if before == terminal {
+                break;
+            }
             if item.kind == LayoutItemKind::TextRun {
-                endpoints.extend(
-                    (item.cluster_range.start + 1..item.cluster_range.end)
-                        .map(|cluster| SourceCursor::WithinText {
-                            item: index,
-                            cluster,
-                        })
-                        .filter(|cursor| {
-                            cursor.key() > start.key() && cursor.key() < terminal.key()
-                        }),
-                );
+                let first = (item.cluster_range.start + 1).max(if index == self.state.item_idx {
+                    self.state.cluster_idx + 1
+                } else {
+                    0
+                });
+                let last = match terminal {
+                    SourceCursor::WithinText {
+                        item: terminal_item,
+                        cluster,
+                    } if terminal_item == index => cluster.min(item.cluster_range.end),
+                    _ => item.cluster_range.end,
+                };
+                endpoints.extend((first..last).map(|cluster| {
+                    #[cfg(test)]
+                    self.visited_source_endpoints
+                        .set(self.visited_source_endpoints.get() + 1);
+                    SourceCursor::WithinText {
+                        item: index,
+                        cluster,
+                    }
+                }));
             }
         }
         if endpoints.last() != Some(&terminal) {
@@ -332,6 +346,43 @@ mod tests {
     use super::*;
     use crate::tests::test_bidi_topology::build_layout_with_direction;
     use crate::{BaseDirection, InlineBox, layout::BreakReason};
+
+    #[test]
+    fn short_source_windows_visit_only_their_endpoints() {
+        for text in [
+            "abcdef ".repeat(16),
+            "abc \u{05d0}\u{05d1}\u{05d2} def".into(),
+        ] {
+            let mut layout = build_layout_with_direction(&text, [], Some(BaseDirection::Ltr));
+            let mut positions = alloc::vec::Vec::new();
+            for (item, source) in layout.data.items.iter().enumerate() {
+                positions.push(SourceCursor::BeforeItem(item));
+                if source.kind == LayoutItemKind::TextRun {
+                    positions.extend(
+                        (source.cluster_range.start + 1..source.cluster_range.end)
+                            .map(|cluster| SourceCursor::WithinText { item, cluster }),
+                    );
+                }
+            }
+            positions.push(SourceCursor::BeforeItem(layout.data.items.len()));
+            let mut breaker = layout.break_lines();
+            for window in positions.windows(4) {
+                let (item, cluster) = match window[0] {
+                    SourceCursor::BeforeItem(item) => (item, 0),
+                    SourceCursor::WithinText { item, cluster } => (item, cluster),
+                };
+                breaker.state.item_idx = item;
+                breaker.state.cluster_idx = cluster;
+                assert_eq!(breaker.source_endpoints(window[3]), window[1..]);
+            }
+            assert!(
+                breaker.visited_source_endpoints.get() <= 2 * positions.len(),
+                "{} endpoint visits for {} positions",
+                breaker.visited_source_endpoints.get(),
+                positions.len()
+            );
+        }
+    }
 
     fn cursor_at(layout: &crate::Layout<impl Brush>, byte: usize) -> SourceCursor {
         layout

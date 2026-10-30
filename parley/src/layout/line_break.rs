@@ -850,6 +850,8 @@ pub struct BreakLines<'a, B: Brush> {
     total_fit: TotalFitState,
     #[cfg(test)]
     visited_clusters: usize,
+    #[cfg(test)]
+    visited_source_endpoints: core::cell::Cell<usize>,
 }
 
 /// The total-fit plan of the current segment between forced breaks.
@@ -926,6 +928,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             total_fit: TotalFitState::default(),
             #[cfg(test)]
             visited_clusters: 0,
+            #[cfg(test)]
+            visited_source_endpoints: core::cell::Cell::new(0),
         }
     }
 
