@@ -28,6 +28,58 @@ fn line_texts(layout: &Layout<ColorBrush>, text: &str) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn first_fit_prefix_commit_retains_the_following_unbreakable_unit() {
+    for suffix in [")", ")x", ") )", "))", "\u{2060}a"] {
+        let text = alloc::format!("X X {suffix} tail");
+        let width = full_width("X X") + 0.01;
+        let mut layout = roboto_layout(&text, Some(WhiteSpaceCollapse::Collapse));
+        layout.set_first_fit_prefix_commits(vec![4, 4, 0, usize::MAX]);
+        layout.break_all_lines(Some(width));
+        let lines = line_texts(&layout, &text);
+        assert_eq!(
+            lines.iter().map(|line| line.trim()).collect::<Vec<_>>(),
+            [alloc::format!("X X {suffix}"), "tail".into()]
+        );
+        assert!(layout.lines().next().unwrap().metrics().advance > width);
+        layout.set_first_fit_prefix_commits(Vec::new());
+        layout.break_all_lines(Some(width));
+        assert_ne!(line_texts(&layout, &text), lines);
+    }
+}
+
+#[test]
+fn first_fit_prefix_commits_do_not_change_intrinsic_or_total_fit_composition() {
+    use crate::layout::{LineBreakPurpose, LineBreakStrategy, TotalFit};
+    let text = "X X ) tail";
+    for (purpose, strategy) in [
+        (
+            LineBreakPurpose::IntrinsicSizing,
+            LineBreakStrategy::FirstFit,
+        ),
+        (
+            LineBreakPurpose::LineLayout,
+            LineBreakStrategy::TotalFit(TotalFit {
+                stretch_em: 0.125,
+                tolerance: 800.0,
+                line_penalty: 10.0,
+                hyphen_penalty: 50.0,
+                double_hyphen_demerits: 10_000.0,
+                final_hyphen_demerits: 5_000.0,
+            }),
+        ),
+    ] {
+        let mut ordinary = roboto_layout(text, Some(WhiteSpaceCollapse::Collapse));
+        ordinary.set_line_break_purpose(purpose);
+        ordinary.set_line_break_strategy(strategy);
+        let mut committed = ordinary.clone();
+        committed.set_first_fit_prefix_commits(vec![4]);
+        ordinary.break_all_lines(Some(full_width("X X") + 0.01));
+        committed.break_all_lines(Some(full_width("X X") + 0.01));
+        assert_eq!(line_texts(&committed, text), line_texts(&ordinary, text));
+    }
+}
+
 fn first_line_visible_advance(layout: &Layout<ColorBrush>) -> f32 {
     layout
         .lines()

@@ -1268,6 +1268,7 @@ pub(crate) struct LayoutData<B: Brush> {
     /// are sorted by `byte_index`; `opportunity = true` adds a soft break and
     /// `false` suppresses the Unicode soft break at that boundary.
     pub(crate) line_break_overrides: Vec<LineBreakOverride>,
+    pub(crate) first_fit_prefix_commits: Vec<usize>,
     pub(crate) first_line_source_end: Option<usize>,
     pub(crate) justification_opportunities: JustificationOpportunities,
     pub(crate) selected_line_justification_opportunities: Option<JustificationOpportunities>,
@@ -1349,6 +1350,7 @@ impl<B: Brush> Default for LayoutData<B> {
             trim_line_end_letter_spacing: true,
             line_fit_tolerance: 0.0,
             line_break_overrides: Vec::new(),
+            first_fit_prefix_commits: Vec::new(),
             first_line_source_end: None,
             justification_opportunities: JustificationOpportunities::default(),
             selected_line_justification_opportunities: None,
@@ -1591,6 +1593,7 @@ impl<B: Brush> LayoutData<B> {
         self.trim_line_end_letter_spacing = true;
         self.line_fit_tolerance = 0.0;
         self.line_break_overrides.clear();
+        self.first_fit_prefix_commits.clear();
         self.first_line_source_end = None;
         self.justification_opportunities.clear();
         self.selected_line_justification_opportunities = None;

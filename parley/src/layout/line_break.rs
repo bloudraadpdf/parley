@@ -522,6 +522,13 @@ struct BreakerState {
 }
 
 impl BreakerState {
+    fn clear_wrap_candidates(&mut self) {
+        self.prev_boundary = None;
+        self.restored_normal_boundary = None;
+        self.overflow_discretionary_boundary = None;
+        self.emergency_boundary = None;
+    }
+
     fn mark_projected_source_boundary(
         &mut self,
         projection: Option<ProjectedSourceBoundary>,
@@ -966,10 +973,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             SourceStartWhitespace::following_break(preceding_break);
         self.state.line.removed_leading_source_ranges.clear();
         self.state.line.conditional_line_start_omission = None;
-        self.state.prev_boundary = None; // Added by Nico
-        self.state.restored_normal_boundary = None;
-        self.state.overflow_discretionary_boundary = None;
-        self.state.emergency_boundary = None;
+        self.state.clear_wrap_candidates();
         self.state.last_appended_authored_unit = AuthoredBreakUnit::Other;
         self.state.line.selected_source_cluster_advance = self
             .state
@@ -1759,6 +1763,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let is_space = whitespace.is_space_or_nbsp();
                         let boundary = cluster.info().boundary();
                         let byte_index = cluster.text_range().start;
+                        if !self.layout.data.first_fit_prefix_commits.is_empty()
+                            && matches!(
+                                self.layout.data.line_break_strategy,
+                                LineBreakStrategy::FirstFit
+                            )
+                            && self.layout.data.line_break_purpose == LineBreakPurpose::LineLayout
+                            && self
+                                .layout
+                                .data
+                                .first_fit_prefix_commits
+                                .binary_search(&byte_index)
+                                .is_ok()
+                        {
+                            self.state.clear_wrap_candidates();
+                        }
                         let boundary_override = self
                             .layout
                             .data

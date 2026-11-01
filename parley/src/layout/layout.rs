@@ -337,6 +337,15 @@ impl<B: Brush> Layout<B> {
         self.data.line_break_overrides = canonical;
     }
 
+    /// Discard earlier wrap candidates at these UTF-8 boundaries in first-fit line layout.
+    /// The following unbreakable unit may overflow. Intrinsic sizing and total-fit composition ignore these commits.
+    pub fn set_first_fit_prefix_commits(&mut self, mut boundaries: Vec<usize>) {
+        boundaries.retain(|&boundary| boundary > 0 && boundary < self.data.text_len);
+        boundaries.sort_unstable();
+        boundaries.dedup();
+        self.data.first_fit_prefix_commits = boundaries;
+    }
+
     /// Retain a fitted first-line source endpoint after reshaping later content.
     ///
     /// The UTF-8 boundary must come from a line fitted with the same source text.
