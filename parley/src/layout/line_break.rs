@@ -141,6 +141,8 @@ struct LineState {
     /// We lag the text-wrap-mode by one cluster due to line-breaking boundaries only
     /// being triggered on the cluster after the linebreak.
     text_wrap_mode: TextWrapMode,
+    /// Likewise the `wrap-inside: avoid` nesting depth of the previous cluster.
+    wrap_avoid_depth: u8,
     /// We lag the resolved soft-break policy for the same boundary reason.
     soft_break_policy: SoftBreakPolicy,
     selected_source_cluster_advance: SelectedSourceClusterAdvance,
@@ -506,6 +508,10 @@ struct BreakerState {
 
     line: LineState,
     prev_boundary: Option<RegularBreakCandidate>,
+    /// The `wrap-inside: avoid` depth of `prev_boundary`; a deeper opportunity never replaces a shallower one.
+    prev_boundary_depth: u8,
+    /// The depth of the opportunity being marked: the shallower of the clusters it separates.
+    opportunity_depth: u8,
     restored_normal_boundary: Option<RegularBreakCandidate>,
     overflow_discretionary_boundary: Option<RegularBreakCandidate>,
     emergency_boundary: Option<EmergencyBreakOpportunity>,
@@ -702,7 +708,10 @@ impl BreakerState {
         } else {
             match condition {
                 DiscretionaryBreakCondition::Normal | DiscretionaryBreakCondition::WordOverflow => {
-                    self.prev_boundary = candidate;
+                    if self.prev_boundary.is_none() || self.opportunity_depth <= self.prev_boundary_depth {
+                        self.prev_boundary = candidate;
+                        self.prev_boundary_depth = self.opportunity_depth;
+                    }
                 }
                 DiscretionaryBreakCondition::Overflow => {
                     self.overflow_discretionary_boundary = candidate;
@@ -1817,6 +1826,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         self.state.line.text_wrap_mode = style.text_wrap_mode;
                         let soft_break_policy = self.state.line.soft_break_policy;
                         self.state.line.soft_break_policy = style.soft_break_policy;
+                        let wrap_avoid_depth = self.state.line.wrap_avoid_depth;
+                        self.state.line.wrap_avoid_depth = style.wrap_avoid_depth;
 
                         let allows_fallback =
                             self.layout.data.line_break_purpose == LineBreakPurpose::LineLayout;
@@ -1975,7 +1986,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 };
                                 if let Some(candidate_kind) = candidate_kind {
                                     finish_source_fragment!();
+                                    self.state.opportunity_depth =
+                                        wrap_avoid_depth.min(style.wrap_avoid_depth);
                                     self.state.mark_line_break_opportunity(candidate_kind);
+                                    self.state.opportunity_depth = 0;
                                 }
                                 // break_opportunity = true;
                             }
