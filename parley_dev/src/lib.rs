@@ -45,6 +45,9 @@ pub mod fonts {
     /// `assets/fonts/font_style_test/FontStyleTest-slnt_ital-VF.ttf`.
     pub const FONT_STYLE_TEST_SLNT_ITAL: &[u8] =
         include_bytes!("../assets/fonts/font_style_test/FontStyleTest-slnt_ital-VF.ttf");
+    /// `assets/fonts/rtl_ink_overflow/rtl-ink-overflow.ttf`: three Arabic letters and no space glyph.
+    pub const RTL_INK_OVERFLOW: &[u8] =
+        include_bytes!("../assets/fonts/rtl_ink_overflow/rtl-ink-overflow.ttf");
 }
 
 /// The font families that are available in the assets/fonts directory.

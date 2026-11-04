@@ -2453,16 +2453,18 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
         // Flush previous cluster if we've reached a new cluster
         if cluster_id != glyph_info.cluster {
             run_advance += cluster_advance;
-            let num_components = num_components(glyph_info.cluster, cluster_id, last_cluster_id);
-            let visible_components = core::iter::once(cluster_start_char.1)
-                .chain(
-                    char_indices_iter
-                        .clone()
-                        .take(num_components as usize - 1)
-                        .map(|(_, ch)| ch),
-                )
-                .filter(|&ch| !default_ignorable.contains(ch))
-                .count();
+            let mut num_components =
+                num_components(glyph_info.cluster, cluster_id, last_cluster_id);
+            let (first_component, visible_components) = split_deleted_ignorables(
+                &direction,
+                clusters,
+                char_infos,
+                cluster_id,
+                &mut num_components,
+                &mut cluster_start_char,
+                &mut char_indices_iter,
+                cluster_glyph_offset,
+            );
             let is_newline = to_whitespace(cluster_start_char.1) == Whitespace::Newline;
             let cluster_type = if num_components > 1 {
                 debug_assert!(!is_newline);
@@ -2487,7 +2489,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
 
             push_cluster(
                 clusters,
-                char_infos[direction.component_index(cluster_id, num_components, 0)],
+                char_infos[direction.component_index(first_component, num_components, 0)],
                 cluster_start_char,
                 cluster_glyph_offset,
                 component_advance(
@@ -2513,7 +2515,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
                 for i in 1..num_components {
                     cluster_start_char = char_indices_iter.next().unwrap();
                     let char_info_ =
-                        char_infos[direction.component_index(cluster_id, num_components, i)];
+                        char_infos[direction.component_index(first_component, num_components, i)];
                     push_cluster(
                         clusters,
                         char_info_,
@@ -2595,7 +2597,17 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
             Direction::Ltr => char_infos.len() as u32,
             Direction::Rtl => 0,
         };
-        let num_components = num_components(next_cluster_id, cluster_id, last_cluster_id);
+        let mut num_components = num_components(next_cluster_id, cluster_id, last_cluster_id);
+        let (first_component, visible_components) = split_deleted_ignorables(
+            &direction,
+            clusters,
+            char_infos,
+            cluster_id,
+            &mut num_components,
+            &mut cluster_start_char,
+            &mut char_indices_iter,
+            cluster_glyph_offset,
+        );
         if num_components > 1 {
             // This is a ligature - create ligature start + ligature components
 
@@ -2603,18 +2615,9 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
                 glyphs.push(pending);
                 total_glyphs += 1;
             }
-            let visible_components = core::iter::once(cluster_start_char.1)
-                .chain(
-                    char_indices_iter
-                        .clone()
-                        .take(num_components as usize - 1)
-                        .map(|(_, ch)| ch),
-                )
-                .filter(|&ch| !default_ignorable.contains(ch))
-                .count();
             push_cluster(
                 clusters,
-                char_infos[direction.component_index(cluster_id, num_components, 0)],
+                char_infos[direction.component_index(first_component, num_components, 0)],
                 cluster_start_char,
                 cluster_glyph_offset,
                 component_advance(
@@ -2639,7 +2642,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
             // Create ligature component clusters for the remaining characters
             for (i, char) in (1..).zip(char_indices_iter) {
                 let component_char_info =
-                    char_infos[direction.component_index(cluster_id, num_components, i)];
+                    char_infos[direction.component_index(first_component, num_components, i)];
                 push_cluster(
                     clusters,
                     component_char_info,
@@ -2682,7 +2685,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
             }
             push_cluster(
                 clusters,
-                char_info,
+                char_infos[first_component as usize],
                 cluster_start_char,
                 cluster_glyph_offset,
                 cluster_advance,
@@ -2695,6 +2698,62 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
     }
 
     run_advance
+}
+
+/// Splits the visually leading default-ignorable components off a shaped cluster.
+///
+/// `HarfRust` deletes default-ignorable glyphs when the font has no space glyph,
+/// and merges their clusters into a neighbour. A deleted control has no glyph,
+/// so it becomes a glyph-less cluster, and a visible component keeps the
+/// glyphs. Returns the logical index of the first remaining component and the
+/// number of visible remaining components.
+fn split_deleted_ignorables<I: Iterator<Item = (usize, char)> + Clone>(
+    direction: &Direction,
+    clusters: &mut Vec<ClusterData>,
+    char_infos: &[(CharInfo, u16)],
+    cluster_id: u32,
+    num_components: &mut u32,
+    cluster_start_char: &mut (usize, char),
+    char_indices_iter: &mut core::iter::Peekable<I>,
+    glyph_offset: u32,
+) -> (u32, usize) {
+    let default_ignorable =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
+    let mut first_component = cluster_id;
+    while *num_components > 1
+        && default_ignorable.contains(cluster_start_char.1)
+        && char_indices_iter
+            .clone()
+            .take(*num_components as usize - 1)
+            .any(|(_, ch)| !default_ignorable.contains(ch))
+    {
+        push_cluster(
+            clusters,
+            char_infos[direction.component_index(first_component, *num_components, 0)],
+            *cluster_start_char,
+            glyph_offset,
+            0.0,
+            0.0,
+            glyph_offset,
+            ClusterType::Deleted,
+            None,
+        );
+        *cluster_start_char = char_indices_iter.next().unwrap();
+        *num_components -= 1;
+        if matches!(direction, Direction::Ltr) {
+            first_component += 1;
+        }
+    }
+    let visible_components = core::iter::once(cluster_start_char.1)
+        .chain(
+            char_indices_iter
+                .clone()
+                .take(*num_components as usize - 1)
+                .map(|(_, ch)| ch),
+        )
+        .filter(|&ch| !default_ignorable.contains(ch))
+        .count();
+    (first_component, visible_components)
 }
 
 /// Projects base font metrics and optionally applied legacy kerning onto a fixed em grid.
@@ -2884,6 +2943,7 @@ enum ClusterType {
     LigatureComponent,
     Regular,
     Newline,
+    Deleted,
 }
 
 impl From<&ClusterType> for u16 {
@@ -2891,7 +2951,7 @@ impl From<&ClusterType> for u16 {
         match cluster_type {
             ClusterType::LigatureStart => ClusterData::LIGATURE_START,
             ClusterType::LigatureComponent => ClusterData::LIGATURE_COMPONENT,
-            ClusterType::Regular | ClusterType::Newline => 0, // No special flags
+            ClusterType::Regular | ClusterType::Newline | ClusterType::Deleted => 0, // No special flags
         }
     }
 }
@@ -2919,6 +2979,11 @@ fn push_cluster(
             ClusterType::Newline => {
                 // Newline clusters are stripped of their glyph contribution.
                 debug_assert_eq!(glyph_len, 1);
+                (0_u8, 0_u32, 0.0, 0.0)
+            }
+            ClusterType::Deleted => {
+                // The shaper deleted the glyph of this default-ignorable control.
+                debug_assert_eq!(glyph_len, 0);
                 (0_u8, 0_u32, 0.0, 0.0)
             }
             _ if inline_glyph_id.is_some() => {

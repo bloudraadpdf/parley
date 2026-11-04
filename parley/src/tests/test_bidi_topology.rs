@@ -365,3 +365,50 @@ fn trailing_edge_box_is_positioned_after_the_reordered_override_text() {
 
     assert_eq!(edge_index, owner_index + 1);
 }
+
+#[test]
+fn a_deleted_format_control_does_not_take_a_visible_glyph() {
+    let mut collection = fontique::Collection::new(fontique::CollectionOptions {
+        shared: false,
+        system_fonts: false,
+    });
+    collection.register_fonts(
+        fontique::Blob::new(alloc::sync::Arc::new(
+            parley_dev::fonts::RTL_INK_OVERFLOW.to_vec(),
+        )),
+        None,
+    );
+    let mut font_context = crate::FontContext {
+        collection,
+        source_cache: fontique::SourceCache::default(),
+    };
+    let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
+    for (text, direction, glyph_owner) in [
+        ("\u{202e}\u{62a}\u{202c}", BaseDirection::Rtl, 3..5),
+        ("\u{200b}\u{62a}", BaseDirection::Ltr, 3..5),
+    ] {
+        let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
+        builder.set_direction(direction);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+            "RTL Ink Overflow",
+        )));
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        let owners: Vec<_> = layout
+            .lines()
+            .flat_map(|line| line.items().collect::<Vec<_>>())
+            .filter_map(|item| match item {
+                PositionedLayoutItem::GlyphRun(run) => Some(run),
+                PositionedLayoutItem::InlineBox(_) => None,
+            })
+            .flat_map(|run| {
+                run.run()
+                    .visual_clusters()
+                    .filter(|cluster| cluster.glyphs().next().is_some())
+                    .map(|cluster| cluster.text_range())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(owners, [glyph_owner], "{text:?}");
+    }
+}
