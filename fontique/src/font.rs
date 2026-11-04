@@ -103,19 +103,6 @@ impl FontInfo {
     ) -> Synthesis {
         let mut synth = Synthesis::default();
         let mut len = 0_usize;
-        if self.has_width_axis() {
-            synth.vars[len] = (Tag::new(b"wdth"), width.percentage());
-            len += 1;
-        }
-        if self.has_weight_axis() {
-            synth.vars[len] = (Tag::new(b"wght"), weight.value());
-            len += 1;
-        } else if weight.value() > self.weight.value()
-            && self.weight.value() < FontWeight::BOLD.value()
-        {
-            // A designed bold face already supplies the family's bold fallback.
-            synth.embolden = true;
-        }
         let slant = match style {
             FontStyle::Oblique(angle) => -angle.unwrap_or(14.0),
             FontStyle::Italic if !self.has_italic_axis() => -14.0,
@@ -123,18 +110,33 @@ impl FontInfo {
         };
         let italic = if style == FontStyle::Italic { 1.0 } else { 0.0 };
         for (tag, value, present) in [
+            (Tag::new(b"wdth"), width.percentage(), self.has_width_axis()),
+            (Tag::new(b"wght"), weight.value(), self.has_weight_axis()),
             (Tag::new(b"slnt"), slant, self.has_slant_axis()),
             (Tag::new(b"ital"), italic, self.has_italic_axis()),
         ] {
             if present {
-                synth.vars[len] = (tag, value);
+                synth.vars[len] = (tag, self.selectable_axis_value(tag, value));
                 len += 1;
             }
         }
+        let axis_value = |tag: Tag| {
+            synth.vars[..len]
+                .iter()
+                .find(|(axis, _)| *axis == tag)
+                .map(|(_, value)| *value)
+        };
+        let available_weight = axis_value(Tag::new(b"wght")).unwrap_or(self.weight.value());
+        // A designed bold face already supplies the family's bold fallback.
+        synth.embolden =
+            weight.value() > available_weight && available_weight < FontWeight::BOLD.value();
+        let slanted_by_axis = axis_value(Tag::new(b"slnt")).is_some_and(|value| value != 0.0);
         let styled_by_axes = match style {
             FontStyle::Normal => true,
-            FontStyle::Italic => self.has_italic_axis() || self.has_slant_axis(),
-            FontStyle::Oblique(_) => self.has_slant_axis(),
+            FontStyle::Italic => {
+                slanted_by_axis || axis_value(Tag::new(b"ital")).is_some_and(|value| value == 1.0)
+            }
+            FontStyle::Oblique(_) => slanted_by_axis,
         };
         if !styled_by_axes
             && self.style != style
@@ -147,13 +149,16 @@ impl FontInfo {
                 FontStyle::Oblique(angle) => angle.unwrap_or(14.0) as i8,
             };
         }
-        for (tag, value) in &mut synth.vars[..len] {
-            if let Some(range) = self.selection_ranges.iter().find(|range| range.tag == *tag) {
-                *value = value.clamp(range.min, range.max);
-            }
-        }
         synth.len = len as u8;
         synth
+    }
+
+    /// Clamps an axis value to the range that high-level attributes may select.
+    fn selectable_axis_value(&self, tag: Tag, value: f32) -> f32 {
+        self.selection_ranges
+            .iter()
+            .find(|range| range.tag == tag)
+            .map_or(value, |range| value.clamp(range.min, range.max))
     }
 
     /// Returns the variation [axes] for the font.
@@ -578,6 +583,33 @@ mod tests {
             );
             assert_eq!(synthesis.embolden(), expected, "{available} -> {requested}");
         }
+    }
+
+    #[test]
+    fn a_restricted_variable_face_synthesises_what_its_axes_cannot_select() {
+        let source = SourceInfo::new(
+            SourceId::new(),
+            SourceKind::Memory(Blob::new(Arc::new(parley_dev::fonts::ROBOTO_FLEX.to_vec()))),
+        );
+        let mut font = FontInfo::from_source(source, 0).unwrap();
+        let ranges = [
+            AxisRange::new(Tag::new(b"wght"), 400.0, 400.0).unwrap(),
+            AxisRange::new(Tag::new(b"slnt"), 0.0, 0.0).unwrap(),
+        ];
+        font.apply_override(&FontInfoOverride {
+            style: Some(FontStyle::Normal),
+            weight: Some(FontWeight::NORMAL),
+            axis_ranges: Some(&ranges),
+            ..FontInfoOverride::default()
+        });
+        let synthesis = font.synthesis(
+            FontWidth::NORMAL,
+            FontStyle::Oblique(Some(10.0)),
+            FontWeight::BOLD,
+            FontStyleSynthesis::Allowed,
+        );
+        assert!(synthesis.embolden());
+        assert_eq!(synthesis.skew(), Some(10.0));
     }
 
     #[test]
