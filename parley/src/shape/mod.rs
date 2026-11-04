@@ -224,7 +224,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
         if level != item.level
             || paragraph_level != item.paragraph_level
             || paragraph_has_strong_direction != item.paragraph_has_strong_direction
-            || script != item.script
+            || !shapes_as_one_script(script, item.script)
         {
             break_run = true;
         }
@@ -669,6 +669,15 @@ fn shape_item<'a, B: Brush>(
     {
         layout.data.push_inline_box(box_index, surrounding_level);
     }
+}
+
+/// Whether OpenType shapes both scripts with one script tag: `kana` covers Hiragana and Katakana.
+fn shapes_as_one_script(a: Script, b: Script) -> bool {
+    a == b
+        || matches!(
+            (a, b),
+            (Script::Hiragana, Script::Katakana) | (Script::Katakana, Script::Hiragana)
+        )
 }
 
 fn real_script(script: Script) -> bool {

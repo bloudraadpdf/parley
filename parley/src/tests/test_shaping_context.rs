@@ -314,3 +314,47 @@ fn arabic_joining_survives_a_font_size_boundary() {
         "each segment must be shaped with its neighbours as context"
     );
 }
+
+#[test]
+fn hiragana_and_katakana_kern_as_one_opentype_script() {
+    let mut collection = fontique::Collection::new(fontique::CollectionOptions {
+        shared: false,
+        system_fonts: false,
+    });
+    let family = collection
+        .register_fonts(
+            fontique::Blob::new(Arc::new(parley_dev::fonts::NOTO_SANS_JP_KANA.to_vec())),
+            None,
+        )
+        .first()
+        .map(|(family, _)| *family)
+        .expect("kana fixture family");
+    let name = alloc::string::String::from(collection.family_name(family).unwrap());
+    let mut fonts = crate::FontContext {
+        collection,
+        source_cache: fontique::SourceCache::default(),
+    };
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut advance = |kern: u16| {
+        let text = "すペ";
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named(&name)));
+        builder.push_default(StyleProperty::FontSize(96.0));
+        let features = [
+            crate::setting::FontFeature {
+                tag: crate::setting::Tag::from_bytes(*b"palt"),
+                value: 1,
+            },
+            crate::setting::FontFeature {
+                tag: crate::setting::Tag::from_bytes(*b"kern"),
+                value: kern,
+            },
+        ];
+        builder.push_default(StyleProperty::FontFeatures((&features).into()));
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        let advance = layout.lines().next().unwrap().metrics().advance;
+        advance
+    };
+    assert_ne!(advance(1), advance(0));
+}

@@ -45,6 +45,9 @@ pub mod fonts {
     /// `assets/fonts/font_style_test/FontStyleTest-slnt_ital-VF.ttf`.
     pub const FONT_STYLE_TEST_SLNT_ITAL: &[u8] =
         include_bytes!("../assets/fonts/font_style_test/FontStyleTest-slnt_ital-VF.ttf");
+    /// `assets/fonts/noto_sans_jp_kana/NotoSansJP-kana_test-subset.otf`: kerned Hiragana and Katakana.
+    pub const NOTO_SANS_JP_KANA: &[u8] =
+        include_bytes!("../assets/fonts/noto_sans_jp_kana/NotoSansJP-kana_test-subset.otf");
     /// `assets/fonts/rtl_ink_overflow/rtl-ink-overflow.ttf`: three Arabic letters and no space glyph.
     pub const RTL_INK_OVERFLOW: &[u8] =
         include_bytes!("../assets/fonts/rtl_ink_overflow/rtl-ink-overflow.ttf");
