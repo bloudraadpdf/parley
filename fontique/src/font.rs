@@ -585,13 +585,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_restricted_variable_face_synthesises_what_its_axes_cannot_select() {
+    fn roboto_flex() -> FontInfo {
         let source = SourceInfo::new(
             SourceId::new(),
             SourceKind::Memory(Blob::new(Arc::new(parley_dev::fonts::ROBOTO_FLEX.to_vec()))),
         );
-        let mut font = FontInfo::from_source(source, 0).unwrap();
+        FontInfo::from_source(source, 0).unwrap()
+    }
+
+    #[test]
+    fn a_restricted_variable_face_synthesises_what_its_axes_cannot_select() {
+        let mut font = roboto_flex();
         let ranges = [
             AxisRange::new(Tag::new(b"wght"), 400.0, 400.0).unwrap(),
             AxisRange::new(Tag::new(b"slnt"), 0.0, 0.0).unwrap(),
@@ -614,11 +618,7 @@ mod tests {
 
     #[test]
     fn normal_request_uses_slant_axis_for_an_oblique_selected_face() {
-        let source = SourceInfo::new(
-            SourceId::new(),
-            SourceKind::Memory(Blob::new(Arc::new(parley_dev::fonts::ROBOTO_FLEX.to_vec()))),
-        );
-        let mut font = FontInfo::from_source(source, 0).unwrap();
+        let mut font = roboto_flex();
         font.attr_axes |= ITALIC_AXIS;
         let slant_range = AxisRange::new(Tag::new(b"slnt"), -67.5, -45.0).unwrap();
         font.apply_override(&FontInfoOverride {

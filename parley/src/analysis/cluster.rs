@@ -66,6 +66,24 @@ pub(crate) enum FontCoverage {
     VariationSequence,
 }
 
+/// The character map queries that font selection makes of a face.
+pub(crate) struct FaceCoverage<G, S> {
+    /// The nominal glyph of a character, or 0.
+    pub glyph: G,
+    /// Whether the face maps a variation sequence.
+    pub sequence: S,
+}
+
+impl<G: Fn(char) -> GlyphId, S: Fn(char, char) -> bool> FaceCoverage<G, S> {
+    /// The nominal glyph of `ch`; a space separator the font lacks takes the space glyph, as `HarfBuzz` shapes it.
+    fn nominal_glyph(&self, ch: char) -> GlyphId {
+        match (self.glyph)(ch) {
+            0 if has_space_fallback(ch) => (self.glyph)(' '),
+            glyph => glyph,
+        }
+    }
+}
+
 impl FontCoverage {
     pub(crate) const fn counts(self) -> bool {
         !matches!(self, Self::Ignored)
@@ -224,8 +242,7 @@ impl CharCluster {
 
     pub(crate) fn map(
         &mut self,
-        f: impl Fn(char) -> GlyphId,
-        sequence: impl Fn(char, char) -> bool,
+        coverage: &FaceCoverage<impl Fn(char) -> GlyphId, impl Fn(char, char) -> bool>,
         analysis_data_sources: &AnalysisDataSources,
     ) -> Status {
         let len = self.len();
@@ -238,7 +255,8 @@ impl CharCluster {
         if self.force_normalize && self.composed(analysis_data_sources).is_some() {
             ratio = self
                 .comp
-                .map(&f, &sequence, &mut glyph_ids, self.best_ratio);
+                .mapper()
+                .map(coverage, &mut glyph_ids, self.best_ratio);
             if ratio > self.best_ratio {
                 self.best_ratio = ratio;
                 self.form = FormKind::NFC;
@@ -251,7 +269,7 @@ impl CharCluster {
             chars: &mut self.chars[..len],
             map_len: self.map_len.max(1),
         }
-        .map(&f, &sequence, &mut glyph_ids, self.best_ratio);
+        .map(coverage, &mut glyph_ids, self.best_ratio);
         if ratio > self.best_ratio {
             self.best_ratio = ratio;
             self.form = FormKind::Original;
@@ -262,7 +280,8 @@ impl CharCluster {
         if self.decomposed(analysis_data_sources).is_some() {
             ratio = self
                 .decomp
-                .map(&f, &sequence, &mut glyph_ids, self.best_ratio);
+                .mapper()
+                .map(coverage, &mut glyph_ids, self.best_ratio);
             if ratio > self.best_ratio {
                 self.best_ratio = ratio;
                 self.form = FormKind::NFD;
@@ -273,7 +292,8 @@ impl CharCluster {
             if !self.force_normalize && self.composed(analysis_data_sources).is_some() {
                 ratio = self
                     .comp
-                    .map(&f, &sequence, &mut glyph_ids, self.best_ratio);
+                    .mapper()
+                    .map(coverage, &mut glyph_ids, self.best_ratio);
                 if ratio > self.best_ratio {
                     self.best_ratio = ratio;
                     self.form = FormKind::NFC;
@@ -349,18 +369,11 @@ impl Form {
     }
 
     #[inline(always)]
-    fn map(
-        &mut self,
-        f: &impl Fn(char) -> u16,
-        sequence: &impl Fn(char, char) -> bool,
-        glyphs: &mut [u16],
-        best_ratio: f32,
-    ) -> f32 {
+    fn mapper(&mut self) -> Mapper<'_> {
         Mapper {
             chars: &mut self.chars[..self.len as usize],
             map_len: self.map_len,
         }
-        .map(f, sequence, glyphs, best_ratio)
     }
 }
 
@@ -372,8 +385,7 @@ struct Mapper<'a> {
 impl<'a> Mapper<'a> {
     fn map(
         &mut self,
-        f: &impl Fn(char) -> u16,
-        sequence: &impl Fn(char, char) -> bool,
+        coverage: &FaceCoverage<impl Fn(char) -> GlyphId, impl Fn(char, char) -> bool>,
         glyphs: &mut [u16],
         best_ratio: f32,
     ) -> f32 {
@@ -383,11 +395,13 @@ impl<'a> Mapper<'a> {
         let mut mapped = 0;
         let mut base = None;
         for (c, g) in self.chars.iter().zip(glyphs.iter_mut()) {
-            *g = nominal_glyph(f, c.ch);
+            *g = coverage.nominal_glyph(c.ch);
             mapped += usize::from(match c.coverage {
                 FontCoverage::Ignored => false,
                 FontCoverage::Nominal => *g != 0,
-                FontCoverage::VariationSequence => base.is_some_and(|base| sequence(base, c.ch)),
+                FontCoverage::VariationSequence => {
+                    base.is_some_and(|base| (coverage.sequence)(base, c.ch))
+                }
             });
             base = Some(c.ch);
         }
@@ -398,14 +412,6 @@ impl<'a> Mapper<'a> {
             }
         }
         ratio
-    }
-}
-
-/// The nominal glyph of `ch`; a space separator the font lacks takes the space glyph, as `HarfBuzz` shapes it.
-fn nominal_glyph(f: &impl Fn(char) -> u16, ch: char) -> u16 {
-    match f(ch) {
-        0 if has_space_fallback(ch) => f(' '),
-        glyph => glyph,
     }
 }
 
@@ -425,11 +431,11 @@ pub fn cluster_is_supported(
     supports_sequence: impl Fn(char, char) -> bool,
 ) -> bool {
     let data = AnalysisDataSources::new();
-    cluster(text.chars(), &data).map(
-        |ch| u16::from(glyph_for(ch).is_some_and(|glyph| glyph != 0)),
-        supports_sequence,
-        &data,
-    ) == Status::Complete
+    let coverage = FaceCoverage {
+        glyph: |ch| u16::from(glyph_for(ch).is_some_and(|glyph| glyph != 0)),
+        sequence: supports_sequence,
+    };
+    cluster(text.chars(), &data).map(&coverage, &data) == Status::Complete
 }
 
 fn cluster(chars: impl IntoIterator<Item = char>, data: &AnalysisDataSources) -> CharCluster {
@@ -491,7 +497,16 @@ mod tests {
         let mut cluster = cluster("\u{0627}\u{064B}".chars(), &data);
         cluster.force_normalize = true;
 
-        assert_eq!(cluster.map(|_| 0, |_, _| false, &data), Status::Discard);
+        assert_eq!(
+            cluster.map(
+                &FaceCoverage {
+                    glyph: |_| 0,
+                    sequence: |_, _| false
+                },
+                &data
+            ),
+            Status::Discard
+        );
     }
 
     #[test]
@@ -503,17 +518,11 @@ mod tests {
             &data,
         );
 
-        let status = cluster.map(
-            |ch| {
-                if matches!(ch, '\u{200D}' | '\u{FE0F}') {
-                    0
-                } else {
-                    1
-                }
-            },
-            |base, selector| (base, selector) == ('\u{2764}', '\u{FE0F}'),
-            &data,
-        );
+        let coverage = FaceCoverage {
+            glyph: |ch| u16::from(!matches!(ch, '\u{200D}' | '\u{FE0F}')),
+            sequence: |base, selector| (base, selector) == ('\u{2764}', '\u{FE0F}'),
+        };
+        let status = cluster.map(&coverage, &data);
 
         assert_eq!(
             status,
@@ -530,17 +539,35 @@ mod tests {
         let space_only = |ch| u16::from(ch == ' ');
         for ch in ['\u{00A0}', '\u{2009}', '\u{202F}', '\u{205F}', '\u{3000}'] {
             assert_eq!(
-                cluster([ch], &data).map(space_only, |_, _| false, &data),
+                cluster([ch], &data).map(
+                    &FaceCoverage {
+                        glyph: space_only,
+                        sequence: |_, _| false
+                    },
+                    &data
+                ),
                 Status::Complete,
                 "{ch:?}"
             );
         }
         assert_eq!(
-            cluster(['\u{1680}'], &data).map(space_only, |_, _| false, &data),
+            cluster(['\u{1680}'], &data).map(
+                &FaceCoverage {
+                    glyph: space_only,
+                    sequence: |_, _| false
+                },
+                &data
+            ),
             Status::Discard
         );
         assert_eq!(
-            cluster(['\u{202F}'], &data).map(|_| 0, |_, _| false, &data),
+            cluster(['\u{202F}'], &data).map(
+                &FaceCoverage {
+                    glyph: |_| 0,
+                    sequence: |_, _| false
+                },
+                &data
+            ),
             Status::Discard
         );
     }
@@ -553,7 +580,16 @@ mod tests {
             &data,
         );
 
-        assert_eq!(cluster.map(|_| 1, |_, _| false, &data), Status::Complete);
+        assert_eq!(
+            cluster.map(
+                &FaceCoverage {
+                    glyph: |_| 1,
+                    sequence: |_, _| false
+                },
+                &data
+            ),
+            Status::Complete
+        );
         assert!(cluster.chars.iter().all(|ch| ch.glyph_id == 1));
     }
 }

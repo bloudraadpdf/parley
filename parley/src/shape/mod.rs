@@ -12,7 +12,7 @@ use core::ops::RangeInclusive;
 use super::layout::Layout;
 use super::resolve::{ResolveContext, Resolved, ResolvedStyle};
 use super::style::{Brush, FontFeature, FontSynthesis, FontVariation};
-use crate::analysis::cluster::{Char, CharCluster, Status};
+use crate::analysis::cluster::{Char, CharCluster, FaceCoverage, Status};
 use crate::analysis::{AnalysisDataSources, CharInfo};
 use crate::convert::script_to_harfrust;
 use crate::inline_box::{
@@ -807,23 +807,17 @@ impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
                 return fontique::QueryStatus::Continue;
             };
 
-            let map_status = cluster.map(
-                |ch| {
+            let coverage = FaceCoverage {
+                // Font selection only needs coverage, so any non-zero glyph stands for the mapping.
+                glyph: |ch| {
                     charmap
                         .map(ch)
-                        .map(|g| {
-                            // HACK: in reality, we're only computing coverage, so
-                            // we only care about whether the font  has a mapping
-                            // for a particular glyph. Any non-zero value indicates
-                            // the existence of a glyph so we can simplify this
-                            // without a fallible conversion from u32 to u16.
-                            (g != 0) as u16
-                        })
+                        .map(|g| u16::from(g != 0))
                         .unwrap_or_default()
                 },
-                |base, selector| charmap.supports_variation_sequence(base, selector),
-                analysis_data_sources,
-            );
+                sequence: |base, selector| charmap.supports_variation_sequence(base, selector),
+            };
+            let map_status = cluster.map(&coverage, analysis_data_sources);
 
             match map_status {
                 Status::Complete => {
