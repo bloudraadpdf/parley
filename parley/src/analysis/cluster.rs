@@ -41,11 +41,8 @@ pub(crate) struct SourceRange {
 pub(crate) struct Char {
     /// The character.
     pub ch: char,
-    /// True if font selection requires a nominal glyph for this character.
-    ///
-    /// Default-ignorable shaping controls still reach the shaper but do not
-    /// disqualify a face whose cmap omits them.
-    pub contributes_to_font_coverage: bool,
+    /// How font selection requires a face to support this character.
+    pub coverage: FontCoverage,
     /// Nominal glyph identifier.
     pub glyph_id: GlyphId,
     /// Indexes into the list of styles for the containing text run, to find the style applicable
@@ -54,6 +51,26 @@ pub(crate) struct Char {
 }
 
 pub(crate) type GlyphId = u16;
+
+/// How a character takes part in font selection (CSS Fonts 4 5.3).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum FontCoverage {
+    /// A default-ignorable shaping control: it reaches the shaper but does not
+    /// disqualify a face whose cmap omits it.
+    #[default]
+    Ignored,
+    /// The face must map the character to a nominal glyph.
+    Nominal,
+    /// A variation selector after a base character: the face must map the
+    /// variation sequence.
+    VariationSequence,
+}
+
+impl FontCoverage {
+    pub(crate) const fn counts(self) -> bool {
+        !matches!(self, Self::Ignored)
+    }
+}
 
 /// Whitespace content of a cluster.
 #[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Debug)]
@@ -123,12 +140,20 @@ impl CharCluster {
     }
 
     #[inline(always)]
-    pub(crate) fn contributes_to_font_coverage(
+    pub(crate) fn font_coverage(
         ch: char,
+        follows_base: bool,
         analysis_data_sources: &AnalysisDataSources,
-    ) -> bool {
-        Self::contributes_to_shaping(ch, analysis_data_sources)
+    ) -> FontCoverage {
+        if follows_base && analysis_data_sources.properties(ch).is_variation_selector() {
+            FontCoverage::VariationSequence
+        } else if Self::contributes_to_shaping(ch, analysis_data_sources)
             && !const { CodePointSetData::new::<DefaultIgnorableCodePoint>() }.contains(ch)
+        {
+            FontCoverage::Nominal
+        } else {
+            FontCoverage::Ignored
+        }
     }
 
     fn decomposed(&mut self, analysis_data_sources: &AnalysisDataSources) -> Option<&[Char]> {
@@ -151,13 +176,11 @@ impl CharCluster {
                     Decomposed::Expansion(a, b) => {
                         let mut copy = self.chars[0];
                         copy.ch = a;
-                        copy.contributes_to_font_coverage =
-                            Self::contributes_to_font_coverage(a, analysis_data_sources);
+                        copy.coverage = Self::font_coverage(a, false, analysis_data_sources);
                         self.decomp.chars[0] = copy;
 
                         copy.ch = b;
-                        copy.contributes_to_font_coverage =
-                            Self::contributes_to_font_coverage(b, analysis_data_sources);
+                        copy.coverage = Self::font_coverage(b, true, analysis_data_sources);
                         self.decomp.chars[1] = copy;
 
                         self.decomp.len = 2;
@@ -187,8 +210,7 @@ impl CharCluster {
                 let ch = composer.compose(self.chars[0].ch, self.chars[1].ch)?;
                 let mut copy = self.chars[0];
                 copy.ch = ch;
-                copy.contributes_to_font_coverage =
-                    Self::contributes_to_font_coverage(ch, analysis_data_sources);
+                copy.coverage = Self::font_coverage(ch, false, analysis_data_sources);
                 self.comp.chars[0] = copy;
                 self.comp.len = 1;
 
@@ -203,6 +225,7 @@ impl CharCluster {
     pub(crate) fn map(
         &mut self,
         f: impl Fn(char) -> GlyphId,
+        sequence: impl Fn(char, char) -> bool,
         analysis_data_sources: &AnalysisDataSources,
     ) -> Status {
         let len = self.len();
@@ -213,7 +236,9 @@ impl CharCluster {
         let prev_ratio = self.best_ratio;
         let mut ratio;
         if self.force_normalize && self.composed(analysis_data_sources).is_some() {
-            ratio = self.comp.map(&f, &mut glyph_ids, self.best_ratio);
+            ratio = self
+                .comp
+                .map(&f, &sequence, &mut glyph_ids, self.best_ratio);
             if ratio > self.best_ratio {
                 self.best_ratio = ratio;
                 self.form = FormKind::NFC;
@@ -226,7 +251,7 @@ impl CharCluster {
             chars: &mut self.chars[..len],
             map_len: self.map_len.max(1),
         }
-        .map(&f, &mut glyph_ids, self.best_ratio);
+        .map(&f, &sequence, &mut glyph_ids, self.best_ratio);
         if ratio > self.best_ratio {
             self.best_ratio = ratio;
             self.form = FormKind::Original;
@@ -235,7 +260,9 @@ impl CharCluster {
             }
         }
         if self.decomposed(analysis_data_sources).is_some() {
-            ratio = self.decomp.map(&f, &mut glyph_ids, self.best_ratio);
+            ratio = self
+                .decomp
+                .map(&f, &sequence, &mut glyph_ids, self.best_ratio);
             if ratio > self.best_ratio {
                 self.best_ratio = ratio;
                 self.form = FormKind::NFD;
@@ -244,7 +271,9 @@ impl CharCluster {
                 }
             }
             if !self.force_normalize && self.composed(analysis_data_sources).is_some() {
-                ratio = self.comp.map(&f, &mut glyph_ids, self.best_ratio);
+                ratio = self
+                    .comp
+                    .map(&f, &sequence, &mut glyph_ids, self.best_ratio);
                 if ratio > self.best_ratio {
                     self.best_ratio = ratio;
                     self.form = FormKind::NFC;
@@ -316,20 +345,22 @@ impl Form {
 
     #[inline(always)]
     fn setup(&mut self) {
-        self.map_len = self
-            .chars()
-            .iter()
-            .filter(|c| c.contributes_to_font_coverage)
-            .count();
+        self.map_len = self.chars().iter().filter(|c| c.coverage.counts()).count();
     }
 
     #[inline(always)]
-    fn map(&mut self, f: &impl Fn(char) -> u16, glyphs: &mut [u16], best_ratio: f32) -> f32 {
+    fn map(
+        &mut self,
+        f: &impl Fn(char) -> u16,
+        sequence: &impl Fn(char, char) -> bool,
+        glyphs: &mut [u16],
+        best_ratio: f32,
+    ) -> f32 {
         Mapper {
             chars: &mut self.chars[..self.len as usize],
             map_len: self.map_len,
         }
-        .map(f, glyphs, best_ratio)
+        .map(f, sequence, glyphs, best_ratio)
     }
 }
 
@@ -339,21 +370,26 @@ struct Mapper<'a> {
 }
 
 impl<'a> Mapper<'a> {
-    fn map(&mut self, f: &impl Fn(char) -> u16, glyphs: &mut [u16], best_ratio: f32) -> f32 {
+    fn map(
+        &mut self,
+        f: &impl Fn(char) -> u16,
+        sequence: &impl Fn(char, char) -> bool,
+        glyphs: &mut [u16],
+        best_ratio: f32,
+    ) -> f32 {
         if self.map_len == 0 {
             return 1.;
         }
         let mut mapped = 0;
+        let mut base = None;
         for (c, g) in self.chars.iter().zip(glyphs.iter_mut()) {
-            if !c.contributes_to_font_coverage {
-                *g = nominal_glyph(f, c.ch);
-            } else {
-                let gid = nominal_glyph(f, c.ch);
-                *g = gid;
-                if gid != 0 {
-                    mapped += 1;
-                }
-            }
+            *g = nominal_glyph(f, c.ch);
+            mapped += usize::from(match c.coverage {
+                FontCoverage::Ignored => false,
+                FontCoverage::Nominal => *g != 0,
+                FontCoverage::VariationSequence => base.is_some_and(|base| sequence(base, c.ch)),
+            });
+            base = Some(c.ch);
         }
         let ratio = mapped as f32 / self.map_len as f32;
         if ratio > best_ratio {
@@ -383,10 +419,15 @@ pub const fn has_space_fallback(ch: char) -> bool {
 }
 
 /// Tests nominal cluster coverage with the same canonical and space fallbacks used by font selection.
-pub fn cluster_is_supported(text: &str, glyph_for: impl Fn(char) -> Option<u32>) -> bool {
+pub fn cluster_is_supported(
+    text: &str,
+    glyph_for: impl Fn(char) -> Option<u32>,
+    supports_sequence: impl Fn(char, char) -> bool,
+) -> bool {
     let data = AnalysisDataSources::new();
     cluster(text.chars(), &data).map(
         |ch| u16::from(glyph_for(ch).is_some_and(|glyph| glyph != 0)),
+        supports_sequence,
         &data,
     ) == Status::Complete
 }
@@ -400,11 +441,11 @@ fn cluster(chars: impl IntoIterator<Item = char>, data: &AnalysisDataSources) ->
             properties.grapheme_cluster_break(),
             properties.is_variation_selector(),
         );
-        let contributes_to_font_coverage = CharCluster::contributes_to_font_coverage(ch, data);
-        cluster.map_len += usize::from(contributes_to_font_coverage);
+        let coverage = CharCluster::font_coverage(ch, !cluster.chars.is_empty(), data);
+        cluster.map_len += usize::from(coverage.counts());
         cluster.chars.push(Char {
             ch,
-            contributes_to_font_coverage,
+            coverage,
             glyph_id: 0,
             style_index: 0,
         });
@@ -419,7 +460,7 @@ mod tests {
     #[test]
     fn public_cluster_coverage_preserves_font_matching_rules() {
         let supports = |text: &str, mapped: &[char]| {
-            cluster_is_supported(text, |ch| mapped.contains(&ch).then_some(1))
+            cluster_is_supported(text, |ch| mapped.contains(&ch).then_some(1), |_, _| false)
         };
         assert!(supports("\u{00a0}\u{093c}", &[' ', '\u{093c}']));
         assert!(!supports("\u{00a0}\u{093c}", &[' ']));
@@ -428,7 +469,20 @@ mod tests {
         assert!(!supports("e\u{0301}", &['e']));
         assert!(supports("é", &['e', '\u{0301}']));
         assert!(supports("a\u{200d}", &['a']));
-        assert!(!cluster_is_supported("a", |_| Some(0)));
+        assert!(!cluster_is_supported("a", |_| Some(0), |_, _| false));
+    }
+
+    #[test]
+    fn a_variation_sequence_needs_a_face_that_maps_the_sequence() {
+        let supports = |sequence: Option<(char, char)>| {
+            cluster_is_supported(
+                "\u{8279}\u{fe00}",
+                |_| Some(1),
+                |base, selector| sequence == Some((base, selector)),
+            )
+        };
+        assert!(supports(Some(('\u{8279}', '\u{fe00}'))));
+        assert!(!supports(None));
     }
 
     #[test]
@@ -437,7 +491,7 @@ mod tests {
         let mut cluster = cluster("\u{0627}\u{064B}".chars(), &data);
         cluster.force_normalize = true;
 
-        assert_eq!(cluster.map(|_| 0, &data), Status::Discard);
+        assert_eq!(cluster.map(|_| 0, |_, _| false, &data), Status::Discard);
     }
 
     #[test]
@@ -457,13 +511,14 @@ mod tests {
                     1
                 }
             },
+            |base, selector| (base, selector) == ('\u{2764}', '\u{FE0F}'),
             &data,
         );
 
         assert_eq!(
             status,
             Status::Complete,
-            "ZWJ and variation selectors are shaping controls, not nominal-glyph coverage requirements",
+            "ZWJ is a shaping control and a variation selector needs its sequence, not a nominal glyph",
         );
     }
 
@@ -475,17 +530,17 @@ mod tests {
         let space_only = |ch| u16::from(ch == ' ');
         for ch in ['\u{00A0}', '\u{2009}', '\u{202F}', '\u{205F}', '\u{3000}'] {
             assert_eq!(
-                cluster([ch], &data).map(space_only, &data),
+                cluster([ch], &data).map(space_only, |_, _| false, &data),
                 Status::Complete,
                 "{ch:?}"
             );
         }
         assert_eq!(
-            cluster(['\u{1680}'], &data).map(space_only, &data),
+            cluster(['\u{1680}'], &data).map(space_only, |_, _| false, &data),
             Status::Discard
         );
         assert_eq!(
-            cluster(['\u{202F}'], &data).map(|_| 0, &data),
+            cluster(['\u{202F}'], &data).map(|_| 0, |_, _| false, &data),
             Status::Discard
         );
     }
@@ -498,7 +553,7 @@ mod tests {
             &data,
         );
 
-        assert_eq!(cluster.map(|_| 1, &data), Status::Complete);
+        assert_eq!(cluster.map(|_| 1, |_, _| false, &data), Status::Complete);
         assert!(cluster.chars.iter().all(|ch| ch.glyph_id == 1));
     }
 }

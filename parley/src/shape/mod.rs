@@ -364,15 +364,13 @@ fn fill_cluster_in_place(
         is_emoji_or_pictograph |= info.is_emoji_or_pictograph();
         *code_unit_offset_in_string += ch.len_utf8();
 
-        let contributes_to_font_coverage =
-            CharCluster::contributes_to_font_coverage(ch, analysis_data_sources);
-        if contributes_to_font_coverage {
-            map_len += 1;
-        }
+        let coverage =
+            CharCluster::font_coverage(ch, !char_cluster.chars.is_empty(), analysis_data_sources);
+        map_len += usize::from(coverage.counts());
 
         char_cluster.chars.push(Char {
             ch,
-            contributes_to_font_coverage,
+            coverage,
             glyph_id: 0,
             style_index: *style_index,
         });
@@ -823,6 +821,7 @@ impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
                         })
                         .unwrap_or_default()
                 },
+                |base, selector| charmap.supports_variation_sequence(base, selector),
                 analysis_data_sources,
             );
 

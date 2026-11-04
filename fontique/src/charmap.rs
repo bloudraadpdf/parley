@@ -8,7 +8,7 @@
 
 use read_fonts::{
     FontData, FontRead, FontRef, TableProvider, TopLevelTable,
-    tables::cmap::{Cmap, CmapSubtable},
+    tables::cmap::{Cmap, Cmap14, CmapSubtable, PlatformId},
     types::GlyphId,
 };
 
@@ -16,6 +16,7 @@ use read_fonts::{
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct CharmapIndex {
     subtable_offset: u32,
+    variation_subtable_offset: Option<u32>,
     is_symbol: bool,
     is_mac_roman: bool,
 }
@@ -31,8 +32,14 @@ impl CharmapIndex {
             .map(|rec| rec.offset())?;
         let (_, rec, _) = cmap.best_subtable()?;
         let subtable_offset = cmap_offset.checked_add(rec.subtable_offset().to_u32())?;
+        let variation_subtable_offset = cmap
+            .encoding_records()
+            .iter()
+            .find(|rec| rec.platform_id() == PlatformId::Unicode && rec.encoding_id() == 5)
+            .and_then(|rec| cmap_offset.checked_add(rec.subtable_offset().to_u32()));
         Some(Self {
             subtable_offset,
+            variation_subtable_offset,
             is_symbol: rec.is_symbol(),
             is_mac_roman: rec.is_mac_roman(),
         })
@@ -42,8 +49,13 @@ impl CharmapIndex {
     pub fn charmap<'a>(&self, font_data: &'a [u8]) -> Option<Charmap<'a>> {
         let subtable_data = font_data.get(self.subtable_offset as usize..)?;
         let subtable = CmapSubtable::read(FontData::new(subtable_data)).ok()?;
+        let variations = self
+            .variation_subtable_offset
+            .and_then(|offset| font_data.get(offset as usize..))
+            .and_then(|data| Cmap14::read(FontData::new(data)).ok());
         Some(Charmap {
             subtable,
+            variations,
             is_symbol: self.is_symbol,
             is_mac_roman: self.is_mac_roman,
         })
@@ -54,6 +66,7 @@ impl CharmapIndex {
 #[derive(Clone)]
 pub struct Charmap<'a> {
     subtable: CmapSubtable<'a>,
+    variations: Option<Cmap14<'a>>,
     is_symbol: bool,
     is_mac_roman: bool,
 }
@@ -95,6 +108,17 @@ impl Charmap<'_> {
             return self.map(0xF000 + c);
         }
         result.map(|gid| gid.to_u32())
+    }
+
+    /// Returns `true` if the font maps the variation sequence of `codepoint` and `selector`.
+    pub fn supports_variation_sequence(
+        &self,
+        codepoint: impl Into<u32>,
+        selector: impl Into<u32>,
+    ) -> bool {
+        self.variations
+            .as_ref()
+            .is_some_and(|variations| variations.map_variant(codepoint, selector).is_some())
     }
 }
 
