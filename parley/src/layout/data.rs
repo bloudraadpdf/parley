@@ -1859,6 +1859,7 @@ impl<B: Brush> LayoutData<B> {
                 glyph_positions,
                 char_infos,
                 source_text.char_indices(),
+                space_gid.is_none(),
             );
         } else {
             run.advance = process_clusters(
@@ -1872,6 +1873,7 @@ impl<B: Brush> LayoutData<B> {
                 glyph_positions,
                 char_infos,
                 source_text.char_indices().rev(),
+                space_gid.is_none(),
             );
             // Reverse clusters into logical order for RTL
             let clusters_len = self.clusters.len();
@@ -2369,6 +2371,8 @@ impl<B: Brush> LayoutData<B> {
 /// * `char_infos` - Character information from text analysis, indexed by cluster ID.
 /// * `char_indices_iter` - Iterator over (`byte_offset`, `char`) pairs from the source text.
 ///   Should be in logical order (forward for LTR, reverse for RTL).
+/// * `ignorables_deleted` - Whether `HarfRust` deleted default-ignorable glyphs because the font
+///   has no space glyph.
 fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
     direction: Direction,
     clusters: &mut Vec<ClusterData>,
@@ -2380,6 +2384,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
     glyph_positions: &[harfrust::GlyphPosition],
     char_infos: &[(CharInfo, u16)],
     char_indices_iter: I,
+    ignorables_deleted: bool,
 ) -> f32 {
     let mut char_indices_iter = char_indices_iter.peekable();
     let mut cluster_start_char = char_indices_iter.next().unwrap();
@@ -2464,6 +2469,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
                 &mut cluster_start_char,
                 &mut char_indices_iter,
                 cluster_glyph_offset,
+                ignorables_deleted,
             );
             let is_newline = to_whitespace(cluster_start_char.1) == Whitespace::Newline;
             let cluster_type = if num_components > 1 {
@@ -2607,6 +2613,7 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
             &mut cluster_start_char,
             &mut char_indices_iter,
             cluster_glyph_offset,
+            ignorables_deleted,
         );
         if num_components > 1 {
             // This is a ligature - create ligature start + ligature components
@@ -2702,10 +2709,10 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
 
 /// Splits the visually leading default-ignorable components off a shaped cluster.
 ///
-/// `HarfRust` deletes default-ignorable glyphs when the font has no space glyph,
-/// and merges their clusters into a neighbour. A deleted control has no glyph,
-/// so it becomes a glyph-less cluster, and a visible component keeps the
-/// glyphs. Returns the logical index of the first remaining component and the
+/// `HarfRust` deletes default-ignorable glyphs when the font has no space glyph
+/// (`ignorables_deleted`), and merges their clusters into a neighbour. A deleted
+/// control has no glyph, so it becomes a glyph-less cluster, and a visible
+/// component keeps the glyphs. Returns the logical index of the first remaining component and the
 /// number of visible remaining components.
 fn split_deleted_ignorables<I: Iterator<Item = (usize, char)> + Clone>(
     direction: &Direction,
@@ -2716,11 +2723,13 @@ fn split_deleted_ignorables<I: Iterator<Item = (usize, char)> + Clone>(
     cluster_start_char: &mut (usize, char),
     char_indices_iter: &mut core::iter::Peekable<I>,
     glyph_offset: u32,
+    ignorables_deleted: bool,
 ) -> (u32, usize) {
     let default_ignorable =
         icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
     let mut first_component = cluster_id;
-    while *num_components > 1
+    while ignorables_deleted
+        && *num_components > 1
         && default_ignorable.contains(cluster_start_char.1)
         && char_indices_iter
             .clone()
