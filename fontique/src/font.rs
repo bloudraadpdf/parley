@@ -24,6 +24,7 @@ pub struct FontInfo {
     weight: FontWeight,
     axes: AxisVec,
     selection_ranges: SmallVec<[AxisRange; 3]>,
+    metrics_override: FontMetricsOverride,
     attr_axes: u8,
     charmap_index: CharmapIndex,
 }
@@ -85,6 +86,11 @@ impl FontInfo {
     /// from `1.0` to `1000.0`.
     pub fn weight(&self) -> FontWeight {
         self.weight
+    }
+
+    /// Returns the line metrics that replace the font's own.
+    pub fn metrics_override(&self) -> FontMetricsOverride {
+        self.metrics_override
     }
 
     /// Returns permitted synthesis suggestions for this font with the given attributes.
@@ -257,6 +263,7 @@ impl FontInfo {
             weight,
             axes,
             selection_ranges: SmallVec::default(),
+            metrics_override: FontMetricsOverride::default(),
             attr_axes,
             charmap_index,
         })
@@ -293,6 +300,7 @@ impl FontInfo {
         if let Some(weight) = info_override.weight {
             self.weight = weight;
         }
+        self.metrics_override = info_override.metrics;
         if let Some(axes) = info_override.axes {
             // This is O(n^2) but no font should have enough axes for that to
             // matter (read-fonts does the same thing)
@@ -507,6 +515,19 @@ pub struct FontInfoOverride<'a> {
     pub axes: Option<&'a [(Tag, f32)]>,
     /// Bounds applied when selecting axes from high-level font attributes.
     pub axis_ranges: Option<&'a [AxisRange]>,
+    /// Line metrics to be used instead of the ones specified in the font itself.
+    pub metrics: FontMetricsOverride,
+}
+
+/// Line metrics, as multiples of the font size, that replace the font's own.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct FontMetricsOverride {
+    /// Ascent above the baseline.
+    pub ascent: Option<f32>,
+    /// Descent below the baseline, as a positive value.
+    pub descent: Option<f32>,
+    /// Line gap.
+    pub line_gap: Option<f32>,
 }
 
 /// A finite, ordered range for high-level variable-font axis selection.

@@ -317,3 +317,47 @@ fn default_ignorable_bidi_controls_do_not_enlarge_the_line_box() {
     let visible_fallback = line_metrics("x\u{05d0}x", 1..3);
     assert!(visible_fallback.line_height > plain.line_height);
 }
+
+#[test]
+fn font_metrics_override_replaces_run_ascent_descent_and_line_gap() {
+    let mut collection = fontique::Collection::new(fontique::CollectionOptions {
+        shared: false,
+        system_fonts: false,
+    });
+    collection.register_fonts(
+        fontique::Blob::new(alloc::sync::Arc::new(
+            parley_dev::fonts::ROBOTO_REGULAR.to_vec(),
+        )),
+        Some(fontique::FontInfoOverride {
+            family_name: Some("Overridden"),
+            metrics: fontique::FontMetricsOverride {
+                ascent: Some(1.0),
+                descent: Some(0.5),
+                line_gap: Some(0.25),
+            },
+            ..Default::default()
+        }),
+    );
+    let mut fcx = crate::FontContext {
+        collection,
+        source_cache: fontique::SourceCache::default(),
+    };
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.ranged_builder(&mut fcx, "X", 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Overridden")));
+    builder.push_default(StyleProperty::FontSize(20.0));
+    let mut layout = builder.build("X");
+    layout.break_all_lines(None);
+    let line = layout.lines().next().unwrap();
+    let metrics = line.metrics();
+    assert_eq!(
+        (
+            metrics.ascent,
+            metrics.descent,
+            metrics.leading,
+            metrics.line_height
+        ),
+        (20.0, 10.0, 5.0, 35.0)
+    );
+    assert_eq!(metrics.baseline, 22.5);
+}

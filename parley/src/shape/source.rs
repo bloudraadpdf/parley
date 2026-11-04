@@ -179,6 +179,7 @@ impl DeferredSourceShape {
             run.font_size,
             run.font_attrs,
             run.synthesis,
+            run.metrics_override,
             &shaped.glyphs,
             self.script,
             run.bidi_level,

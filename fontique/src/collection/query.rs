@@ -11,8 +11,8 @@ use alloc::vec::Vec;
 
 use super::{
     super::{
-        Attributes, Blob, FallbackKey, FamilyId, FamilyInfo, FontStyleSynthesis, GenericFamily,
-        Synthesis,
+        Attributes, Blob, FallbackKey, FamilyId, FamilyInfo, FontMetricsOverride,
+        FontStyleSynthesis, GenericFamily, Synthesis,
     },
     Inner,
 };
@@ -237,6 +237,8 @@ pub struct QueryFont {
     pub index: u32,
     /// Synthesis suggestions for this font based on the requested attributes.
     pub synthesis: Synthesis,
+    /// Line metrics that replace the font's own.
+    pub metrics_override: FontMetricsOverride,
     /// Data used for constructing a character map for this font.
     pub charmap_index: CharmapIndex,
 }
@@ -286,6 +288,7 @@ fn load_font<'a>(
                 blob: blob.clone(),
                 index: blob_index,
                 synthesis,
+                metrics_override: font_info.metrics_override(),
                 charmap_index: font_info.charmap_index(),
             });
             if let Entry::Ok(font) = status {

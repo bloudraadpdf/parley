@@ -966,6 +966,8 @@ pub(crate) struct RunData {
     pub(crate) font_attrs: fontique::Attributes,
     /// Synthesis for rendering (contains variation settings)
     pub(crate) synthesis: fontique::Synthesis,
+    /// Line metrics that replace the font's own.
+    pub(crate) metrics_override: fontique::FontMetricsOverride,
     /// Range of normalized coordinates in the layout data.
     pub(crate) coords_range: Range<usize>,
     /// Range of the source text.
@@ -1672,6 +1674,7 @@ impl<B: Brush> LayoutData<B> {
         font_size: f32,
         font_attrs: fontique::Attributes,
         synthesis: fontique::Synthesis,
+        metrics_override: fontique::FontMetricsOverride,
         glyph_buffer: &harfrust::GlyphBuffer,
         script: icu_properties::props::Script,
         bidi_level: u8,
@@ -1773,10 +1776,13 @@ impl<B: Brush> LayoutData<B> {
                 self.vertical_metric_grid
                     .map_or(value, |grid| grid.round(value))
             };
+            let em = |value: Option<f32>, font_value: f32| {
+                on_grid(value.map_or(font_value, |value| value * font_size))
+            };
             let (ascent, descent, leading) = (
-                on_grid(metrics.ascent),
-                on_grid(-metrics.descent),
-                on_grid(metrics.leading),
+                em(metrics_override.ascent, metrics.ascent),
+                em(metrics_override.descent, -metrics.descent),
+                em(metrics_override.line_gap, metrics.leading),
             );
 
             // Compute line height
@@ -1813,6 +1819,7 @@ impl<B: Brush> LayoutData<B> {
             font_size,
             font_attrs,
             synthesis,
+            metrics_override,
             coords_range: coords_start..coords_end,
             text_range,
             bidi_level,

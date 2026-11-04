@@ -591,6 +591,7 @@ fn shape_item<'a, B: Brush>(
             item.size,
             font.attrs,
             font.font.synthesis,
+            font.font.metrics_override,
             &shaped.glyphs,
             item.script,
             item.level,
