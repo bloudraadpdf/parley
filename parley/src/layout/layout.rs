@@ -30,6 +30,8 @@ pub struct DiscretionaryBreakShape<B: Brush> {
     latest_line_start: Option<usize>,
     layout: Arc<Layout<B>>,
     replaced_source: Option<core::ops::Range<usize>>,
+    replaced_advance: f32,
+    replaced_fit_advance: f32,
 }
 
 /// A shaped string inserted at the start of a line only when wrapping
@@ -113,6 +115,8 @@ impl<B: Brush> DiscretionaryBreakShape<B> {
             latest_line_start: None,
             layout: Arc::new(layout),
             replaced_source: None,
+            replaced_advance: 0.0,
+            replaced_fit_advance: 0.0,
         })
     }
 
@@ -285,12 +289,16 @@ impl<B: Brush> Layout<B> {
     }
 
     pub(crate) fn discretionary_fit_advance(&self, byte_index: usize, rendered: f32) -> f32 {
+        let replacement = self.discretionary_break_shape(byte_index);
+        let rendered_removed = replacement.map_or(0.0, |shape| shape.replaced_advance);
+        let fit_removed = replacement.map_or(0.0, |shape| shape.replaced_fit_advance);
         self.data
             .discretionary_fit_advances
             .binary_search_by_key(&byte_index, |entry| entry.byte_index)
-            .map_or(rendered, |index| {
+            .map_or(rendered + rendered_removed, |index| {
                 self.data.discretionary_fit_advances[index].advance
             })
+            - fit_removed
     }
 
     /// Set position-dependent fitting advances for line-start shaping.
@@ -429,7 +437,20 @@ impl<B: Brush> Layout<B> {
     pub fn set_discretionary_break_shapes(&mut self, mut shapes: Vec<DiscretionaryBreakShape<B>>) {
         shapes.sort_by_key(|shape| shape.byte_index);
         shapes.dedup_by_key(|shape| shape.byte_index);
-        shapes.retain(|shape| shape.byte_index <= self.data.text_len);
+        shapes.retain_mut(|shape| {
+            if shape.byte_index > self.data.text_len {
+                return false;
+            }
+            let Some(source) = shape.replaced_source.as_ref() else {
+                return true;
+            };
+            let Some((advance, fit)) = self.replacement_source_advances(source) else {
+                return false;
+            };
+            shape.replaced_advance = advance;
+            shape.replaced_fit_advance = fit;
+            true
+        });
         self.set_discretionary_breaks(
             shapes
                 .iter()
@@ -441,7 +462,43 @@ impl<B: Brush> Layout<B> {
                 })
                 .collect(),
         );
+        for (entry, shape) in self.data.discretionary_breaks.iter_mut().zip(&shapes) {
+            entry.advance -= shape.replaced_advance;
+        }
         self.data.discretionary_break_shapes = shapes;
+    }
+
+    fn replacement_source_advances(&self, source: &core::ops::Range<usize>) -> Option<(f32, f32)> {
+        if source.end > self.data.text_len || source.start >= source.end {
+            return None;
+        }
+        let mut advance = 0.0;
+        let mut fit = 0.0;
+        let mut start = usize::MAX;
+        let mut end = 0;
+        for run in self.runs() {
+            for cluster in run.clusters() {
+                let range = cluster.text_range();
+                if (range.start == source.start || range.start == source.end)
+                    && (cluster.data.flags & super::data::ClusterData::GRAPHEME_START == 0
+                        || cluster.is_ligature_continuation())
+                {
+                    return None;
+                }
+                if range.end <= source.start || range.start >= source.end {
+                    continue;
+                }
+                if range.start < source.start || range.end > source.end {
+                    return None;
+                }
+                start = start.min(range.start);
+                end = end.max(range.end);
+                advance += cluster.advance();
+                fit += cluster.fit_advance();
+            }
+        }
+        (start == source.start && end == source.end && advance.is_finite() && fit.is_finite())
+            .then_some((advance, fit))
     }
 
     /// Shaped replacement retained at a discretionary boundary.
@@ -458,15 +515,26 @@ impl<B: Brush> Layout<B> {
 
     pub(crate) fn discretionary_line_start_allowed(&self, boundary: usize, start: usize) -> bool {
         self.discretionary_break_shape(boundary)
-            .and_then(|shape| shape.latest_line_start)
-            .is_none_or(|latest| start <= latest)
+            .is_none_or(|shape| {
+                shape.latest_line_start.is_none_or(|latest| start <= latest)
+                    && shape
+                        .replaced_source
+                        .as_ref()
+                        .is_none_or(|source| start <= source.start)
+            })
     }
 
     /// Set shaped material shown on the following line when its boundary is selected.
     pub fn set_following_break_shapes(&mut self, mut shapes: Vec<FollowingBreakShape<B>>) {
         shapes.sort_by_key(|shape| shape.byte_index);
         shapes.dedup_by_key(|shape| shape.byte_index);
-        shapes.retain(|shape| shape.byte_index < self.data.text_len);
+        shapes.retain(|shape| {
+            shape.byte_index < self.data.text_len
+                && shape
+                    .replaced_source
+                    .as_ref()
+                    .is_none_or(|source| self.replacement_source_advances(source).is_some())
+        });
         self.data.following_break_shapes = shapes;
     }
 

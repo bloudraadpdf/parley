@@ -227,8 +227,12 @@ impl<'a, B: Brush> Cluster<'a, B> {
             .data
             .lines
             .get(self.path.line_index as usize)
-            .and_then(|line| line.conditional_line_start_omission.as_ref())
-            .is_some_and(|range| range.contains(&self.text_range().start))
+            .is_some_and(|line| {
+                line.conditional_line_start_omission
+                    .iter()
+                    .chain(&line.conditional_line_end_omission)
+                    .any(|range| range.contains(&self.text_range().start))
+            })
         {
             return GlyphIter::Single(None);
         }

@@ -111,6 +111,148 @@ fn spelling_replacement_ranges_are_anchored_to_their_break_side() {
 }
 
 #[test]
+fn selected_spelling_replacement_removes_source_width_and_glyphs() {
+    use crate::layout::DiscretionaryBreakShape;
+    let text = "cafee\u{ad}tje";
+    let boundary = "cafee\u{ad}".len();
+    let mut replacement = roboto_layout("café-");
+    replacement.break_all_lines(None);
+    let width = replacement.full_width();
+    assert!(width < unwrapped_advance("cafee"));
+    for strategy in spelling_replacement_strategies() {
+        for projected in [false, true] {
+            let mut layout = roboto_layout(text);
+            layout.set_line_break_strategy(strategy);
+            if projected {
+                set_uniform_fit_advances(&mut layout, text, 10.0);
+            }
+            layout.set_discretionary_break_shapes(vec![
+                DiscretionaryBreakShape::new(boundary, None, "café-".into(), replacement.clone())
+                    .unwrap()
+                    .with_replaced_source(0..boundary)
+                    .unwrap(),
+            ]);
+            layout.break_all_lines(Some(width + 0.01));
+            let first = layout.get(0).unwrap();
+            assert_eq!(first.text_range(), 0..boundary);
+            assert!(first.ends_at_discretionary_break());
+            assert!((first.metrics().advance - width).abs() < 0.001);
+            assert_eq!(
+                first
+                    .runs()
+                    .map(|run| run
+                        .clusters()
+                        .map(|cluster| cluster.glyphs().count())
+                        .sum::<usize>())
+                    .sum::<usize>(),
+                0
+            );
+            let second = layout.get(1).unwrap();
+            assert_eq!(second.text_range(), boundary..text.len());
+            assert!((second.metrics().advance - unwrapped_advance("tje")).abs() < 0.001);
+            layout.break_all_lines(None);
+            assert_eq!(layout.lines().count(), 1);
+            let first = layout.get(0).unwrap();
+            assert!(!first.ends_at_discretionary_break());
+            assert!((first.metrics().advance - unwrapped_advance(text)).abs() < 0.001);
+            assert!(
+                first
+                    .runs()
+                    .map(|run| run
+                        .clusters()
+                        .map(|cluster| cluster.glyphs().count())
+                        .sum::<usize>())
+                    .sum::<usize>()
+                    > 0
+            );
+        }
+    }
+}
+
+fn spelling_replacement_strategies() -> [crate::LineBreakStrategy; 2] {
+    [
+        crate::LineBreakStrategy::FirstFit,
+        crate::LineBreakStrategy::TotalFit(crate::TotalFit {
+            stretch_em: 0.125,
+            tolerance: 800.0,
+            line_penalty: 10.0,
+            hyphen_penalty: 50.0,
+            double_hyphen_demerits: 2500.0,
+            final_hyphen_demerits: 0.0,
+        }),
+    ]
+}
+
+#[test]
+fn selected_spelling_replacement_can_replace_both_sides() {
+    use crate::layout::{DiscretionaryBreakShape, FollowingBreakShape};
+    let text = "ab\u{ad}cd";
+    let boundary = "ab\u{ad}".len();
+    let mut before = roboto_layout("x-");
+    before.break_all_lines(None);
+    let mut after = roboto_layout("Y");
+    after.break_all_lines(None);
+    let before_width = before.full_width();
+    let after_width = after.full_width() + unwrapped_advance("d");
+    for strategy in spelling_replacement_strategies() {
+        let mut layout = roboto_layout(text);
+        layout.set_line_break_strategy(strategy);
+        layout.set_discretionary_break_shapes(vec![
+            DiscretionaryBreakShape::new(boundary, None, "x-".into(), before.clone())
+                .unwrap()
+                .with_replaced_source(0..boundary)
+                .unwrap(),
+        ]);
+        layout.set_following_break_shapes(vec![
+            FollowingBreakShape::new(boundary, "Y".into(), after.clone())
+                .unwrap()
+                .with_replaced_source(boundary..boundary + 1)
+                .unwrap(),
+        ]);
+        layout.break_all_lines(Some(before_width.max(after_width) + 0.01));
+        assert_eq!(layout.lines().count(), 2);
+        assert!((layout.get(0).unwrap().metrics().advance - before_width).abs() < 0.001);
+        let second = layout.get(1).unwrap();
+        assert!((second.metrics().advance - after_width).abs() < 0.001);
+        let omitted = second
+            .runs()
+            .find_map(|run| {
+                run.clusters()
+                    .find(|cluster| cluster.text_range().start == boundary)
+                    .map(|cluster| (cluster.advance(), cluster.glyphs().count()))
+            })
+            .unwrap();
+        assert_eq!(omitted, (0.0, 0));
+        layout.break_all_lines(None);
+        assert_eq!(layout.lines().count(), 1);
+        assert!((layout.get(0).unwrap().metrics().advance - unwrapped_advance(text)).abs() < 0.001);
+    }
+}
+
+#[test]
+fn spelling_replacements_cannot_cut_a_shaped_cluster() {
+    use crate::layout::{DiscretionaryBreakShape, FollowingBreakShape};
+    let mut hyphen = roboto_layout("-");
+    hyphen.break_all_lines(None);
+    let mut layout = roboto_layout("e\u{301}\u{ad}x");
+    layout.set_discretionary_break_shapes(vec![
+        DiscretionaryBreakShape::new(5, None, "-".into(), hyphen.clone())
+            .unwrap()
+            .with_replaced_source(1..5)
+            .unwrap(),
+    ]);
+    assert!(layout.discretionary_break_shape(5).is_none());
+    let mut layout = roboto_layout("ab\u{ad}e\u{301}z");
+    layout.set_following_break_shapes(vec![
+        FollowingBreakShape::new(4, "-".into(), hyphen)
+            .unwrap()
+            .with_replaced_source(4..5)
+            .unwrap(),
+    ]);
+    assert!(layout.following_break_shape(4).is_none());
+}
+
+#[test]
 fn soft_hyphens_split_enabled_discretionary_ligatures() {
     let build = |text: &str| {
         let mut fonts = create_font_context();

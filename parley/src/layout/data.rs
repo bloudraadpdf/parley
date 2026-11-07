@@ -1088,6 +1088,7 @@ pub(crate) struct LineData {
     pub(crate) removed_leading_source_ranges: Vec<Range<usize>>,
     /// Source omitted only when its registered boundary starts this line.
     pub(crate) conditional_line_start_omission: Option<Range<usize>>,
+    pub(crate) conditional_line_end_omission: Option<Range<usize>>,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
     /// Inline position of the local line origin on the block tab grid.
@@ -1136,6 +1137,7 @@ impl LineData {
             .removed_terminal_source_ranges
             .iter()
             .chain(&self.removed_leading_source_ranges)
+            .chain(&self.conditional_line_end_omission)
             .any(|range| range.contains(&byte_index))
         {
             0.0

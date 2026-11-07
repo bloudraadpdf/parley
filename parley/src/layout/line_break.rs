@@ -1010,14 +1010,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 .expect("committed line")
                 .text_range
                 .end;
-            if let Some(range) = self.layout.conditional_line_start_omission(boundary) {
+            let following = self
+                .layout
+                .following_break_shape(boundary)
+                .filter(|shape| shape.replaced_source().is_none() || ended_at_discretionary);
+            if let Some(range) = following
+                .and_then(|shape| shape.replaced_source())
+                .or_else(|| self.layout.conditional_line_start_omission(boundary))
+            {
                 self.state.line.conditional_line_start_omission = Some(range.clone());
                 self.state
                     .line
                     .removed_leading_source_ranges
                     .push(range.clone());
             }
-            if let Some(shape) = self.layout.following_break_shape(boundary) {
+            if let Some(shape) = following {
                 let advance = shape.layout().full_width();
                 self.state.line.x += advance;
                 self.state.line.fit_x += advance;
@@ -2732,6 +2739,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             &line.selected_source_cluster_advance,
         );
         let mut removed = line.removed_leading_source_ranges.clone();
+        removed.extend(line.conditional_line_end_omission.iter().cloned());
         removed.extend(terminal.removed_source_ranges);
         let mut visual_items = line_items[line.item_range.clone()].to_vec();
         reorder_line_items(&mut visual_items, &self.layout.data.inline_boxes);
@@ -3778,6 +3786,7 @@ fn line_visual_letter_spacing_units<B: Brush>(
     line: &LineData,
 ) -> Vec<VisualLetterSpacingUnit> {
     let mut removed = line.removed_leading_source_ranges.clone();
+    removed.extend(line.conditional_line_end_omission.iter().cloned());
     removed.extend(line.removed_terminal_source_ranges.iter().cloned());
     letter_spacing_units_from_visual_items(
         data,
@@ -3792,6 +3801,7 @@ fn resolve_inline_boundary_tracking<B: Brush>(
     line: &LineData,
 ) {
     let mut removed = line.removed_leading_source_ranges.clone();
+    removed.extend(line.conditional_line_end_omission.iter().cloned());
     removed.extend(line.removed_terminal_source_ranges.iter().cloned());
     let mut preceding: Option<LetterSpacingUnit> = None;
     let mut boundaries = Vec::<usize>::new();
@@ -4007,6 +4017,15 @@ fn try_commit_line<B: Brush>(
     //     return false;
     // }
 
+    let conditional_line_end_omission = state
+        .discretionary_break
+        .then(|| {
+            layout
+                .discretionary_break_shape(committed_text_range.as_ref()?.end)?
+                .replaced_source()
+                .cloned()
+        })
+        .flatten();
     lines.lines.push(LineData {
         item_range: start_item_idx..end_item_idx,
         max_advance,
@@ -4022,6 +4041,7 @@ fn try_commit_line<B: Brush>(
         selected_source_cluster_advance: state.selected_source_cluster_advance.clone(),
         removed_leading_source_ranges: state.removed_leading_source_ranges.clone(),
         conditional_line_start_omission: state.conditional_line_start_omission.clone(),
+        conditional_line_end_omission,
         ends_at_discretionary_break: state.discretionary_break,
         metrics: LineMetrics {
             advance: state.x + state.cloned_owners.end_advance(line_index),
