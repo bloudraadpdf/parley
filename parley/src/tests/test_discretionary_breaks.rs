@@ -169,6 +169,50 @@ fn selected_spelling_replacement_removes_source_width_and_glyphs() {
     }
 }
 
+#[test]
+fn shrinking_replacement_can_fit_after_its_source_overflows_an_earlier_break() {
+    use crate::layout::DiscretionaryBreakShape;
+    let text = "pa\u{ad}ral·\u{ad}lel";
+    let early = "pa\u{ad}".len();
+    let boundary = "pa\u{ad}ral·\u{ad}".len();
+    let consumed = "pa\u{ad}ral".len()..boundary;
+    for strategy in spelling_replacement_strategies() {
+        for projected in [false, true] {
+            for fits in [false, true] {
+                let mut hyphen = roboto_layout("-");
+                hyphen.break_all_lines(None);
+                let mut empty = roboto_layout("");
+                empty.break_all_lines(None);
+                let mut layout = roboto_layout(text);
+                layout.set_line_break_strategy(strategy);
+                if projected {
+                    set_uniform_fit_advances(&mut layout, text, 10.0);
+                }
+                layout.set_discretionary_break_shapes(vec![
+                    DiscretionaryBreakShape::new(early, None, "-".into(), hyphen).unwrap(),
+                    DiscretionaryBreakShape::new(boundary, None, "".into(), empty)
+                        .unwrap()
+                        .with_replaced_source(consumed.clone())
+                        .unwrap(),
+                ]);
+                let width = if projected {
+                    if fits { 50.0 } else { 30.0 }
+                } else if fits {
+                    unwrapped_advance("paral")
+                } else {
+                    unwrapped_advance("pa-")
+                };
+                layout.break_all_lines(Some(width + 0.01));
+                assert_eq!(
+                    layout.get(0).unwrap().text_range().end,
+                    if fits { boundary } else { early },
+                    "{strategy:?}, projected={projected}, fits={fits}"
+                );
+            }
+        }
+    }
+}
+
 fn spelling_replacement_strategies() -> [crate::LineBreakStrategy; 2] {
     [
         crate::LineBreakStrategy::FirstFit,

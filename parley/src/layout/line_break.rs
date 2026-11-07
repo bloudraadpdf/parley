@@ -2255,7 +2255,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 }
                             }
                             LineFit::ContentOverflow => {
-                                if !self.has_negative_end_edges && commit_overflow_candidate!() {
+                                if !self.has_negative_end_edges
+                                    && !self.pending_spelling_replacement_fits(
+                                        cluster.text_range(),
+                                        next_fit_x,
+                                        max_advance,
+                                    )
+                                    && commit_overflow_candidate!()
+                                {
                                     return self.start_new_line();
                                 } else {
                                     if self.has_negative_end_edges {
@@ -2314,6 +2321,78 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
 
         None
+    }
+
+    fn pending_spelling_replacement_fits(
+        &self,
+        cluster: Range<usize>,
+        next_fit_x: f32,
+        max_advance: f32,
+    ) -> bool {
+        let shapes = &self.layout.data.discretionary_break_shapes;
+        let index = shapes.partition_point(|shape| shape.byte_index < cluster.end);
+        let Some(shape) = shapes.get(index) else {
+            return false;
+        };
+        let Some(source) = shape.replaced_source() else {
+            return false;
+        };
+        if !source.contains(&cluster.start) {
+            return false;
+        }
+        let Ok(index) = self
+            .layout
+            .data
+            .discretionary_breaks
+            .binary_search_by_key(&shape.byte_index, |entry| entry.byte_index)
+        else {
+            return false;
+        };
+        let entry = self.layout.data.discretionary_breaks[index];
+        let delta = self
+            .layout
+            .discretionary_fit_advance(entry.byte_index, entry.advance);
+        let start = self
+            .lines
+            .lines
+            .last()
+            .map_or(0, |line| line.text_range.end);
+        if delta >= 0.0
+            || !self
+                .layout
+                .discretionary_line_start_allowed(entry.byte_index, start)
+            || entry
+                .max_consecutive_lines
+                .is_some_and(|limit| self.state.consecutive_discretionary_lines >= limit)
+        {
+            return false;
+        }
+        let first_run = self
+            .layout
+            .data
+            .runs
+            .partition_point(|run| run.text_range.end <= cluster.end);
+        let mut cursor = cluster.end;
+        let mut remaining = 0.0;
+        for run in self
+            .layout
+            .runs()
+            .skip(first_run)
+            .take_while(|run| run.text_range().start < source.end)
+        {
+            for following in run.clusters().filter(|following| {
+                following.text_range().end > cluster.end
+                    && following.text_range().start < source.end
+            }) {
+                let range = following.text_range();
+                if range.start != cursor || range.end > source.end {
+                    return false;
+                }
+                cursor = range.end;
+                remaining += following.fit_advance();
+            }
+        }
+        cursor == source.end && self.advance_fits(next_fit_x + remaining + delta, max_advance)
     }
 
     fn discretionary_break_allowed(&self, entry: DiscretionaryBreak, max_advance: f32) -> bool {
