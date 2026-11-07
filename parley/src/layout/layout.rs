@@ -27,7 +27,9 @@ pub struct DiscretionaryBreakShape<B: Brush> {
     pub(crate) max_consecutive_lines: Option<u32>,
     text: String,
     condition: DiscretionaryBreakCondition,
+    latest_line_start: Option<usize>,
     layout: Arc<Layout<B>>,
+    replaced_source: Option<core::ops::Range<usize>>,
 }
 
 /// A shaped string inserted at the start of a line only when wrapping
@@ -37,6 +39,7 @@ pub struct FollowingBreakShape<B: Brush> {
     pub(crate) byte_index: usize,
     text: String,
     layout: Arc<Layout<B>>,
+    replaced_source: Option<core::ops::Range<usize>>,
 }
 
 impl<B: Brush> FollowingBreakShape<B> {
@@ -56,7 +59,21 @@ impl<B: Brush> FollowingBreakShape<B> {
             byte_index,
             text,
             layout: Arc::new(layout),
+            replaced_source: None,
         })
+    }
+
+    /// Retain the nonempty source range replaced after this boundary.
+    pub fn with_replaced_source(mut self, source: core::ops::Range<usize>) -> Option<Self> {
+        if source.start != self.byte_index || source.end <= source.start {
+            return None;
+        }
+        self.replaced_source = Some(source);
+        Some(self)
+    }
+
+    pub fn replaced_source(&self) -> Option<&core::ops::Range<usize>> {
+        self.replaced_source.as_ref()
     }
 
     /// Text used to shape this line-start material.
@@ -93,13 +110,34 @@ impl<B: Brush> DiscretionaryBreakShape<B> {
             max_consecutive_lines,
             text,
             condition: DiscretionaryBreakCondition::Normal,
+            latest_line_start: None,
             layout: Arc::new(layout),
+            replaced_source: None,
         })
+    }
+
+    /// Retain the nonempty source range replaced before this boundary.
+    pub fn with_replaced_source(mut self, source: core::ops::Range<usize>) -> Option<Self> {
+        if source.end != self.byte_index || source.start >= source.end {
+            return None;
+        }
+        self.replaced_source = Some(source);
+        Some(self)
+    }
+
+    pub fn replaced_source(&self) -> Option<&core::ops::Range<usize>> {
+        self.replaced_source.as_ref()
     }
 
     /// Set when this shaped replacement may participate in wrapping.
     pub fn with_condition(mut self, condition: DiscretionaryBreakCondition) -> Self {
         self.condition = condition;
+        self
+    }
+
+    /// Limit this break to lines starting at or before the supplied source byte.
+    pub fn with_latest_line_start(mut self, latest: Option<usize>) -> Self {
+        self.latest_line_start = latest.map(|latest| latest.min(self.byte_index));
         self
     }
 
@@ -416,6 +454,12 @@ impl<B: Brush> Layout<B> {
             .binary_search_by_key(&byte_index, |shape| shape.byte_index)
             .ok()
             .map(|index| &self.data.discretionary_break_shapes[index])
+    }
+
+    pub(crate) fn discretionary_line_start_allowed(&self, boundary: usize, start: usize) -> bool {
+        self.discretionary_break_shape(boundary)
+            .and_then(|shape| shape.latest_line_start)
+            .is_none_or(|latest| start <= latest)
     }
 
     /// Set shaped material shown on the following line when its boundary is selected.

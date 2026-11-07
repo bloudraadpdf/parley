@@ -708,7 +708,9 @@ impl BreakerState {
         } else {
             match condition {
                 DiscretionaryBreakCondition::Normal | DiscretionaryBreakCondition::WordOverflow => {
-                    if self.prev_boundary.is_none() || self.opportunity_depth <= self.prev_boundary_depth {
+                    if self.prev_boundary.is_none()
+                        || self.opportunity_depth <= self.prev_boundary_depth
+                    {
                         self.prev_boundary = candidate;
                         self.prev_boundary_depth = self.opportunity_depth;
                     }
@@ -1206,7 +1208,21 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 let segment = probe.state.probe?;
                 let mut items = probe.items;
                 items.sort_by_key(|item| item.layout_item_index);
-                segment.plan(params, first_width, width, |from, to| {
+                let layout = &*self.layout;
+                let allowed = |from: Option<total_fit::BreakCursor>,
+                               to: Option<total_fit::BreakCursor>| {
+                    let offset = |cursor: total_fit::BreakCursor| {
+                        SourceCursor::at(&layout.data, cursor.0, cursor.1)
+                            .source_offset(&layout.data)
+                    };
+                    to.is_none_or(|to| {
+                        layout.discretionary_line_start_allowed(
+                            offset(to),
+                            from.map_or(start, offset),
+                        )
+                    })
+                };
+                segment.plan(params, first_width, width, allowed, |from, to| {
                     let offset = |cursor: total_fit::BreakCursor| {
                         SourceCursor::at(&self.layout.data, cursor.0, cursor.1)
                             .source_offset(&self.layout.data)
@@ -2294,9 +2310,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     }
 
     fn discretionary_break_allowed(&self, entry: DiscretionaryBreak, max_advance: f32) -> bool {
-        entry
-            .max_consecutive_lines
-            .is_none_or(|limit| self.state.consecutive_discretionary_lines < limit)
+        let start = self
+            .lines
+            .lines
+            .last()
+            .map_or(0, |line| line.text_range.end);
+        self.layout
+            .discretionary_line_start_allowed(entry.byte_index, start)
+            && entry
+                .max_consecutive_lines
+                .is_none_or(|limit| self.state.consecutive_discretionary_lines < limit)
             && (self.advance_fits(
                 self.state.line.fit_x
                     + self

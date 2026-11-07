@@ -90,6 +90,7 @@ struct Node {
 }
 
 enum LineFit {
+    Forbidden,
     Overfull,
     Badness(f32),
 }
@@ -129,25 +130,30 @@ impl Segment {
         params: TotalFit,
         first_width: f32,
         width: f32,
+        allowed: impl Fn(Option<BreakCursor>, Option<BreakCursor>) -> bool,
         mut shape_adjustment: impl FnMut(Option<BreakCursor>, Option<BreakCursor>) -> f32,
     ) -> Option<Vec<BreakCursor>> {
         let end = self.end?;
         let last = self.opportunities.len() + 1;
+        let cursor = |point: usize| {
+            point
+                .checked_sub(1)
+                .and_then(|index| self.opportunities.get(index))
+                .map(|opportunity| opportunity.cursor)
+        };
+        let permitted = |from: usize, to: usize| allowed(cursor(from), cursor(to));
         let mut fit = |from: usize, to: usize| -> LineFit {
+            if !permitted(from, to) {
+                return LineFit::Forbidden;
+            }
             let start = self.start_of(from);
             let stop = self.end_of(to, end);
             let available = if from == 0 { first_width } else { width };
-            let cursor = |point: usize| {
-                point
-                    .checked_sub(1)
-                    .and_then(|index| self.opportunities.get(index))
-                    .map(|opportunity| opportunity.cursor)
-            };
             let slack = available
                 - (stop.advance - start.advance + shape_adjustment(cursor(from), cursor(to)));
             let shrink = stop.shrink - start.shrink;
             if slack < -shrink - SLACK_EPSILON {
-                return if to == from + 1 {
+                return if !(from + 1..to).any(|point| permitted(from, point)) {
                     LineFit::Badness(0.0)
                 } else {
                     LineFit::Overfull
@@ -228,12 +234,19 @@ impl Segment {
                 let node_index = active[index];
                 let node = nodes[node_index];
                 let badness = match fit(node.point, point) {
+                    LineFit::Forbidden => {
+                        index += 1;
+                        continue;
+                    }
                     LineFit::Overfull => {
                         active.remove(index);
-                        let underfull = (point - 1).max(node.point + 1);
+                        let underfull = (node.point + 1..point)
+                            .rev()
+                            .find(|&candidate| permitted(node.point, candidate))
+                            .expect("an overflowing break has a permitted preceding opportunity");
                         let badness = match fit(node.point, underfull) {
                             LineFit::Badness(value) => value,
-                            LineFit::Overfull => f32::INFINITY,
+                            LineFit::Overfull | LineFit::Forbidden => f32::INFINITY,
                         };
                         let candidate = Node {
                             point: underfull,
@@ -361,9 +374,24 @@ mod tests {
         plan_with(segment(words), PRINCE, width)
     }
 
+    #[test]
+    fn forbidden_continuation_break_is_not_a_forced_overflow_fallback() {
+        let segment = segment_with_metrics(&[2.0, 4.0, 1.0, 4.0], 0.0, 0.0);
+        let plan = segment
+            .plan(
+                PRINCE,
+                4.5,
+                4.5,
+                |from, to| !(from == Some((0, 2)) && to == Some((0, 3))),
+                |_, _| 0.0,
+            )
+            .unwrap();
+        assert_eq!(plan, [(0, 1), (0, 2)]);
+    }
+
     fn plan_with(segment: Segment, params: TotalFit, width: f32) -> Vec<usize> {
         segment
-            .plan(params, width, width, |_, _| 0.0)
+            .plan(params, width, width, |_, _| true, |_, _| 0.0)
             .expect("a segment with an end has a plan")
             .into_iter()
             .map(|(_, cluster)| cluster)

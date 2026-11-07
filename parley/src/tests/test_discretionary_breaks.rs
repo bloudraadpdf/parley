@@ -44,6 +44,73 @@ fn unwrapped_advance(text: &str) -> f32 {
 }
 
 #[test]
+fn discretionary_minimum_fragment_retains_an_overflowing_continuation() {
+    let text = "ab\u{00ad}cdef\u{00ad}g\u{00ad}hijk";
+    for restricted in [false, true] {
+        let mut layout = roboto_layout(text);
+        set_uniform_fit_advances(&mut layout, text, 1.0);
+        let mut empty = roboto_layout("");
+        empty.break_all_lines(None);
+        let shapes = text
+            .match_indices('\u{00ad}')
+            .enumerate()
+            .map(|(index, (offset, _))| {
+                crate::layout::DiscretionaryBreakShape::new(
+                    offset + 2,
+                    None,
+                    "".into(),
+                    empty.clone(),
+                )
+                .unwrap()
+                .with_latest_line_start((restricted && index == 2).then(|| text.find('f').unwrap()))
+            })
+            .collect();
+        layout.set_discretionary_break_shapes(shapes);
+        layout.break_all_lines(Some(4.5));
+        let lines = layout
+            .lines()
+            .map(|line| text[line.text_range()].replace('\u{00ad}', ""))
+            .collect::<Vec<_>>();
+        let expected = if restricted {
+            vec!["ab", "cdef", "ghijk"]
+        } else {
+            vec!["ab", "cdef", "g", "hijk"]
+        };
+        assert_eq!(lines, expected);
+    }
+}
+
+#[test]
+fn spelling_replacement_ranges_are_anchored_to_their_break_side() {
+    use crate::layout::{DiscretionaryBreakShape, FollowingBreakShape};
+
+    let mut before = roboto_layout("é-");
+    before.break_all_lines(None);
+    let mut after = roboto_layout("tje");
+    after.break_all_lines(None);
+    let before = DiscretionaryBreakShape::new(7, None, "é-".into(), before).unwrap();
+    let after = FollowingBreakShape::new(7, "tje".into(), after).unwrap();
+    assert!(before.replaced_source().is_none());
+    assert!(after.replaced_source().is_none());
+    let replacement = before.clone().with_replaced_source(3..7).unwrap();
+    assert_eq!(replacement.replaced_source(), Some(&(3..7)));
+    assert_eq!(replacement.text(), "é-");
+    assert_eq!(
+        replacement.layout().full_width(),
+        before.layout().full_width()
+    );
+    let replacement = after.clone().with_replaced_source(7..10).unwrap();
+    assert_eq!(replacement.replaced_source(), Some(&(7..10)));
+    assert_eq!(replacement.text(), "tje");
+    for (start, end) in [(3, 6), (8, 9), (7, 7), (8, 7)] {
+        assert!(before.clone().with_replaced_source(start..end).is_none());
+    }
+    for (start, end) in [(6, 10), (8, 10), (7, 7), (7, 6)] {
+        assert!(after.clone().with_replaced_source(start..end).is_none());
+    }
+}
+
+#[test]
 fn soft_hyphens_split_enabled_discretionary_ligatures() {
     let build = |text: &str| {
         let mut fonts = create_font_context();
