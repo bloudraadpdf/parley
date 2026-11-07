@@ -1927,7 +1927,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let source_boundary_was_projected = self
                             .state
                             .projected_source_boundary
-                            .is_some_and(|projection| projection.suppresses(byte_index));
+                            .is_some_and(|projection| projection.suppresses(byte_index))
+                            || self
+                                .state
+                                .taken_projected_source_boundary
+                                .is_some_and(|projection| projection.suppresses(byte_index));
                         if let Some(projection) = self
                             .state
                             .projected_source_boundary

@@ -5,7 +5,9 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use crate::{
     InlineBox,
-    inline_box::{ClonedInlineOwner, InlineBoxShapingParticipation},
+    inline_box::{
+        ClonedInlineOwner, InlineBoxLineBreakParticipation, InlineBoxShapingParticipation,
+    },
     style::Brush,
 };
 
@@ -120,6 +122,14 @@ pub(super) fn blocks_source_whitespace<B: Brush>(
         return false;
     }
     let inline_box = &layout.inline_boxes[item.index];
+    // Inline decorations delimit an owner, not source text: terminal spaces
+    // still collapse before an original border/padding edge (CSS Text 3 §4.1.2).
+    if matches!(
+        inline_box.line_break_participation(),
+        InlineBoxLineBreakParticipation::LogicalOwnerEdge(_)
+    ) {
+        return false;
+    }
     (item.layout_item_index.is_some() || inline_box.cloned_owner().is_none())
         && inline_box.shaping_participation() != InlineBoxShapingParticipation::TransparentBoundary
 }

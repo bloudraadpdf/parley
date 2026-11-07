@@ -497,3 +497,92 @@ fn owner_start_atomic_group_preserves_surrounding_breaks() {
     );
     assert_eq!(layout.len(), 2);
 }
+
+#[test]
+fn original_owner_edges_do_not_retain_terminal_collapsible_space() {
+    for cloned in [false, true] {
+        let build = |first_end| {
+            let text = "aaa aaa";
+            let mut fonts = create_font_context();
+            let mut context = LayoutContext::new();
+            let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+            builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+            builder.push_default(StyleProperty::FontSize(10.0));
+            builder.push_default(StyleProperty::WhiteSpaceCollapse(
+                WhiteSpaceCollapse::Collapse,
+            ));
+            for (ids, range) in [([801, 802], 0..first_end), ([803, 804], 4..7)] {
+                let widths = [
+                    InlineOwnerEdgeAdvance::uniform(14.0),
+                    InlineOwnerEdgeAdvance::uniform(22.0),
+                ];
+                let edges = if cloned {
+                    InlineBox::cloned_inline_edges(
+                        ids,
+                        range,
+                        widths,
+                        FollowingSourceSpace::UnicodeBoundary,
+                    )
+                } else {
+                    [
+                        InlineBox::inline_start_edge(
+                            ids[0],
+                            range.start,
+                            widths[0],
+                            0.0,
+                            InlineBoxBreakAffinity::ToNext,
+                        ),
+                        InlineBox::inline_end_edge(
+                            ids[1],
+                            range.end,
+                            widths[1],
+                            0.0,
+                            InlineBoxBreakAffinity::ToPrevious,
+                        ),
+                    ]
+                };
+                for edge in edges {
+                    builder.push_inline_box(edge);
+                }
+            }
+            let mut layout: Layout<ColorBrush> = builder.build(text);
+            layout.break_all_lines(Some(0.0));
+            layout
+        };
+        let inside = build(4);
+        let outside = build(3);
+        let actual = inside.calculate_content_widths();
+        let expected = outside.calculate_content_widths();
+        assert!(
+            (actual.min - expected.min).abs() < 0.0001,
+            "clone={cloned}: {actual:?} vs {expected:?}"
+        );
+        assert!(
+            (actual.max - expected.max).abs() < 0.0001,
+            "max-content clone={cloned}: {actual:?} vs {expected:?}"
+        );
+        let describe = |layout: &Layout<ColorBrush>| {
+            layout
+                .lines()
+                .map(|line| {
+                    (
+                        line.text_range(),
+                        line.items()
+                            .filter_map(|item| match item {
+                                PositionedLayoutItem::InlineBox(item) => Some(item.id),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            inside.len(),
+            outside.len(),
+            "clone={cloned}: {:?} vs {:?}",
+            describe(&inside),
+            describe(&outside)
+        );
+    }
+}

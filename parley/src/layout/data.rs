@@ -2269,6 +2269,11 @@ impl<B: Brush> LayoutData<B> {
                         let style = &self.styles[cluster.style_index as usize];
                         let prev_text_wrap_mode = text_wrap_mode;
                         text_wrap_mode = style.text_wrap_mode;
+                        let projected_collapsed_space =
+                            projected_source_boundary.is_some_and(|projection| {
+                                projection.cluster_participation(byte_index)
+                                    == ProjectedSourceClusterParticipation::CollapsedSourceSpace
+                            });
                         let source_boundary_was_projected = projected_source_boundary
                             .is_some_and(|projection| projection.suppresses(byte_index));
                         if projected_source_boundary
@@ -2334,7 +2339,12 @@ impl<B: Brush> LayoutData<B> {
                         }
                         let advance =
                             f64::from(cluster.advance) + f64::from(cluster.trimmed_letter_spacing);
-                        running_min_width += advance;
+                        let min_advance = if projected_collapsed_space {
+                            0.0
+                        } else {
+                            advance
+                        };
+                        running_min_width += min_advance;
                         running_max_width += advance;
                         min_spacing.include(self, item_index, Some(cluster));
                         max_spacing.include(self, item_index, Some(cluster));
@@ -2343,12 +2353,12 @@ impl<B: Brush> LayoutData<B> {
                         match terminal_disposition {
                             TerminalWhitespaceDisposition::Removed
                             | TerminalWhitespaceDisposition::Hanging => {
-                                trailing_min_width += advance;
+                                trailing_min_width += min_advance;
                                 trailing_max_width += advance;
                                 trailing_unconditional_max_width += advance;
                             }
                             TerminalWhitespaceDisposition::ConditionallyHanging => {
-                                trailing_min_width += advance;
+                                trailing_min_width += min_advance;
                                 trailing_max_width += advance;
                                 max_spacing.unconditional = max_spacing.edges.correction(trim);
                             }
@@ -2457,14 +2467,20 @@ impl<B: Brush> LayoutData<B> {
                                 trailing_min_width = 0.0;
                                 projected_source_boundary = projection;
                             }
+                            if source_projection
+                                == LogicalInlineEdgeSourceProjection::BeforeGeometry
+                                && !project
+                                && projected_source_boundary
+                                    .is_some_and(|boundary| boundary.target() == ibox.index)
+                            {
+                                running_min_width -= trailing_min_width;
+                                trailing_min_width = 0.0;
+                            }
                             running_min_width += f64::from(width);
                             min_spacing.include(self, item_index, None);
                             if width != 0.0 {
                                 min_spacing.measure(trim);
                                 max_spacing.measure(trim);
-                                trailing_min_width = 0.0;
-                                trailing_max_width = 0.0;
-                                trailing_unconditional_max_width = 0.0;
                             }
                             if source_projection == LogicalInlineEdgeSourceProjection::AfterGeometry
                                 && project
@@ -2473,9 +2489,10 @@ impl<B: Brush> LayoutData<B> {
                                     &cloned_owners,
                                     &mut min_width,
                                     &mut running_min_width,
-                                    0.0,
+                                    trailing_min_width,
                                     false,
                                 );
+                                trailing_min_width = 0.0;
                                 projected_source_boundary = projection;
                             }
                         }
