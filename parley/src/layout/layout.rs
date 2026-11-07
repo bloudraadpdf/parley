@@ -212,6 +212,7 @@ impl<B: Brush> Layout<B> {
     pub(crate) fn clear_justification_shape_selection(&mut self) {
         unjustify(&mut self.data);
         self.data.restore_line_end_letter_spacing();
+        self.data.restore_line_end_kerning();
         if let Some(variants) = self.data.line_shape_variants.take() {
             self.data.clusters = variants.original;
             self.data.glyphs.truncate(variants.original_glyph_len);
@@ -728,6 +729,7 @@ impl<B: Brush> Layout<B> {
         unjustify(&mut self.data);
         self.data.selected_line_justification_opportunities = None;
         self.data.restore_line_end_letter_spacing();
+        self.data.restore_line_end_kerning();
         BreakLines::new(self)
     }
 

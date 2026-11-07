@@ -846,6 +846,7 @@ impl ClusterData {
     pub(crate) const LETTER_SPACING_BOUNDARY: u16 = 4;
     pub(crate) const GRAPHEME_START: u16 = 8;
     pub(crate) const GRAPHEME_END: u16 = 16;
+    pub(crate) const LINE_END_KERNING_REMOVED: u16 = 32;
 
     #[inline(always)]
     pub(crate) fn is_ligature_start(self) -> bool {
@@ -1311,6 +1312,9 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) inline_owner_shaping: Vec<super::InlineOwnerShaping>,
     pub(crate) deferred_physical_shapes:
         Vec<alloc::sync::Arc<crate::shape::source::DeferredSourceShape>>,
+    /// The pair kerning against each collapsible space that ends a word, by source offset of the
+    /// space.
+    pub(crate) line_end_kerning: Vec<LineEndKerning>,
 
     // Output of line breaking
     pub(crate) lines: Vec<LineData>,
@@ -1385,6 +1389,7 @@ impl<B: Brush> Default for LayoutData<B> {
             deferred_justification_shapes: Vec::new(),
             inline_owner_shaping: Vec::new(),
             deferred_physical_shapes: Vec::new(),
+            line_end_kerning: Vec::new(),
             lines: Vec::new(),
             line_items: Vec::new(),
             alignment: None,
@@ -1628,6 +1633,7 @@ impl<B: Brush> LayoutData<B> {
         self.deferred_justification_shapes.clear();
         self.inline_owner_shaping.clear();
         self.deferred_physical_shapes.clear();
+        self.line_end_kerning.clear();
         self.lines.clear();
         self.line_items.clear();
         self.is_aligned_justified = false;
@@ -1690,6 +1696,7 @@ impl<B: Brush> LayoutData<B> {
         text_range: Range<usize>,       // The text range this run covers
         coords: &[harfrust::NormalizedCoord],
         transparent_inline_boxes: &[(usize, u8, usize)],
+        line_end_kerning: Option<LineEndKerningShape<'_>>,
     ) {
         let coords_start = self.coords.len();
         self.coords.extend(coords.iter().map(|c| c.to_bits()));
@@ -1883,8 +1890,95 @@ impl<B: Brush> LayoutData<B> {
         }
 
         run.cluster_range = cluster_range_start..self.clusters.len();
+        if let Some(shape) = line_end_kerning {
+            self.record_line_end_kerning(
+                &run,
+                glyph_buffer,
+                shape,
+                source_text,
+                scale_factor,
+                advance_projection.as_ref(),
+            );
+        }
         if !run.cluster_range.is_empty() {
             self.push_shaped_run(run, transparent_inline_boxes);
+        }
+    }
+
+    /// CSS Text 3 §4.1.2: a line end removes its collapsible spaces, and with them the pair kerning
+    /// of the cluster before them. Records the advance that the removal gives back to that cluster.
+    fn record_line_end_kerning(
+        &mut self,
+        run: &RunData,
+        kerned: &harfrust::GlyphBuffer,
+        shape: LineEndKerningShape<'_>,
+        source_text: &str,
+        scale_factor: f32,
+        advance_projection: Option<&FontMetricAdvanceProjection<'_>>,
+    ) {
+        let offsets = source_text
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .collect::<Vec<_>>();
+        let cluster_advances = |buffer: &harfrust::GlyphBuffer| {
+            let (infos, positions) = (buffer.glyph_infos(), buffer.glyph_positions());
+            let mut advances = alloc::vec![None; offsets.len()];
+            for (index, info) in infos.iter().enumerate() {
+                let advance =
+                    shaped_glyph_advance(index, infos, positions, scale_factor, advance_projection);
+                *advances[info.cluster as usize].get_or_insert(0.0) += advance;
+            }
+            advances
+        };
+        let kerned = cluster_advances(kerned);
+        let unkerned = cluster_advances(shape.glyphs);
+        let run_index = self.runs.len();
+        let clusters = &self.clusters[run.cluster_range.clone()];
+        for &space in shape.spaces {
+            let Some(owner) = (0..space as usize).rev().find(|&index| kerned[index].is_some())
+            else {
+                continue;
+            };
+            let delta = unkerned[owner].unwrap_or(0.0) - kerned[owner].unwrap_or(0.0);
+            if nearly_zero(delta) {
+                continue;
+            }
+            let position = clusters.partition_point(|cluster| cluster.text_offset < offsets[owner]);
+            if clusters
+                .get(position)
+                .is_none_or(|cluster| cluster.text_offset != offsets[owner])
+            {
+                continue;
+            }
+            let space = run.text_range.start + offsets[space as usize];
+            let at = self
+                .line_end_kerning
+                .partition_point(|kerning| kerning.space < space);
+            self.line_end_kerning.insert(
+                at,
+                LineEndKerning {
+                    space,
+                    run: run_index,
+                    cluster: run.cluster_range.start + position,
+                    delta,
+                },
+            );
+        }
+    }
+
+    /// Gives back the pair kerning that a previous line break removed from line-ending clusters.
+    pub(crate) fn restore_line_end_kerning(&mut self) {
+        for kerning in &self.line_end_kerning {
+            if self.clusters[kerning.cluster].flags & ClusterData::LINE_END_KERNING_REMOVED == 0 {
+                continue;
+            }
+            let glyph_index = self.runs[kerning.run].spacing_glyph(&self.clusters, kerning.cluster);
+            let cluster = &mut self.clusters[kerning.cluster];
+            cluster.flags &= !ClusterData::LINE_END_KERNING_REMOVED;
+            cluster.advance -= kerning.delta;
+            if let Some(index) = glyph_index {
+                self.glyphs[index].advance -= kerning.delta;
+            }
         }
     }
 
@@ -2356,6 +2450,42 @@ impl<B: Brush> LayoutData<B> {
     }
 }
 
+/// The pair kerning of a word end against the collapsible space after it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LineEndKerning {
+    pub(crate) space: usize,
+    pub(crate) run: usize,
+    pub(crate) cluster: usize,
+    pub(crate) delta: f32,
+}
+
+/// The shape of a segment without the pair kerning before each of `spaces`, the source clusters
+/// of collapsible spaces.
+#[derive(Clone, Copy)]
+pub(crate) struct LineEndKerningShape<'a> {
+    pub(crate) spaces: &'a [u32],
+    pub(crate) glyphs: &'a harfrust::GlyphBuffer,
+}
+
+fn shaped_glyph_advance(
+    glyph_index: usize,
+    glyph_infos: &[harfrust::GlyphInfo],
+    glyph_positions: &[harfrust::GlyphPosition],
+    scale_factor: f32,
+    advance_projection: Option<&FontMetricAdvanceProjection<'_>>,
+) -> f32 {
+    let shaped_advance = (glyph_positions[glyph_index].x_advance as f32) * scale_factor;
+    let glyph_id = skrifa::GlyphId::new(glyph_infos[glyph_index].glyph_id);
+    advance_projection
+        .filter(|_| !nearly_zero(shaped_advance))
+        .map_or(shaped_advance, |projection| {
+            projection.project(glyph_id, shaped_advance)
+        })
+        + advance_projection.map_or(0.0, |projection| {
+            projection.kerning_correction(glyph_index, glyph_infos, glyph_positions)
+        })
+}
+
 /// Processes shaped glyphs from `HarfRust` and converts them into `ClusterData` and `Glyph`.
 ///
 /// # Parameters
@@ -2559,14 +2689,13 @@ fn process_clusters<I: Iterator<Item = (usize, char)> + Clone>(
 
         let shaped_advance = (glyph_pos.x_advance as f32) * scale_factor;
         let glyph_id = skrifa::GlyphId::new(glyph_info.glyph_id);
-        let advance = advance_projection
-            .filter(|_| !nearly_zero(shaped_advance))
-            .map_or(shaped_advance, |projection| {
-                projection.project(glyph_id, shaped_advance)
-            })
-            + advance_projection.map_or(0.0, |projection| {
-                projection.kerning_correction(glyph_index, glyph_infos, glyph_positions)
-            });
+        let advance = shaped_glyph_advance(
+            glyph_index,
+            glyph_infos,
+            glyph_positions,
+            scale_factor,
+            advance_projection,
+        );
         let line_break_advance = if nominal_font_metric_line_breaks && !nearly_zero(shaped_advance)
         {
             advance_projection.map_or(advance, |projection| projection.nominal(glyph_id))

@@ -193,6 +193,7 @@ impl DeferredSourceShape {
             range.clone(),
             &shaped.coords,
             &[],
+            None,
         );
         let source_clusters = &data.clusters[run.cluster_range.clone()];
         let offset = range.start - run.text_range.start;

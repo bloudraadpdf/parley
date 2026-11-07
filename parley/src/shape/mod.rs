@@ -547,6 +547,12 @@ fn shape_item<'a, B: Brush>(
             .find(|&&barrier| barrier >= segment_end)
             .copied()
             .unwrap_or(text.len());
+        // Extract relevant CharInfo slice for this segment
+        let char_start = char_range.start + item_text[..segment_start_offset].chars().count();
+        let segment_char_start = char_start - char_range.start;
+        let segment_char_count = segment_text.chars().count();
+        let segment_infos =
+            &item_infos[segment_char_start..(segment_char_start + segment_char_count)];
         let features = mem::take(&mut scx.features);
         let shaped = scx.shape_segment(segment::SegmentShape {
             use_default_font_weight: layout.data.use_default_font_weight,
@@ -564,14 +570,29 @@ fn shape_item<'a, B: Brush>(
             after: &text[segment_end..context_end],
             produce_concat_boundaries,
         });
+        let line_end_spaces =
+            line_end_kerning_spaces(&shaped.glyphs, segment_text, segment_infos, styles);
+        let unkerned = (!line_end_spaces.is_empty()).then(|| {
+            scx.unicode_buffer = Some(harfrust::UnicodeBuffer::new());
+            scx.shape_segment(segment::SegmentShape {
+                use_default_font_weight: layout.data.use_default_font_weight,
+                font: FontData::new(font.font.blob.clone(), font.font.index),
+                synthesis: font.font.synthesis,
+                variations: rcx.variations(item.variations),
+                features: &features,
+                disabled_pair_kerning: &line_end_spaces,
+                size: item.size,
+                direction,
+                script: hb_script,
+                language: language.clone(),
+                text: segment_text,
+                before: &text[context_start..segment_start],
+                after: &text[segment_end..context_end],
+                produce_concat_boundaries,
+            })
+        });
         scx.features = features;
 
-        // Extract relevant CharInfo slice for this segment
-        let char_start = char_range.start + item_text[..segment_start_offset].chars().count();
-        let segment_char_start = char_start - char_range.start;
-        let segment_char_count = segment_text.chars().count();
-        let segment_infos =
-            &item_infos[segment_char_start..(segment_char_start + segment_char_count)];
         let segment_text_range =
             (text_range.start + segment_start_offset)..(text_range.start + segment_end_offset);
         let segment_inline_box_end = transparent_inline_box_start
@@ -603,6 +624,12 @@ fn shape_item<'a, B: Brush>(
             segment_text_range.clone(),
             &shaped.coords,
             segment_inline_boxes,
+            unkerned
+                .as_ref()
+                .map(|unkerned| crate::layout::data::LineEndKerningShape {
+                    spaces: &line_end_spaces,
+                    glyphs: &unkerned.glyphs,
+                }),
         );
 
         let has_ligatures = layout.data.runs.get(run_index).is_some_and(|run| {
@@ -669,6 +696,36 @@ fn shape_item<'a, B: Brush>(
     {
         layout.data.push_inline_box(box_index, surrounding_level);
     }
+}
+
+/// The source clusters of the collapsible spaces that end a word where breaking is unsafe: the
+/// pair kerning that a line end removes with the space (CSS Text 3 §4.1.2).
+fn line_end_kerning_spaces<B: Brush>(
+    glyphs: &harfrust::GlyphBuffer,
+    text: &str,
+    infos: &[(CharInfo, u16)],
+    styles: &[ResolvedStyle<B>],
+) -> Vec<u32> {
+    let mut candidates = glyphs
+        .glyph_infos()
+        .iter()
+        .filter(|glyph| glyph.unsafe_to_break() && glyph.cluster != 0)
+        .map(|glyph| glyph.cluster)
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return candidates;
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+    let characters = text.chars().collect::<Vec<_>>();
+    candidates.retain(|&cluster| {
+        let index = cluster as usize;
+        characters[index] == ' '
+            && !characters[index - 1].is_whitespace()
+            && styles[usize::from(infos[index].1)].white_space_collapse
+                != crate::WhiteSpaceCollapse::Preserve
+    });
+    candidates
 }
 
 /// Whether OpenType shapes both scripts with one script tag: `kana` covers Hiragana and Katakana.

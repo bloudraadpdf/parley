@@ -2925,6 +2925,61 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
+    /// CSS Text 3 §4.1.2: a line end removes its collapsible spaces, and with them the pair kerning
+    /// of the cluster before them.
+    fn remove_line_end_kerning(&mut self, line_idx: usize) {
+        if self.layout.data.line_end_kerning.is_empty() {
+            return;
+        }
+        let LineLayout { lines, line_items } = &mut self.lines;
+        let line = &mut lines[line_idx];
+        let terminal = collect_terminal_whitespace(
+            &line_items[line.item_range.clone()],
+            &self.layout.data,
+            &line.selected_source_cluster_advance,
+        );
+        let Some(space) = terminal
+            .removed_source_ranges
+            .iter()
+            .map(|range| range.start)
+            .min()
+        else {
+            return;
+        };
+        let data = &mut self.layout.data;
+        let Ok(entry) = data
+            .line_end_kerning
+            .binary_search_by_key(&space, |kerning| kerning.space)
+        else {
+            return;
+        };
+        let kerning = data.line_end_kerning[entry];
+        if data.clusters[kerning.cluster].flags & ClusterData::LINE_END_KERNING_REMOVED != 0 {
+            return;
+        }
+        let glyph_index = data.runs[kerning.run].spacing_glyph(&data.clusters, kerning.cluster);
+        CandidateMutations::cluster(
+            &mut self.candidate_mutations,
+            kerning.cluster,
+            &mut data.clusters[kerning.cluster],
+            |cluster| {
+                cluster.advance += kerning.delta;
+                cluster.flags |= ClusterData::LINE_END_KERNING_REMOVED;
+            },
+        );
+        if let Some(index) = glyph_index {
+            CandidateMutations::glyph(
+                &mut self.candidate_mutations,
+                index,
+                &mut data.glyphs[index],
+                |glyph| {
+                    glyph.advance += kerning.delta;
+                },
+            );
+        }
+        line.metrics.advance += kerning.delta;
+    }
+
     fn trim_terminal_owner_edges(&mut self, line_idx: usize) {
         let range = self.lines.lines[line_idx].item_range.clone();
         let mut edges = Vec::new();
@@ -2999,6 +3054,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             self.state.items = self.lines.line_items.len();
         }
         self.trim_line_end_letter_spacing(line_idx);
+        self.remove_line_end_kerning(line_idx);
         self.trim_terminal_owner_edges(line_idx);
         let item_range = self.lines.lines[line_idx].item_range.clone();
         let selected_source_cluster_advance = self.lines.lines[line_idx]
