@@ -9,11 +9,21 @@ use crate::{FontFamily, Layout, LayoutContext, StyleProperty};
 use alloc::{vec, vec::Vec};
 
 fn roboto_layout(text: &str) -> Layout<ColorBrush> {
+    roboto_layout_with_spacing(text, [])
+}
+
+fn roboto_layout_with_spacing(
+    text: &str,
+    spacing: impl IntoIterator<Item = crate::InlineBox>,
+) -> Layout<ColorBrush> {
     let mut font_context = create_font_context();
     let mut layout_context: LayoutContext<ColorBrush> = LayoutContext::new();
     let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, false);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     builder.push_default(StyleProperty::FontSize(12.0));
+    for spacing in spacing {
+        builder.push_inline_box(spacing);
+    }
     builder.build(text)
 }
 
@@ -228,6 +238,60 @@ fn spelling_replacement_strategies() -> [crate::LineBreakStrategy; 2] {
 }
 
 #[test]
+fn spelling_replacement_removes_consumed_contextual_spacing() {
+    use crate::layout::DiscretionaryBreakShape;
+    let text = "pa\u{ad}ral·\u{ad}lel";
+    for strategy in spelling_replacement_strategies() {
+        let mut layout = roboto_layout_with_spacing(
+            text,
+            [crate::InlineBox::contextual_spacing(1, 7, 4.5, 0.0)],
+        );
+        layout.set_line_break_strategy(strategy);
+        layout.set_normal_soft_wrap_selection(crate::NormalSoftWrapSelection::GreedyLatest);
+        layout.set_line_end_letter_spacing_trim(true);
+        set_uniform_fit_advances(&mut layout, text, 21.603516);
+        let mut empty = roboto_layout("");
+        empty.break_all_lines(None);
+        layout.set_discretionary_break_shapes(vec![
+            DiscretionaryBreakShape::new(4, None, "".into(), empty.clone())
+                .unwrap()
+                .with_latest_line_start(Some(0)),
+            DiscretionaryBreakShape::new(11, None, "".into(), empty)
+                .unwrap()
+                .with_latest_line_start(Some(5))
+                .with_replaced_source(7..11)
+                .unwrap(),
+        ]);
+        layout.break_all_lines(Some(108.01758));
+        let lines = layout
+            .lines()
+            .map(|line| (line.text_range(), line.metrics().advance))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            layout.get(0).unwrap().text_range().end,
+            11,
+            "{strategy:?}: {lines:?}"
+        );
+        assert!(
+            (layout.get(0).unwrap().metrics().advance - unwrapped_advance("paral")).abs() < 0.001
+        );
+        assert!(
+            !layout
+                .get(0)
+                .unwrap()
+                .items()
+                .any(|item| matches!(item, crate::layout::PositionedLayoutItem::InlineBox(_)))
+        );
+        layout.break_all_lines(None);
+        assert_eq!(layout.lines().count(), 1);
+        assert!(
+            (layout.get(0).unwrap().metrics().advance - unwrapped_advance(text) - 4.5).abs()
+                < 0.001
+        );
+    }
+}
+
+#[test]
 fn selected_spelling_replacement_can_replace_both_sides() {
     use crate::layout::{DiscretionaryBreakShape, FollowingBreakShape};
     let text = "ab\u{ad}cd";
@@ -239,7 +303,10 @@ fn selected_spelling_replacement_can_replace_both_sides() {
     let before_width = before.full_width();
     let after_width = after.full_width() + unwrapped_advance("d");
     for strategy in spelling_replacement_strategies() {
-        let mut layout = roboto_layout(text);
+        let mut layout = roboto_layout_with_spacing(
+            text,
+            [crate::InlineBox::contextual_spacing(1, boundary, 4.5, 0.0)],
+        );
         layout.set_line_break_strategy(strategy);
         layout.set_discretionary_break_shapes(vec![
             DiscretionaryBreakShape::new(boundary, None, "x-".into(), before.clone())
@@ -269,7 +336,10 @@ fn selected_spelling_replacement_can_replace_both_sides() {
         assert_eq!(omitted, (0.0, 0));
         layout.break_all_lines(None);
         assert_eq!(layout.lines().count(), 1);
-        assert!((layout.get(0).unwrap().metrics().advance - unwrapped_advance(text)).abs() < 0.001);
+        assert!(
+            (layout.get(0).unwrap().metrics().advance - unwrapped_advance(text) - 4.5).abs()
+                < 0.001
+        );
     }
 }
 

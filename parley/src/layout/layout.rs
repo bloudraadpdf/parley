@@ -497,6 +497,21 @@ impl<B: Brush> Layout<B> {
                 fit += cluster.fit_advance();
             }
         }
+        let spacing: f32 = self
+            .data
+            .inline_boxes
+            .iter()
+            .filter(|inline_box| {
+                source.contains(&inline_box.index)
+                    && matches!(
+                        inline_box.line_break_participation(),
+                        crate::inline_box::InlineBoxLineBreakParticipation::ContextualSpacing
+                    )
+            })
+            .map(|inline_box| inline_box.width())
+            .sum();
+        advance += spacing;
+        fit += spacing;
         (start == source.start && end == source.end && advance.is_finite() && fit.is_finite())
             .then_some((advance, fit))
     }

@@ -1442,6 +1442,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
+                            if self
+                                .state
+                                .line
+                                .conditional_line_start_omission
+                                .as_ref()
+                                .is_some_and(|range| range.contains(&inline_box.index))
+                            {
+                                self.state.item_idx += 1;
+                                self.state.line.items.end += 1;
+                                continue;
+                            }
                             let width = inline_box.advance_for_line(self.state.lines);
                             let height = inline_box.height();
                             let boundary = self.layout.data.contextual_spacing_soft_wrap_boundary(
@@ -1461,7 +1472,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.item_idx += 1;
                                 self.state.mark_line_break_opportunity(candidate);
                                 let next_fit_x = self.state.line.fit_x + width;
-                                if !self.advance_contribution_fits(width, next_fit_x, max_advance) {
+                                if !self.advance_contribution_fits(width, next_fit_x, max_advance)
+                                    && !self.pending_spelling_replacement_fits(
+                                        inline_box.index..inline_box.index,
+                                        next_fit_x,
+                                        max_advance,
+                                    )
+                                {
                                     if let Some(candidate) = self.state.take_overflow_candidate() {
                                         if try_commit_regular_candidate!(candidate) {
                                             return self.start_new_line();
@@ -2367,29 +2384,48 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         {
             return false;
         }
-        let first_run = self
-            .layout
-            .data
-            .runs
-            .partition_point(|run| run.text_range.end <= cluster.end);
         let mut cursor = cluster.end;
         let mut remaining = 0.0;
-        for run in self
-            .layout
-            .runs()
-            .skip(first_run)
-            .take_while(|run| run.text_range().start < source.end)
-        {
-            for following in run.clusters().filter(|following| {
-                following.text_range().end > cluster.end
-                    && following.text_range().start < source.end
-            }) {
-                let range = following.text_range();
-                if range.start != cursor || range.end > source.end {
-                    return false;
+        for item in &self.layout.data.items[self.state.item_idx..] {
+            match item.kind {
+                LayoutItemKind::InlineBox => {
+                    let inline_box = &self.layout.data.inline_boxes[item.index];
+                    if inline_box.index >= source.end {
+                        break;
+                    }
+                    if inline_box.index >= cluster.end {
+                        if !matches!(
+                            inline_box.line_break_participation(),
+                            InlineBoxLineBreakParticipation::ContextualSpacing
+                        ) {
+                            return false;
+                        }
+                        remaining += inline_box.advance_for_line(self.state.lines);
+                    }
                 }
-                cursor = range.end;
-                remaining += following.fit_advance();
+                LayoutItemKind::TextRun => {
+                    let data = &self.layout.data.runs[item.index];
+                    let run = Run::new(self.layout, 0, item.index as u32, data, None);
+                    for following in run
+                        .clusters()
+                        .skip(item.cluster_range.start - data.cluster_range.start)
+                        .take(item.cluster_range.len())
+                        .filter(|following| {
+                            following.text_range().end > cluster.end
+                                && following.text_range().start < source.end
+                        })
+                    {
+                        let range = following.text_range();
+                        if range.start != cursor || range.end > source.end {
+                            return false;
+                        }
+                        cursor = range.end;
+                        remaining += following.fit_advance();
+                    }
+                    if cursor == source.end {
+                        break;
+                    }
+                }
             }
         }
         cursor == source.end && self.advance_fits(next_fit_x + remaining + delta, max_advance)
@@ -4065,6 +4101,15 @@ fn try_commit_line<B: Brush>(
         .filter(|item| item.kind == LayoutItemKind::TextRun)
         .map(|item| item.text_range.clone())
         .reduce(|before, after| before.start.min(after.start)..before.end.max(after.end));
+    let conditional_line_end_omission = state
+        .discretionary_break
+        .then(|| {
+            layout
+                .discretionary_break_shape(committed_text_range.as_ref()?.end)?
+                .replaced_source()
+                .cloned()
+        })
+        .flatten();
     let mut committed_items = lines.line_items.split_off(start_item_idx);
     committed_items.retain(|item| {
         if item.kind != LayoutItemKind::InlineBox {
@@ -4077,6 +4122,13 @@ fn try_commit_line<B: Brush>(
         ) || committed_text_range
             .as_ref()
             .is_some_and(|range| range.start < inline_box.index && inline_box.index < range.end)
+            && !conditional_line_end_omission
+                .as_ref()
+                .is_some_and(|range| range.contains(&inline_box.index))
+            && !state
+                .conditional_line_start_omission
+                .as_ref()
+                .is_some_and(|range| range.contains(&inline_box.index))
     });
     let last_item_kind = committed_items
         .last()
@@ -4096,15 +4148,6 @@ fn try_commit_line<B: Brush>(
     //     return false;
     // }
 
-    let conditional_line_end_omission = state
-        .discretionary_break
-        .then(|| {
-            layout
-                .discretionary_break_shape(committed_text_range.as_ref()?.end)?
-                .replaced_source()
-                .cloned()
-        })
-        .flatten();
     lines.lines.push(LineData {
         item_range: start_item_idx..end_item_idx,
         max_advance,
