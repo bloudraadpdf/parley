@@ -118,17 +118,17 @@ pub(crate) struct InstalledShape {
 }
 
 /// The source ranges that need new glyphs for `points`, each from the safe boundary before a point to the safe
-/// boundary after it, with the last point in each range and its glyph context: an end at a safe boundary limits the
+/// boundary after it, with its glyph context: an end at a safe boundary limits the
 /// context, else the end of `context` applies.
 fn affected_windows(
     range: &Range<usize>,
     context: &Range<usize>,
     safe: &[usize],
     mut points: Vec<usize>,
-) -> Vec<(Range<usize>, usize, Range<usize>)> {
+) -> Vec<(Range<usize>, Range<usize>)> {
     points.sort_unstable();
     points.dedup();
-    let mut windows: Vec<(Range<usize>, usize)> = Vec::new();
+    let mut windows: Vec<Range<usize>> = Vec::new();
     for point in points {
         let before = safe.partition_point(|boundary| *boundary <= point);
         let start = before
@@ -141,14 +141,13 @@ fn affected_windows(
         if start >= end {
             continue;
         }
-        if let Some((previous, last)) = windows
+        if let Some(previous) = windows
             .last_mut()
-            .filter(|(previous, _)| previous.end >= start)
+            .filter(|previous| previous.end >= start)
         {
             previous.end = previous.end.max(end);
-            *last = point;
         } else {
-            windows.push((start..end, point));
+            windows.push(start..end);
         }
     }
     let safe_or = |position: usize, outer: usize| {
@@ -160,9 +159,9 @@ fn affected_windows(
     };
     windows
         .into_iter()
-        .map(|(window, last)| {
+        .map(|window| {
             let context = safe_or(window.start, context.start)..safe_or(window.end, context.end);
-            (window, last, context)
+            (window, context)
         })
         .collect()
 }
@@ -286,8 +285,8 @@ impl<B: Brush> PhysicalShaper<B> {
         shape.ends_before(offset) || self.owner_edges.last().is_none_or(|edge| *edge < offset)
     }
 
-    /// The segments of a line from `line_start`: each window of `affected_windows` from the line start to the next
-    /// owner edge after its last point, and not after the first boundary at or after `limit`, else the first source
+    /// The segments of a line from `line_start`: each window of `affected_windows`,
+    /// not after the first boundary at or after `limit`, else the first source
     /// cluster at or after it, split at the boundaries and the soft line boundaries.
     pub(crate) fn shape_line(
         &mut self,
@@ -346,14 +345,8 @@ impl<B: Brush> PhysicalShaper<B> {
             let windows = affected_windows(&run.text_range, &deferred.context, safe, points);
             let alternative = alternative
                 .map(|alternative| &data.deferred_justification_shapes[alternative.shape]);
-            for (range, last, context) in windows {
-                let next_edge = self.owner_edges
-                    [self.owner_edges.partition_point(|edge| *edge <= last)..]
-                    .first()
-                    .copied()
-                    .unwrap_or(range.end);
-                let install = range.start.max(line_start)
-                    ..range.end.min(next_edge).min(end.unwrap_or(range.end));
+            for (range, context) in windows {
+                let install = range.start.max(line_start)..range.end.min(end.unwrap_or(range.end));
                 if install.is_empty() {
                     continue;
                 }

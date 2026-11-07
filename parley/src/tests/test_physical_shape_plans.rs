@@ -55,6 +55,22 @@ fn apply_boundaries(
 }
 
 #[test]
+fn a_decorated_owner_keeps_ligatures_across_its_undecorated_edge() {
+    let configure = |builder: &mut RangedBuilder<'_, ColorBrush>| {
+        builder.push_inline_owner_shaping(owner(
+            2..3,
+            PhysicalLineEdge::Left,
+            ShapingEdgePlacement::FirstLine,
+        ));
+    };
+    let mut layout = retained_layout("office", "Roboto", &[], configure);
+    let mut expected = retained_layout("office", "Roboto", &[2], configure);
+    let mut shaper = crate::shape::physical::PhysicalShaper::new(&layout.data);
+    apply_boundaries(&mut shaper, &mut layout, &[2]);
+    assert_eq!(glyphs(&mut layout), glyphs(&mut expected));
+}
+
+#[test]
 fn prepared_boundaries_split_and_restore_ligatures_without_new_source_items() {
     for spacing in [0.0, 3.0] {
         let configure = |builder: &mut RangedBuilder<'_, ColorBrush>| {
