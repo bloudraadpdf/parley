@@ -75,10 +75,11 @@ pub(crate) struct FaceCoverage<G, S> {
 }
 
 impl<G: Fn(char) -> GlyphId, S: Fn(char, char) -> bool> FaceCoverage<G, S> {
-    /// The nominal glyph of `ch`; a space separator the font lacks takes the space glyph, as `HarfBuzz` shapes it.
+    /// The nominal glyph of `ch`, including the space and hyphen fallbacks used by `HarfBuzz`.
     fn nominal_glyph(&self, ch: char) -> GlyphId {
         match (self.glyph)(ch) {
             0 if has_space_fallback(ch) => (self.glyph)(' '),
+            0 if ch == '\u{2011}' => (self.glyph)('\u{2010}'),
             glyph => glyph,
         }
     }
@@ -476,6 +477,22 @@ mod tests {
         assert!(supports("é", &['e', '\u{0301}']));
         assert!(supports("a\u{200d}", &['a']));
         assert!(!cluster_is_supported("a", |_| Some(0), |_, _| false));
+        assert!(supports("\u{2011}", &['\u{2010}']));
+        assert!(!supports("\u{2011}", &['-']));
+        assert!(supports("\u{2011}", &['\u{2011}']));
+    }
+
+    #[test]
+    fn native_nonbreaking_hyphen_precedes_shaping_fallback() {
+        let coverage = FaceCoverage {
+            glyph: |ch| match ch {
+                '\u{2011}' => 2,
+                '\u{2010}' => 1,
+                _ => 0,
+            },
+            sequence: |_, _| false,
+        };
+        assert_eq!(coverage.nominal_glyph('\u{2011}'), 2);
     }
 
     #[test]
