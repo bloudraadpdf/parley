@@ -357,3 +357,39 @@ fn resolved_scripts_survive_line_breaking() {
         );
     }
 }
+
+#[test]
+fn intrinsic_width_accumulation_preserves_fractional_advances_in_either_order() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::<ColorBrush>::new();
+    let text = "abcdef";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    let mut layout = builder.build(text);
+    let advances = [
+        7.980_911_f32,
+        2.896_435,
+        6.678_371,
+        2.896_435,
+        6.238_476,
+        2.896_435,
+    ];
+    assert_eq!(layout.data.clusters.len(), advances.len());
+    let expected = advances
+        .iter()
+        .map(|advance| f64::from(*advance))
+        .sum::<f64>() as f32;
+    for reverse in [false, true] {
+        for (index, cluster) in layout.data.clusters.iter_mut().enumerate() {
+            cluster.advance = advances[if reverse {
+                advances.len() - index - 1
+            } else {
+                index
+            }];
+            cluster.trimmed_letter_spacing = 0.0;
+        }
+        let widths = layout.calculate_content_widths();
+        assert_eq!(widths.min, expected, "reverse={reverse}");
+        assert_eq!(widths.max, expected, "reverse={reverse}");
+    }
+}

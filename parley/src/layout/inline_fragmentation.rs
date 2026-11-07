@@ -53,13 +53,13 @@ impl ClonedInlineFlow {
 
     pub(super) fn finish_intrinsic_fragment(
         &self,
-        maximum: &mut f32,
-        advance: &mut f32,
-        trailing: f32,
+        maximum: &mut f64,
+        advance: &mut f64,
+        trailing: f64,
         line_index: usize,
     ) {
-        *maximum = maximum.max(*advance - trailing + self.end_advance(line_index));
-        *advance = self.start_advance(line_index + 1);
+        *maximum = maximum.max(*advance - trailing + f64::from(self.end_advance(line_index)));
+        *advance = f64::from(self.start_advance(line_index + 1));
     }
 
     pub(super) fn start_ids(&self) -> impl Iterator<Item = u64> + '_ {

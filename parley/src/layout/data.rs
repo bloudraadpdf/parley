@@ -44,9 +44,9 @@ impl IntrinsicLetterSpacing {
     fn finish(
         &mut self,
         owners: &super::inline_fragmentation::ClonedInlineFlow,
-        maximum: &mut f32,
-        advance: &mut f32,
-        trailing: f32,
+        maximum: &mut f64,
+        advance: &mut f64,
+        trailing: f64,
         unconditional: bool,
     ) {
         let correction = if unconditional {
@@ -54,7 +54,12 @@ impl IntrinsicLetterSpacing {
         } else {
             self.measured
         };
-        owners.finish_intrinsic_fragment(maximum, advance, trailing + correction, self.line_index);
+        owners.finish_intrinsic_fragment(
+            maximum,
+            advance,
+            trailing + f64::from(correction),
+            self.line_index,
+        );
         self.line_index += 1;
         self.edges.clear();
         self.measured = 0.0;
@@ -2237,8 +2242,8 @@ impl<B: Brush> LayoutData<B> {
         let mut min_spacing = IntrinsicLetterSpacing::default();
         let mut max_spacing = IntrinsicLetterSpacing::default();
         let trim = self.trim_line_end_letter_spacing;
-        let mut min_width = 0.0_f32;
-        let mut max_width = 0.0_f32;
+        let mut min_width = 0.0_f64;
+        let mut max_width = 0.0_f64;
         let mut cloned_owners = super::inline_fragmentation::ClonedInlineFlow::default();
 
         let mut running_min_width = 0.0;
@@ -2327,7 +2332,8 @@ impl<B: Brush> LayoutData<B> {
                                 trailing_unconditional_max_width = 0.0;
                             }
                         }
-                        let advance = cluster.advance + cluster.trimmed_letter_spacing;
+                        let advance =
+                            f64::from(cluster.advance) + f64::from(cluster.trimmed_letter_spacing);
                         running_min_width += advance;
                         running_max_width += advance;
                         min_spacing.include(self, item_index, Some(cluster));
@@ -2360,8 +2366,8 @@ impl<B: Brush> LayoutData<B> {
                         }
                     }
                     min_width = min_width.max(
-                        running_min_width - trailing_min_width - min_spacing.measured
-                            + cloned_owners.end_advance(min_spacing.line_index),
+                        running_min_width - trailing_min_width - f64::from(min_spacing.measured)
+                            + f64::from(cloned_owners.end_advance(min_spacing.line_index)),
                     );
                 }
                 LayoutItemKind::InlineBox => {
@@ -2369,8 +2375,8 @@ impl<B: Brush> LayoutData<B> {
                     cloned_owners.before_edge(ibox);
                     let width = ibox.width_for_line(min_spacing.line_index)
                         + ibox.letter_spacing().unwrap_or(0.0);
-                    running_max_width += ibox.width_for_line(max_spacing.line_index)
-                        + ibox.letter_spacing().unwrap_or(0.0);
+                    running_max_width += f64::from(ibox.width_for_line(max_spacing.line_index))
+                        + f64::from(ibox.letter_spacing().unwrap_or(0.0));
                     max_spacing.include(self, item_index, None);
                     let mut measure_atomic = |break_before, break_after| {
                         let can_wrap = text_wrap_mode == TextWrapMode::Wrap;
@@ -2383,7 +2389,7 @@ impl<B: Brush> LayoutData<B> {
                                 false,
                             );
                         }
-                        running_min_width += width;
+                        running_min_width += f64::from(width);
                         min_spacing.include(self, item_index, None);
                         min_spacing.measure(trim);
                         max_spacing.measure(trim);
@@ -2451,7 +2457,7 @@ impl<B: Brush> LayoutData<B> {
                                 trailing_min_width = 0.0;
                                 projected_source_boundary = projection;
                             }
-                            running_min_width += width;
+                            running_min_width += f64::from(width);
                             min_spacing.include(self, item_index, None);
                             if width != 0.0 {
                                 min_spacing.measure(trim);
@@ -2480,17 +2486,21 @@ impl<B: Brush> LayoutData<B> {
                     cloned_owners.after_edge(ibox);
                 }
             }
-            max_width =
-                max_width.max(running_max_width - trailing_max_width - max_spacing.measured);
+            max_width = max_width
+                .max(running_max_width - trailing_max_width - f64::from(max_spacing.measured));
         }
 
-        min_width = min_width.max(running_min_width - trailing_min_width - min_spacing.measured);
-        max_width = max_width
-            .max(running_max_width - trailing_unconditional_max_width - max_spacing.unconditional);
+        min_width =
+            min_width.max(running_min_width - trailing_min_width - f64::from(min_spacing.measured));
+        max_width = max_width.max(
+            running_max_width
+                - trailing_unconditional_max_width
+                - f64::from(max_spacing.unconditional),
+        );
 
         ContentWidths {
-            min: min_width,
-            max: max_width,
+            min: min_width as f32,
+            max: max_width as f32,
         }
     }
 }
