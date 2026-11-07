@@ -5,7 +5,7 @@
 
 use super::{test_builders::create_font_context, utils::ColorBrush};
 use crate::{FontFamily, InlineBox, LayoutContext, StyleProperty};
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{borrow::ToOwned, sync::Arc, vec::Vec};
 
 #[test]
 fn equivalent_font_aliases_preserve_ligatures() {
@@ -357,4 +357,45 @@ fn hiragana_and_katakana_kern_as_one_opentype_script() {
         advance
     };
     assert_ne!(advance(1), advance(0));
+}
+
+#[test]
+fn inherited_marks_select_their_graphemes_script_extensions() {
+    use icu_properties::props::Script;
+    for marks in ["\u{a0}\u{654}\u{670}", "\u{a0}\u{670}\u{654}"] {
+        for (text, direction) in [
+            (marks.to_owned(), crate::BaseDirection::Rtl),
+            (
+                alloc::format!("a\u{2067}{marks}\u{2069}z"),
+                crate::BaseDirection::Ltr,
+            ),
+        ] {
+            let mut fonts = naskh_font_context();
+            let mut context = LayoutContext::<ColorBrush>::new();
+            let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
+            builder.set_direction(direction);
+            builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+                "Noto Naskh Arabic",
+            )));
+            builder.push_default(StyleProperty::FontSize(2048.0));
+            let mut layout = builder.build(&text);
+            layout.break_all_lines(None);
+            let runs: Vec<_> = layout.lines().flat_map(|line| line.runs()).collect();
+            let run = runs
+                .iter()
+                .find(|run| text[run.text_range()].contains('\u{a0}'))
+                .unwrap();
+            assert_eq!(run.script(), Script::Arabic, "{text:?}");
+            let glyphs: Vec<_> = run
+                .visual_clusters()
+                .flat_map(|cluster| cluster.glyphs())
+                .collect();
+            assert!(
+                glyphs
+                    .iter()
+                    .any(|glyph| glyph.x == 94.0 && glyph.y.abs() == 608.0),
+                "{text:?}: {glyphs:?}"
+            );
+        }
+    }
 }

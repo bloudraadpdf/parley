@@ -208,10 +208,16 @@ impl CharInfo {
         reason = "To be used in more complete emoji checking, in select_font"
     )]
     const REGION_INDICATOR_MASK: u8 = 1 << Self::REGION_INDICATOR_SHIFT;
-    #[allow(dead_code, reason = "retained for analysis diagnostics and invariant tests")]
+    #[allow(
+        dead_code,
+        reason = "retained for analysis diagnostics and invariant tests"
+    )]
     const CONTROL_MASK: u8 = 1 << Self::CONTROL_SHIFT;
     const EMOJI_OR_PICTOGRAPH_MASK: u8 = 1 << Self::EMOJI_OR_PICTOGRAPH_SHIFT;
-    #[allow(dead_code, reason = "retained for analysis diagnostics and invariant tests")]
+    #[allow(
+        dead_code,
+        reason = "retained for analysis diagnostics and invariant tests"
+    )]
     const CONTRIBUTES_TO_SHAPING_MASK: u8 = 1 << Self::CONTRIBUTES_TO_SHAPING_SHIFT;
     const FORCE_NORMALIZE_MASK: u8 = 1 << Self::FORCE_NORMALIZE_SHIFT;
 
@@ -264,7 +270,10 @@ impl CharInfo {
     }
 
     #[inline(always)]
-    #[allow(dead_code, reason = "retained for analysis diagnostics and invariant tests")]
+    #[allow(
+        dead_code,
+        reason = "retained for analysis diagnostics and invariant tests"
+    )]
     pub(crate) fn is_control(self) -> bool {
         self.flags & Self::CONTROL_MASK != 0
     }
@@ -275,7 +284,10 @@ impl CharInfo {
     }
 
     #[inline(always)]
-    #[allow(dead_code, reason = "retained for analysis diagnostics and invariant tests")]
+    #[allow(
+        dead_code,
+        reason = "retained for analysis diagnostics and invariant tests"
+    )]
     pub(crate) fn contributes_to_shaping(self) -> bool {
         self.flags & Self::CONTRIBUTES_TO_SHAPING_MASK != 0
     }
@@ -615,6 +627,8 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
             next_mandatory_linebreak
         });
 
+    resolve_neutral_grapheme_scripts(text, &mut lcx.info, &lcx.analysis_data_sources);
+
     // Convert paragraph direction to base bidi level
     let base_level = match lcx.direction {
         BaseDirection::Auto => None,
@@ -649,4 +663,66 @@ pub(crate) fn contributes_to_shaping(general_category: GeneralCategory, script: 
     }
 
     !(general_category == GeneralCategory::Format && script != Script::Inherited)
+}
+
+fn resolve_neutral_grapheme_scripts(
+    text: &str,
+    infos: &mut [(CharInfo, u16)],
+    sources: &AnalysisDataSources,
+) {
+    use icu_properties::script::ScriptWithExtensions;
+
+    if text.is_ascii() {
+        return;
+    }
+    let specific = |script| !matches!(script, Script::Common | Script::Inherited | Script::Unknown);
+    let extensions = ScriptWithExtensions::new();
+    let mut preferred = infos
+        .iter()
+        .map(|entry| entry.0.script)
+        .find(|script| specific(*script));
+    let mut candidates = Vec::new();
+    let mut byte_start = 0;
+    let mut char_start = 0;
+    for byte_end in sources.grapheme_boundaries(text).skip(1) {
+        let grapheme = &text[byte_start..byte_end];
+        let char_end = char_start + grapheme.chars().count();
+        let cluster_infos = &mut infos[char_start..char_end];
+        byte_start = byte_end;
+        char_start = char_end;
+        if let Some(script) = cluster_infos
+            .iter()
+            .map(|entry| entry.0.script)
+            .find(|script| specific(*script))
+        {
+            preferred = Some(script);
+            continue;
+        }
+        candidates.clear();
+        let mut constrained = false;
+        for character in grapheme.chars() {
+            let scripts = extensions.get_script_extensions_val(character);
+            if !scripts.iter().any(specific) {
+                continue;
+            }
+            if constrained {
+                candidates.retain(|script| scripts.contains(script));
+            } else {
+                candidates.extend(scripts.iter().filter(|script| specific(*script)));
+                constrained = true;
+            }
+            if candidates.is_empty() {
+                break;
+            }
+        }
+        if let Some(script) = preferred
+            .filter(|script| candidates.contains(script))
+            .or_else(|| candidates.first().copied())
+        {
+            for (info, _) in cluster_infos {
+                info.script = script;
+            }
+            preferred = Some(script);
+        }
+    }
 }

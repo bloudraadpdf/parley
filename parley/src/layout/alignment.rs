@@ -295,7 +295,11 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                 // Preserved tabs must remain on their tab stops (CSS Text 3 §7.1).
                 if opportunities == 0
                     || layout.lines[line_index].justification_shape_fallback
-                    || line_contains_tab(&layout.line_items[item_range.clone()], &layout.clusters)
+                    || justification_mode != JustificationMode::SourceOpportunities
+                        && line_contains_tab(
+                            &layout.line_items[item_range.clone()],
+                            &layout.clusters,
+                        )
                 {
                     let fallback = if last_alignment == Alignment::Justify {
                         Alignment::Center
@@ -527,6 +531,8 @@ fn source_justification_targets<B: Brush>(
     let mut text_units = Vec::new();
     let mut boxes = BTreeMap::new();
     let mut visual_index = 0;
+    let is_rtl = layout.line_paragraph_level(line) & 1 != 0;
+    let mut final_tab = None;
     for item_index in line.item_range.clone() {
         let item = &layout.line_items[item_index];
         if item.is_text_run() {
@@ -537,6 +543,11 @@ fn source_justification_targets<B: Brush>(
                 &mut item.cluster_range.clone().rev()
             };
             for index in clusters {
+                if layout.clusters[index].info.whitespace() == Whitespace::Tab
+                    && (!is_rtl || final_tab.is_none())
+                {
+                    final_tab = Some(visual_index);
+                }
                 let source = layout.clusters[index].text_range(run);
                 text_units.push((
                     source,
@@ -606,6 +617,20 @@ fn source_justification_targets<B: Brush>(
                     })
                 }
             }
+        })
+        // Stretch only the part following the final tab in the paragraph's
+        // inline direction, so every earlier tab retains its selected stop.
+        .filter(|site| {
+            final_tab.is_none_or(|tab| {
+                let follows_tab = |position: SourceUnitPosition| {
+                    if is_rtl {
+                        position.visual_index < tab
+                    } else {
+                        position.visual_index > tab
+                    }
+                };
+                follows_tab(site.before) && site.after.is_none_or(follows_tab)
+            })
         })
         .collect()
 }
