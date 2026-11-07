@@ -123,6 +123,39 @@ fn configured_layout(
 }
 
 #[test]
+fn resolved_emergency_boundaries_keep_nowrap_units_intact() {
+    let text = "ABCDABCDABCD";
+    for overflow in [
+        crate::OverflowWrap::Anywhere,
+        crate::OverflowWrap::BreakWord,
+    ] {
+        let mut layout = configured_layout(text, |builder| {
+            builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
+            builder.push_default(StyleProperty::OverflowWrap(overflow));
+        });
+        layout.set_line_break_overrides(vec![
+            LineBreakOverride::resolved_emergency_opportunity(4, overflow),
+            LineBreakOverride::resolved_emergency_opportunity(8, overflow),
+        ]);
+        let widths = layout.calculate_content_widths();
+        let expected_min = if overflow == crate::OverflowWrap::Anywhere {
+            full_width("ABCD")
+        } else {
+            full_width(text)
+        };
+        assert!((widths.min - expected_min).abs() < 0.01);
+        assert!((widths.max - full_width(text)).abs() < 0.01);
+        for (width, expected) in [
+            (full_width("ABCDABCD") + 0.01, vec!["ABCDABCD", "ABCD"]),
+            (1.0, vec!["ABCD", "ABCD", "ABCD"]),
+        ] {
+            layout.break_all_lines(Some(width));
+            assert_eq!(line_texts(&layout, text), expected);
+        }
+    }
+}
+
+#[test]
 fn source_justification_positions_the_next_styled_run_from_cluster_advance() {
     use crate::{
         JustificationOpportunity::BetweenUnits, JustificationUnit::Text, PositionedLayoutItem,

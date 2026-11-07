@@ -472,6 +472,7 @@ pub(crate) enum LineBreakOverrideDisposition {
     UnprioritizedOpportunity,
     ResolvedCollapsedSourceOpportunity,
     ResolvedRetainedSourceOpportunity,
+    ResolvedEmergencyOpportunity(OverflowWrap),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -685,6 +686,13 @@ impl SourceSoftWrapBoundary {
 }
 
 impl LineBreakOverride {
+    /// Set an emergency boundary using the wrapping policy of its enclosing owner.
+    pub const fn resolved_emergency_opportunity(byte_index: usize, overflow: OverflowWrap) -> Self {
+        Self {
+            byte_index,
+            disposition: LineBreakOverrideDisposition::ResolvedEmergencyOpportunity(overflow),
+        }
+    }
     /// Suppress a Unicode soft-wrap opportunity at `byte_index`.
     pub const fn suppress(byte_index: usize) -> Self {
         Self {
@@ -748,7 +756,11 @@ impl LineBreakOverride {
 
     /// Whether the override adds rather than suppresses an opportunity.
     pub const fn allows_break(self) -> bool {
-        !matches!(self.disposition, LineBreakOverrideDisposition::Suppress)
+        !matches!(
+            self.disposition,
+            LineBreakOverrideDisposition::Suppress
+                | LineBreakOverrideDisposition::ResolvedEmergencyOpportunity(OverflowWrap::Normal)
+        )
     }
 
     pub(crate) const fn disposition(self) -> LineBreakOverrideDisposition {
@@ -1562,7 +1574,10 @@ impl<B: Brush> LayoutData<B> {
                             continue;
                         }
                         let authority = match disposition {
-                            Some(LineBreakOverrideDisposition::Suppress) => {
+                            Some(
+                                LineBreakOverrideDisposition::Suppress
+                                | LineBreakOverrideDisposition::ResolvedEmergencyOpportunity(_),
+                            ) => {
                                 return SourceSoftWrapBoundary::Absent;
                             }
                             Some(
@@ -1946,7 +1961,9 @@ impl<B: Brush> LayoutData<B> {
         let run_index = self.runs.len();
         let clusters = &self.clusters[run.cluster_range.clone()];
         for &space in shape.spaces {
-            let Some(owner) = (0..space as usize).rev().find(|&index| kerned[index].is_some())
+            let Some(owner) = (0..space as usize)
+                .rev()
+                .find(|&index| kerned[index].is_some())
             else {
                 continue;
             };
@@ -2267,9 +2284,17 @@ impl<B: Brush> LayoutData<B> {
                             )
                             || (style.overflow_wrap == OverflowWrap::Anywhere
                                 && cluster.flags & ClusterData::GRAPHEME_START != 0));
+                        let resolved_emergency = matches!(
+                            boundary_override,
+                            Some(LineBreakOverrideDisposition::ResolvedEmergencyOpportunity(
+                                OverflowWrap::Anywhere
+                            ))
+                        ) && cluster.flags & ClusterData::GRAPHEME_START
+                            != 0;
                         if boundary == Boundary::Mandatory
                             || (!source_boundary_was_projected
-                                && ((resolved_source_opportunity && !discretionary_suppressed)
+                                && (resolved_emergency
+                                    || (resolved_source_opportunity && !discretionary_suppressed)
                                     || (prev_text_wrap_mode == TextWrapMode::Wrap
                                         && style_resolved_opportunity)))
                         {

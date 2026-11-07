@@ -1879,7 +1879,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             .ok()
                             .map(|index| self.layout.data.discretionary_breaks[index]);
                         let has_soft_break_opportunity = !is_newline && match boundary_override {
-                            Some(LineBreakOverrideDisposition::Suppress) => false,
+                            Some(
+                                LineBreakOverrideDisposition::Suppress
+                                | LineBreakOverrideDisposition::ResolvedEmergencyOpportunity(_),
+                            ) => false,
                             Some(LineBreakOverrideDisposition::OverflowOpportunity) => {
                                 allows_fallback
                             }
@@ -2071,9 +2074,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             }
                         } else if
                         // This text can contribute "emergency" line breaks.
-                        self.layout.data.line_break_purpose.allows_emergency_wrap(style.overflow_wrap) && !is_ligature_continuation
+                        match boundary_override {
+                            Some(LineBreakOverrideDisposition::ResolvedEmergencyOpportunity(overflow)) => self.layout.data.line_break_purpose.allows_emergency_wrap(overflow),
+                            _ => self.layout.data.line_break_purpose.allows_emergency_wrap(style.overflow_wrap) && text_wrap_mode == TextWrapMode::Wrap,
+                        } && !is_ligature_continuation
                         && cluster.data.flags & ClusterData::GRAPHEME_START != 0
-                        && text_wrap_mode == TextWrapMode::Wrap
                         // If we're at the start of the line, this particular cluster will never fit, so it's not a valid emergency break opportunity.
                         && self.state.line.has_content_advance()
                         && self.state.line.fragment_fit != FragmentFit::PendingOverflow
