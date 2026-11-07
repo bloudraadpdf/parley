@@ -20,6 +20,8 @@ fn word_spacing_preserves_spaces_in_mark_clusters() {
         ("A A", 100.0),
         ("א א", 100.0),
         ("A \u{0301}", 100.0),
+        ("\u{200e}A \u{0301}", 100.0),
+        ("\u{200f}א \u{0301}", 0.0),
         ("A \u{0301}A", 100.0),
         ("א \u{0301}", 0.0),
         ("א \u{0301}א", 100.0),
@@ -68,22 +70,30 @@ fn word_spacing_preserves_spaces_in_mark_clusters() {
                 .flat_map(|item| match item {
                     crate::PositionedLayoutItem::GlyphRun(run) => run
                         .positioned_glyphs()
-                        .map(|glyph| (glyph.id, glyph.x))
+                        .map(|glyph| (glyph.id, glyph.x, glyph.advance))
                         .collect::<Vec<_>>(),
                     crate::PositionedLayoutItem::InlineBox(_) => Vec::new(),
                 })
                 .collect::<Vec<_>>();
             let space = glyphs
                 .iter()
-                .find(|(id, _)| *id == 1)
+                // The font uses the space glyph for invisible bidi controls too.
+                // Those have zero advance; the authored separator retains 50–200px
+                // of advance for every spacing value exercised here.
+                .find(|(id, _, advance)| *id == 1 && *advance != 0.0)
                 .expect("the space glyph")
                 .1;
+            let space_run_is_rtl = layout
+                .runs()
+                .find(|run| run.clusters().any(|cluster| cluster.is_space_or_nbsp()))
+                .expect("the separator has a run")
+                .is_rtl();
             assert_eq!(
                 space,
-                space_origin + word_spacing / 2.0,
-                "half-side word spacing: {text:?}, spacing={word_spacing}"
+                space_origin + if space_run_is_rtl { word_spacing } else { 0.0 },
+                "logical-end word spacing: {text:?}, spacing={word_spacing}"
             );
-            for (_, mark) in glyphs.iter().filter(|(id, _)| matches!(id, 3 | 4)) {
+            for (_, mark, _) in glyphs.iter().filter(|(id, _, _)| matches!(id, 3 | 4)) {
                 assert_eq!(*mark, space, "{text:?}, spacing={word_spacing}");
             }
         }

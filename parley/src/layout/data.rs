@@ -995,6 +995,17 @@ pub(crate) struct RunData {
 }
 
 impl RunData {
+    /// Place additional word spacing at the logical end of the separator.
+    /// Keep the base and all attached marks together; RTL runs put that padding
+    /// physically before their glyphs. Advances are independent of this offset.
+    pub(crate) fn word_spacing_glyph_offset(&self) -> f32 {
+        if self.bidi_level & 1 == 1 {
+            self.word_spacing
+        } else {
+            0.0
+        }
+    }
+
     pub(crate) fn is_cursive_script(&self) -> bool {
         is_cursive_script(self.script)
     }
@@ -2128,7 +2139,7 @@ impl<B: Brush> LayoutData<B> {
                     spacing += word;
                     if let Some(range) = run.cluster_glyph_range(&self.clusters, index) {
                         for glyph in &mut self.glyphs[range] {
-                            glyph.x += word / 2.0;
+                            glyph.x += run.word_spacing_glyph_offset();
                         }
                     }
                 }

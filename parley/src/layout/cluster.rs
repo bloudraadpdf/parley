@@ -241,7 +241,7 @@ impl<'a, B: Brush> Cluster<'a, B> {
                 id: self.data.glyph_offset,
                 style_index: self.data.style_index,
                 x: if self.is_space_or_nbsp() {
-                    self.run.data.word_spacing / 2.0
+                    self.run.data.word_spacing_glyph_offset()
                 } else {
                     0.0
                 },
