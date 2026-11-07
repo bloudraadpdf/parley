@@ -28,6 +28,29 @@ pub(super) struct ShapedSegment {
     pub(super) coords: Vec<harfrust::NormalizedCoord>,
 }
 
+struct EmBoxVerticalAdvance {
+    advance: i32,
+    origin: i32,
+}
+
+impl harfrust::font::FontFuncs for EmBoxVerticalAdvance {
+    fn advance_height(
+        &mut self,
+        _builtin: &harfrust::font::BuiltinFontFuncs<'_>,
+        _glyph: skrifa::GlyphId,
+    ) -> i32 {
+        -self.advance
+    }
+
+    fn vertical_origin(
+        &mut self,
+        builtin: &harfrust::font::BuiltinFontFuncs<'_>,
+        glyph: skrifa::GlyphId,
+    ) -> (i32, i32) {
+        (builtin.advance_width(glyph) / 2, self.origin)
+    }
+}
+
 impl ShapeContext {
     pub(super) fn shape_segment(&mut self, input: SegmentShape<'_>) -> ShapedSegment {
         let font = harfrust::FontRef::from_index(input.font.data.as_ref(), input.font.index)
@@ -111,15 +134,33 @@ impl ShapeContext {
         if let Some(language) = input.language {
             buffer.set_language(language);
         }
+        let mut em_box = {
+            use skrifa::raw::TableProvider;
+            (input.direction == harfrust::Direction::TopToBottom && font.vmtx().is_err()).then(
+                || {
+                    let metrics = skrifa::metrics::Metrics::new(
+                        &font,
+                        skrifa::prelude::Size::unscaled(),
+                        shaper.coords(),
+                    );
+                    EmBoxVerticalAdvance {
+                        advance: i32::from(font.head().expect("font head").units_per_em()),
+                        origin: metrics.ascent as i32,
+                    }
+                },
+            )
+        };
+        let options = harfrust::ShapeOptions::new()
+            .plan(Some(plan))
+            .features(input.features)
+            .disable_pair_kerning_at(input.disabled_pair_kerning)
+            .point_size(Some(input.size));
+        let options = match em_box.as_mut() {
+            Some(funcs) => options.font_funcs(Some(funcs)),
+            None => options,
+        };
         ShapedSegment {
-            glyphs: shaper.shape(
-                buffer,
-                harfrust::ShapeOptions::new()
-                    .plan(Some(plan))
-                    .features(input.features)
-                    .disable_pair_kerning_at(input.disabled_pair_kerning)
-                    .point_size(Some(input.size)),
-            ),
+            glyphs: shaper.shape(buffer, options),
             coords: shaper.coords().to_vec(),
         }
     }

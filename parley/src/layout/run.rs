@@ -47,6 +47,12 @@ impl<'a, B: Brush> Run<'a, B> {
         self.layout.data.fonts.get(self.data.font_index).unwrap()
     }
 
+    /// Direction used to shape glyphs. Upright glyphs use logical coordinates:
+    /// `advance` and `x` follow the inline axis; `y` is the cross-axis offset.
+    pub fn shaping_orientation(&self) -> crate::ShapingOrientation {
+        self.data.shaping_orientation
+    }
+
     /// Returns the font size for the run.
     pub fn font_size(&self) -> f32 {
         self.data.font_size

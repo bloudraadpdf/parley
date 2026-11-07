@@ -971,6 +971,7 @@ const fn to_whitespace(c: char) -> Whitespace {
 /// `HarfRust`-based run data
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RunData {
+    pub(crate) shaping_orientation: crate::ShapingOrientation,
     /// Index of the font for the run.
     pub(crate) font_index: usize,
     /// Font size.
@@ -1710,6 +1711,7 @@ impl<B: Brush> LayoutData<B> {
         synthesis: fontique::Synthesis,
         metrics_override: fontique::FontMetricsOverride,
         glyph_buffer: &harfrust::GlyphBuffer,
+        shaping_orientation: crate::ShapingOrientation,
         script: icu_properties::props::Script,
         bidi_level: u8,
         paragraph_level: u8,
@@ -1751,7 +1753,8 @@ impl<B: Brush> LayoutData<B> {
         let advance_projection = self
             .font_metric_advance_quantization
             .filter(|quantization| {
-                self.styles[style_index as usize].font_metric_advance_quantization
+                shaping_orientation == crate::ShapingOrientation::Horizontal
+                    && self.styles[style_index as usize].font_metric_advance_quantization
                     && quantization.applies_to_script(script)
             })
             .map(|quantization| {
@@ -1850,6 +1853,7 @@ impl<B: Brush> LayoutData<B> {
         let cluster_range = self.clusters.len()..self.clusters.len();
 
         let mut run = RunData {
+            shaping_orientation,
             font_index,
             font_size,
             font_attrs,
@@ -1879,9 +1883,12 @@ impl<B: Brush> LayoutData<B> {
             }
             return;
         }
-        let glyph_positions = glyph_buffer.glyph_positions();
+        let logical_positions =
+            logical_glyph_positions(glyph_buffer.glyph_positions(), shaping_orientation);
+        let glyph_positions = logical_positions.as_ref();
         let cluster_range_start = self.clusters.len();
-        let is_rtl = bidi_level & 1 == 1;
+        let is_rtl =
+            bidi_level & 1 == 1 && shaping_orientation == crate::ShapingOrientation::Horizontal;
         if !is_rtl {
             run.advance = process_clusters(
                 Direction::Ltr,
@@ -1947,7 +1954,9 @@ impl<B: Brush> LayoutData<B> {
             .map(|(offset, _)| offset)
             .collect::<Vec<_>>();
         let cluster_advances = |buffer: &harfrust::GlyphBuffer| {
-            let (infos, positions) = (buffer.glyph_infos(), buffer.glyph_positions());
+            let positions =
+                logical_glyph_positions(buffer.glyph_positions(), run.shaping_orientation);
+            let (infos, positions) = (buffer.glyph_infos(), positions.as_ref());
             let mut advances = alloc::vec![None; offsets.len()];
             for (index, info) in infos.iter().enumerate() {
                 let advance =
@@ -2501,6 +2510,30 @@ pub(crate) struct LineEndKerning {
 pub(crate) struct LineEndKerningShape<'a> {
     pub(crate) spaces: &'a [u32],
     pub(crate) glyphs: &'a harfrust::GlyphBuffer,
+}
+
+fn logical_glyph_positions(
+    positions: &[harfrust::GlyphPosition],
+    orientation: crate::ShapingOrientation,
+) -> alloc::borrow::Cow<'_, [harfrust::GlyphPosition]> {
+    if orientation == crate::ShapingOrientation::Horizontal {
+        return alloc::borrow::Cow::Borrowed(positions);
+    }
+    let mut cross_advance = 0;
+    alloc::borrow::Cow::Owned(
+        positions
+            .iter()
+            .map(|position| {
+                let mut logical = *position;
+                logical.x_advance = -position.y_advance;
+                logical.y_advance = position.x_advance;
+                logical.x_offset = -position.y_offset;
+                logical.y_offset = -(position.x_offset + cross_advance);
+                cross_advance += position.x_advance;
+                logical
+            })
+            .collect(),
+    )
 }
 
 fn shaped_glyph_advance(

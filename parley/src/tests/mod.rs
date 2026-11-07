@@ -3,8 +3,8 @@
 
 mod test_analysis;
 mod test_bidi_paragraph_boundaries;
-mod test_build_buffers;
 pub(crate) mod test_bidi_topology;
+mod test_build_buffers;
 mod test_builders;
 mod test_discretionary_breaks;
 mod test_first_line_owner_edges;
@@ -16,8 +16,8 @@ mod test_justification_shapes;
 mod test_justify_shrink;
 mod test_letter_spacing;
 mod test_line_break_overrides;
-mod test_line_end_space;
 mod test_line_end_kerning;
+mod test_line_end_space;
 mod test_line_metrics;
 mod test_no_break_space;
 mod test_pair_kerning;
@@ -26,9 +26,11 @@ mod test_physical_shape_plans;
 mod test_physical_shaping;
 mod test_shaping_context;
 mod test_total_fit;
-mod test_wrap_avoid_depth;
 mod test_vertical_metric_grid;
 mod test_word_spacing;
+mod test_wrap_avoid_depth;
 mod utils;
 
 mod test_terminal_owner_edges;
+
+mod test_shaping_orientation;

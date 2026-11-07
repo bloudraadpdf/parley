@@ -162,7 +162,9 @@ impl DeferredSourceShape {
             features: &features,
             disabled_pair_kerning: &disabled_pair_kerning,
             size: run.font_size,
-            direction: if run.bidi_level & 1 == 0 {
+            direction: if run.shaping_orientation == crate::ShapingOrientation::UprightVertical {
+                harfrust::Direction::TopToBottom
+            } else if run.bidi_level & 1 == 0 {
                 harfrust::Direction::LeftToRight
             } else {
                 harfrust::Direction::RightToLeft
@@ -181,6 +183,7 @@ impl DeferredSourceShape {
             run.synthesis,
             run.metrics_override,
             &shaped.glyphs,
+            run.shaping_orientation,
             self.script,
             run.bidi_level,
             run.paragraph_level,

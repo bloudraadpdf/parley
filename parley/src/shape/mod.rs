@@ -60,6 +60,7 @@ impl Default for ShapeContext {
 }
 
 struct Item {
+    orientation: crate::ShapingOrientation,
     style_index: u16,
     size: f32,
     script: Script,
@@ -142,6 +143,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
     // Setup mutable state for iteration
     let mut style = &styles[0];
     let mut item = Item {
+        orientation: style.shaping_orientation,
         style_index: 0,
         size: style.font_size,
         level: levels.first().copied().unwrap_or(0),
@@ -207,6 +209,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 || next_style.font_language_override != item.font_language_override
                 || next_style.font_variations != item.variations
                 || next_style.font_features != item.features
+                || next_style.shaping_orientation != item.orientation
                 || !nearly_eq(next_style.letter_spacing, item.letter_spacing)
                 || !nearly_eq(next_style.word_spacing, item.word_spacing)
                 // line-height does not affect shaping, but it feeds the
@@ -292,6 +295,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             item.font_language_override = style.font_language_override;
             item.variations = style.font_variations;
             item.features = style.font_features;
+            item.orientation = style.shaping_orientation;
             item.word_spacing = style.word_spacing;
             item.letter_spacing = style.letter_spacing;
             text_range.start = text_range.end;
@@ -490,7 +494,9 @@ fn shape_item<'a, B: Brush>(
         // Shape the entire segment text including newlines
         // The line breaking algorithm will handle newlines automatically
 
-        let direction = if item.level & 1 != 0 {
+        let direction = if item.orientation == crate::ShapingOrientation::UprightVertical {
+            harfrust::Direction::TopToBottom
+        } else if item.level & 1 != 0 {
             harfrust::Direction::RightToLeft
         } else {
             harfrust::Direction::LeftToRight
@@ -612,6 +618,7 @@ fn shape_item<'a, B: Brush>(
             font.font.synthesis,
             font.font.metrics_override,
             &shaped.glyphs,
+            item.orientation,
             item.script,
             item.level,
             item.paragraph_level,

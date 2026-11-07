@@ -156,6 +156,7 @@ impl ResolveContext {
             StyleProperty::FontMetricAdvanceQuantization(value) => {
                 FontMetricAdvanceQuantization(*value)
             }
+            StyleProperty::ShapingOrientation(value) => ShapingOrientation(*value),
             StyleProperty::Locale(value) => Locale(*value),
             StyleProperty::FontLanguageOverride(value) => FontLanguageOverride(*value),
             StyleProperty::Brush(value) => Brush(value.clone()),
@@ -207,6 +208,7 @@ impl ResolveContext {
             font_features: self.resolve_features(&raw_style.font_features),
             font_features_for_justification: self
                 .resolve_features(&raw_style.font_features_for_justification),
+            shaping_orientation: raw_style.shaping_orientation,
             font_metric_advance_quantization: FontMetricAdvanceProjection(
                 raw_style.font_metric_advance_quantization,
             ),
@@ -404,6 +406,7 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
     FontMetricAdvanceQuantization(bool),
+    ShapingOrientation(crate::ShapingOrientation),
     /// Locale.
     Locale(Option<Language>),
     /// OpenType language system tag.
@@ -497,6 +500,7 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
     font_metric_advance_quantization: FontMetricAdvanceProjection,
+    pub(crate) shaping_orientation: crate::ShapingOrientation,
     /// Locale.
     pub(crate) locale: Option<Language>,
     /// OpenType language system tag.
@@ -555,6 +559,7 @@ impl<B: Brush> ResolvedStyle<B> {
             FontMetricAdvanceQuantization(value) => {
                 self.font_metric_advance_quantization = FontMetricAdvanceProjection(value);
             }
+            ShapingOrientation(value) => self.shaping_orientation = value,
             Locale(value) => self.locale = value,
             FontLanguageOverride(value) => self.font_language_override = value,
             Brush(value) => self.brush = value,
@@ -602,6 +607,7 @@ impl<B: Brush> ResolvedStyle<B> {
             FontMetricAdvanceQuantization(value) => {
                 self.font_metric_advance_quantization.0 == *value
             }
+            ShapingOrientation(value) => self.shaping_orientation == *value,
             Locale(value) => self.locale == *value,
             FontLanguageOverride(value) => self.font_language_override == *value,
             Brush(value) => self.brush == *value,

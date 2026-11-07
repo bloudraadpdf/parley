@@ -165,6 +165,17 @@ impl LineHeight {
     }
 }
 
+/// Font shaping direction independent of the paragraph's bidi direction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ShapingOrientation {
+    /// Horizontal or sideways text.
+    #[default]
+    Horizontal,
+    /// Upright text shaped top-to-bottom, including vertical substitutions and positioning.
+    /// Fonts without vertical metrics use one em advances before positioning adjustments.
+    UprightVertical,
+}
+
 /// Properties that define a style.
 #[derive(Clone, PartialEq, Debug)]
 pub enum StyleProperty<'a, B: Brush> {
@@ -192,6 +203,8 @@ pub enum StyleProperty<'a, B: Brush> {
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
     FontMetricAdvanceQuantization(bool),
+    /// Direction used for font shaping.
+    ShapingOrientation(ShapingOrientation),
     /// Locale.
     Locale(Option<Language>),
     /// OpenType language system tag selected independently of locale.
@@ -280,6 +293,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
     pub font_metric_advance_quantization: bool,
+    /// Direction used for font shaping.
+    pub shaping_orientation: ShapingOrientation,
     /// Locale.
     pub locale: Option<Language>,
     /// OpenType language system tag selected independently of locale.
@@ -352,6 +367,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             font_features: FontFeatures::empty(),
             font_features_for_justification: FontFeatures::empty(),
             font_metric_advance_quantization: true,
+            shaping_orientation: ShapingOrientation::Horizontal,
             locale: None,
             font_language_override: None,
             brush: B::default(),
