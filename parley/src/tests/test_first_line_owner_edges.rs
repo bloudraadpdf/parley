@@ -586,3 +586,69 @@ fn original_owner_edges_do_not_retain_terminal_collapsible_space() {
         );
     }
 }
+
+#[test]
+fn cloned_owner_leading_space_matches_an_explicit_break() {
+    let build = |text: &str, whitespace, width| {
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::new();
+        let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(whitespace));
+        builder.push_default(StyleProperty::TextWrapMode(
+            if whitespace == WhiteSpaceCollapse::Preserve {
+                crate::TextWrapMode::NoWrap
+            } else {
+                crate::TextWrapMode::Wrap
+            },
+        ));
+        for (ids, range) in [([801, 802], 0..3), ([803, 804], 3..7)] {
+            for edge in InlineBox::cloned_inline_edges(
+                ids,
+                range,
+                [
+                    InlineOwnerEdgeAdvance::uniform(14.0),
+                    InlineOwnerEdgeAdvance::uniform(22.0),
+                ],
+                FollowingSourceSpace::UnicodeBoundary,
+            ) {
+                builder.push_inline_box(edge);
+            }
+        }
+        let mut layout: Layout<ColorBrush> = builder.build(text);
+        layout.break_all_lines(width);
+        layout
+    };
+    let expected = build("aaa\naaa", WhiteSpaceCollapse::Preserve, Some(0.0));
+    let actual = build("aaa aaa", WhiteSpaceCollapse::Collapse, Some(0.0));
+    assert_eq!(
+        actual.calculate_content_widths().min,
+        expected.calculate_content_widths().min
+    );
+    let edges = |layout: &Layout<ColorBrush>| {
+        layout
+            .lines()
+            .map(|line| {
+                line.items()
+                    .filter_map(|item| match item {
+                        PositionedLayoutItem::InlineBox(edge) => {
+                            Some((edge.id, edge.x, edge.width))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(actual.lines().next().unwrap().source_is_removed(3));
+    assert!(!actual.lines().next().unwrap().source_is_removed(2));
+    assert_eq!(edges(&actual), edges(&expected));
+    let widths = |layout: &Layout<ColorBrush>| {
+        layout
+            .lines()
+            .map(|line| line.metrics().advance - line.metrics().trailing_whitespace)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(widths(&actual), widths(&expected));
+}

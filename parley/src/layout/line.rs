@@ -57,6 +57,19 @@ impl<'a, B: Brush> Line<'a, B> {
         })
     }
 
+    /// Whether source text was removed when composing this line's boundaries.
+    pub fn source_is_removed(&self, byte_index: usize) -> bool {
+        self.data
+            .removed_terminal_source_ranges
+            .iter()
+            .chain(&self.data.removed_leading_source_ranges)
+            .chain(&self.data.conditional_line_end_omission)
+            .any(|range| range.contains(&byte_index))
+            || matches!(self.data.selected_source_cluster_advance,
+                super::data::SelectedSourceClusterAdvance::Collapsed { ref source_range }
+                if source_range.contains(&byte_index))
+    }
+
     /// Returns the metrics for the line.
     pub fn metrics(&self) -> &LineMetrics {
         &self.data.metrics
