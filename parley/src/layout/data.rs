@@ -2253,6 +2253,7 @@ impl<B: Brush> LayoutData<B> {
         let mut trailing_unconditional_max_width = 0.0;
         let mut text_wrap_mode = TextWrapMode::Wrap;
         let mut projected_source_boundary: Option<ProjectedSourceBoundary> = None;
+        let mut mandatory_break_handled = false;
         for (item_index, item) in self.items.iter().enumerate() {
             match item.kind {
                 LayoutItemKind::TextRun => {
@@ -2261,6 +2262,8 @@ impl<B: Brush> LayoutData<B> {
                     for cluster in clusters {
                         let boundary = cluster.info.boundary();
                         let byte_index = cluster.text_range(run).start;
+                        let mandatory_boundary = boundary == Boundary::Mandatory
+                            && !core::mem::replace(&mut mandatory_break_handled, false);
                         let boundary_override = self
                             .line_break_overrides
                             .binary_search_by_key(&byte_index, |entry| entry.byte_index())
@@ -2310,7 +2313,7 @@ impl<B: Brush> LayoutData<B> {
                             ))
                         ) && cluster.flags & ClusterData::GRAPHEME_START
                             != 0;
-                        if boundary == Boundary::Mandatory
+                        if mandatory_boundary
                             || (!source_boundary_was_projected
                                 && (resolved_emergency
                                     || (resolved_source_opportunity && !discretionary_suppressed)
@@ -2325,7 +2328,7 @@ impl<B: Brush> LayoutData<B> {
                                 false,
                             );
                             trailing_min_width = 0.0;
-                            if boundary == Boundary::Mandatory {
+                            if mandatory_boundary {
                                 max_spacing.finish(
                                     &cloned_owners,
                                     &mut max_width,
@@ -2373,6 +2376,26 @@ impl<B: Brush> LayoutData<B> {
                                 max_spacing.measure(trim);
                             }
                             TerminalWhitespaceDisposition::Measured => {}
+                        }
+                        if cluster.info.whitespace() == Whitespace::Newline {
+                            min_spacing.finish(
+                                &cloned_owners,
+                                &mut min_width,
+                                &mut running_min_width,
+                                trailing_min_width,
+                                false,
+                            );
+                            max_spacing.finish(
+                                &cloned_owners,
+                                &mut max_width,
+                                &mut running_max_width,
+                                trailing_unconditional_max_width,
+                                true,
+                            );
+                            trailing_min_width = 0.0;
+                            trailing_max_width = 0.0;
+                            trailing_unconditional_max_width = 0.0;
+                            mandatory_break_handled = true;
                         }
                     }
                     min_width = min_width.max(

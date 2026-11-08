@@ -43,6 +43,36 @@ fn build_inline_box_layout(
 }
 
 #[test]
+fn max_content_keeps_inline_boxes_after_mandatory_breaks() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    for text in ["A\nAAAA", "A\u{2028}AAAA", "A\r\nAAAA"] {
+        let next_line = text.len() - 4;
+        let mut layout = build_inline_box_layout(
+            &mut lcx,
+            &mut fcx,
+            text,
+            10.0,
+            None,
+            [
+                InlineBox::new(0, 0, 10.0, 10.0),
+                InlineBox::new(1, next_line, 10.0, 10.0),
+            ],
+        );
+        let maximum = layout.calculate_content_widths().max;
+        layout.break_all_lines(None);
+        let measured = layout
+            .lines()
+            .map(|line| line.metrics().advance)
+            .fold(0.0_f32, f32::max);
+        assert!(
+            (maximum - measured).abs() < 0.001,
+            "{text:?}: intrinsic {maximum}, laid out {measured}"
+        );
+    }
+}
+
+#[test]
 fn source_text_affinity_retains_source_breaks_in_intrinsic_measurement() {
     let mut fcx = create_font_context();
     let mut lcx = LayoutContext::new();
