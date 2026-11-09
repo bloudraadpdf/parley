@@ -265,6 +265,20 @@ impl<B: Brush> BreakLines<'_, B> {
         if self.state.line.items.is_empty() && self.state.line.clusters.is_empty() {
             return None;
         }
+        if !self.state.line.items.is_empty()
+            && self.state.item_idx < self.layout.data.items.len()
+            && self.layout.data.items[self.state.line.items.clone()]
+                .iter()
+                .all(|item| {
+                    item.kind == LayoutItemKind::InlineBox
+                        && matches!(
+                            self.layout.data.inline_boxes[item.index].line_break_participation(),
+                            crate::inline_box::InlineBoxLineBreakParticipation::TransparentAnchor
+                        )
+                })
+        {
+            return None;
+        }
         let removes_leading_space = self.fitted_end_precedes_collapsible_space(SourceCursor::at(
             &self.layout.data,
             self.state.item_idx,
@@ -346,6 +360,64 @@ mod tests {
     use super::*;
     use crate::tests::test_bidi_topology::build_layout_with_direction;
     use crate::{BaseDirection, InlineBox, layout::BreakReason};
+
+    #[test]
+    fn source_prefix_does_not_break_after_only_transparent_anchors() {
+        for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+            let mut layout = build_layout_with_direction(
+                "",
+                [
+                    InlineBox::transparent_anchor(1, 0),
+                    InlineBox::transparent_anchor(2, 0),
+                    InlineBox::new(3, 0, 0.0, 10.0),
+                    InlineBox::new(4, 0, 300.0, 100.0),
+                ],
+                Some(direction),
+            );
+            let mut breaker = layout.break_lines();
+            for end in [1, 2] {
+                assert!(breaker
+                    .preview_source_prefix(SourceCursor::BeforeItem(end), LineTabOrigin::ZERO)
+                    .is_none());
+                assert_eq!(breaker.state.item_idx, 0);
+                assert!(breaker.lines.lines.is_empty());
+            }
+            let zero_width_atomic = breaker
+                .preview_source_prefix(SourceCursor::BeforeItem(3), LineTabOrigin::ZERO)
+                .expect("a zero-width in-flow atomic still contributes to the line");
+            assert_eq!(zero_width_atomic.items.len(), 3);
+        }
+    }
+
+    #[test]
+    fn source_prefix_preserves_zero_advance_text_and_terminal_anchors() {
+        for text in ["\u{200b}x", "\nx"] {
+            let mut layout = build_layout_with_direction(
+                text,
+                [InlineBox::transparent_anchor(1, 0)],
+                Some(BaseDirection::Ltr),
+            );
+            let end = cursor_at(&layout, text.len() - 1);
+            assert!(layout
+                .break_lines()
+                .preview_source_prefix(end, LineTabOrigin::ZERO)
+                .is_some());
+        }
+        let mut layout = build_layout_with_direction(
+            "",
+            [
+                InlineBox::transparent_anchor(1, 0),
+                InlineBox::transparent_anchor(2, 0),
+            ],
+            Some(BaseDirection::Ltr),
+        );
+        let end = SourceCursor::BeforeItem(layout.data.items.len());
+        let candidate = layout
+            .break_lines()
+            .preview_source_prefix(end, LineTabOrigin::ZERO)
+            .expect("terminal anchors retain their positioning line");
+        assert_eq!(candidate.items.len(), 2);
+    }
 
     #[test]
     fn short_source_windows_visit_only_their_endpoints() {
