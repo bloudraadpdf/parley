@@ -1494,11 +1494,14 @@ impl<B: Brush> LayoutData<B> {
                     return cluster.text_range(&self.runs[item.index]).end == byte_index
                         && override_.map_or_else(
                             || {
+                                let style = &self.styles[cluster.style_index as usize];
                                 matches!(
                                     CodePointMapData::<LineBreak>::new()
                                         .get(cluster.info.source_char()),
                                     LineBreak::Space | LineBreak::ZWSpace
-                                )
+                                ) || (cluster.info.whitespace() == Whitespace::Tab
+                                    && style.white_space_collapse != WhiteSpaceCollapse::Collapse
+                                    && style.text_wrap_mode == TextWrapMode::Wrap)
                             },
                             |disposition| disposition != LineBreakOverrideDisposition::Suppress,
                         );

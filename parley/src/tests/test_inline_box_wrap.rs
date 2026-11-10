@@ -123,6 +123,53 @@ fn source_text_affinity_retains_source_breaks_in_intrinsic_measurement() {
 }
 
 #[test]
+fn source_text_affinity_wraps_after_a_preserved_tab() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    for (wrap, suppressed, second_line) in [
+        (TextWrapMode::Wrap, false, 1),
+        (TextWrapMode::NoWrap, false, 0),
+        (TextWrapMode::Wrap, true, 0),
+    ] {
+        let text = "\t";
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(10.0));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        builder.push_default(StyleProperty::TextWrapMode(wrap));
+        builder.push_default(StyleProperty::TabSize(crate::style::TabSize::Length(40.0)));
+        for (id, index) in [(1, 0), (2, text.len())] {
+            builder.push_inline_box(InlineBox::atomic_with_break_affinity(
+                id,
+                index,
+                80.0,
+                20.0,
+                InlineBoxBreakAffinity::SourceText,
+            ));
+        }
+        let mut layout = builder.build(text);
+        if suppressed {
+            layout.set_line_break_overrides(vec![LineBreakOverride::suppress(text.len())]);
+        }
+        let intrinsic = layout.calculate_content_widths();
+        assert_eq!(
+            intrinsic.min < intrinsic.max,
+            second_line == 1,
+            "{wrap:?}, {suppressed}: {intrinsic:?}"
+        );
+        layout.break_all_lines(Some(120.0));
+        assert_eq!(inline_box_line(&layout, 1), 0, "{wrap:?}, {suppressed}");
+        assert_eq!(
+            inline_box_line(&layout, 2),
+            second_line,
+            "{wrap:?}, {suppressed}"
+        );
+    }
+}
+
+#[test]
 fn restored_source_opportunities_stay_conditional_across_inline_boxes() {
     use crate::layout::LineBreakPurpose;
     let mut fcx = create_font_context();
