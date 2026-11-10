@@ -2737,3 +2737,83 @@ fn zero_width_closing_edge_does_not_hyphenate_a_terminal_word() {
             .all(|line| !line.ends_at_discretionary_break())
     );
 }
+
+#[test]
+fn cloned_shape_shares_immutable_items_and_inline_boxes() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let source = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        "A B",
+        10.0,
+        None,
+        [InlineBox::new(1, 1, 10.0, 10.0)],
+    );
+    let cloned = source.clone();
+    assert_eq!(
+        (
+            source.data.items.as_ptr() == cloned.data.items.as_ptr(),
+            source.inline_boxes().as_ptr() == cloned.inline_boxes().as_ptr()
+        ),
+        (true, true),
+    );
+    let mut finalized = cloned;
+    finalized.break_all_lines(Some(20.0));
+    assert_eq!(source.data.items.as_ptr(), finalized.data.items.as_ptr());
+    assert_eq!(
+        source.inline_boxes().as_ptr(),
+        finalized.inline_boxes().as_ptr()
+    );
+    assert_eq!(source.len(), 0);
+}
+
+#[test]
+fn cloned_shape_line_breaking_and_mutation_preserve_the_source() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let text = "A B C D";
+    let mut source = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        10.0,
+        None,
+        [InlineBox::new(1, 1, 10.0, 10.0)],
+    );
+    let original = source.data.clone();
+    let mut cloned = source.clone();
+    cloned.inline_boxes_mut()[0] = InlineBox::new(1, 1, 20.0, 10.0);
+    cloned.break_all_lines(Some(25.0));
+    assert_eq!(source.data, original);
+    assert_eq!(source.inline_boxes()[0].width(), 10.0);
+    source.break_all_lines(Some(80.0));
+    let mut expected = build_inline_box_layout(
+        &mut lcx,
+        &mut fcx,
+        text,
+        10.0,
+        None,
+        [InlineBox::new(1, 1, 20.0, 10.0)],
+    );
+    expected.break_all_lines(Some(25.0));
+    super::utils::asserts::assert_eq_layout_data(
+        &cloned.data,
+        &expected.data,
+        "cloned box mutation",
+    );
+    cloned.break_all_lines(Some(80.0));
+    expected.break_all_lines(Some(80.0));
+    super::utils::asserts::assert_eq_layout_data(
+        &cloned.data,
+        &expected.data,
+        "cloned rebreak width",
+    );
+    let retained = cloned.data.clone();
+    let mut builder = lcx.ranged_builder(&mut fcx, "replacement", 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.build_into(&mut cloned, "replacement");
+    assert_eq!(expected.data, retained);
+    assert!(cloned.inline_boxes().is_empty());
+    assert!(!cloned.data.items.is_empty());
+}

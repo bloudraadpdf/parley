@@ -825,7 +825,7 @@ use core::num::NonZeroU16;
 use core::ops::Range;
 use skrifa::MetadataProvider as _;
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
 use crate::analysis::{AuthoredBreakUnit, Boundary, CharInfo};
 
@@ -1327,20 +1327,19 @@ pub(crate) struct LayoutData<B: Brush> {
 
     // Input (/ output of style resolution)
     pub(crate) styles: Vec<Style<B>>,
-    pub(crate) inline_boxes: Vec<InlineBox>,
+    pub(crate) inline_boxes: Arc<Vec<InlineBox>>,
 
     // Output of shaping
     pub(crate) runs: Vec<RunData>,
-    pub(crate) items: Vec<LayoutItem>,
+    pub(crate) items: Arc<Vec<LayoutItem>>,
     pub(crate) clusters: Vec<ClusterData>,
     pub(crate) glyphs: Vec<Glyph>,
     pub(crate) line_shape_variants: Option<crate::shape::justification::LineShapeVariants>,
-    pub(crate) shaping_source_text: Option<alloc::sync::Arc<str>>,
+    pub(crate) shaping_source_text: Option<Arc<str>>,
     pub(crate) deferred_justification_shapes:
         Vec<crate::shape::justification::DeferredJustificationShape>,
     pub(crate) inline_owner_shaping: Vec<super::InlineOwnerShaping>,
-    pub(crate) deferred_physical_shapes:
-        Vec<alloc::sync::Arc<crate::shape::source::DeferredSourceShape>>,
+    pub(crate) deferred_physical_shapes: Vec<Arc<crate::shape::source::DeferredSourceShape>>,
     /// The pair kerning against each collapsible space that ends a word, by source offset of the
     /// space.
     pub(crate) line_end_kerning: Vec<LineEndKerning>,
@@ -1408,9 +1407,9 @@ impl<B: Brush> Default for LayoutData<B> {
             fonts: Vec::new(),
             coords: Vec::new(),
             styles: Vec::new(),
-            inline_boxes: Vec::new(),
+            inline_boxes: Arc::default(),
             runs: Vec::new(),
-            items: Vec::new(),
+            items: Arc::default(),
             clusters: Vec::new(),
             glyphs: Vec::new(),
             shaping_source_text: None,
@@ -1655,9 +1654,17 @@ impl<B: Brush> LayoutData<B> {
         self.fonts.clear();
         self.coords.clear();
         self.styles.clear();
-        self.inline_boxes.clear();
+        if let Some(values) = Arc::get_mut(&mut self.inline_boxes) {
+            values.clear();
+        } else {
+            self.inline_boxes = Arc::default();
+        }
         self.runs.clear();
-        self.items.clear();
+        if let Some(values) = Arc::get_mut(&mut self.items) {
+            values.clear();
+        } else {
+            self.items = Arc::default();
+        }
         self.clusters.clear();
         self.glyphs.clear();
         self.shaping_source_text = None;
@@ -1699,7 +1706,7 @@ impl<B: Brush> LayoutData<B> {
     /// Prince and AHF on the `ui/accent-color/checked-checkbox-rtl`
     /// scenario family.
     pub(crate) fn push_inline_box(&mut self, index: usize, surrounding_level: u8) {
-        self.items.push(LayoutItem {
+        Arc::make_mut(&mut self.items).push(LayoutItem {
             kind: LayoutItemKind::InlineBox,
             index,
             bidi_level: surrounding_level,
@@ -2043,7 +2050,7 @@ impl<B: Brush> LayoutData<B> {
                 .position(|cluster| cluster.text_range(run).start >= boundary)
                 .map_or(run_cluster_range.end, |offset| cluster_start + offset);
             if text_start < boundary || cluster_start < cluster_end {
-                self.items.push(LayoutItem {
+                Arc::make_mut(&mut self.items).push(LayoutItem {
                     kind: LayoutItemKind::TextRun,
                     index: run_index,
                     bidi_level,
@@ -2056,7 +2063,7 @@ impl<B: Brush> LayoutData<B> {
             cluster_start = cluster_end;
         }
         if text_start < run_text_range.end || cluster_start < run_cluster_range.end {
-            self.items.push(LayoutItem {
+            Arc::make_mut(&mut self.items).push(LayoutItem {
                 kind: LayoutItemKind::TextRun,
                 index: run_index,
                 bidi_level,
@@ -2069,8 +2076,14 @@ impl<B: Brush> LayoutData<B> {
     /// Gives back the letter spacing that a previous line break removed from
     /// line-ending clusters, so the layout can be broken again from scratch.
     pub(crate) fn restore_line_end_letter_spacing(&mut self) {
-        for inline_box in &mut self.inline_boxes {
-            inline_box.restore_letter_spacing();
+        if self
+            .inline_boxes
+            .iter()
+            .any(InlineBox::needs_letter_spacing_restore)
+        {
+            for inline_box in Arc::make_mut(&mut self.inline_boxes) {
+                inline_box.restore_letter_spacing();
+            }
         }
         for run in &self.runs {
             for index in run.cluster_range.clone() {
@@ -2131,7 +2144,7 @@ impl<B: Brush> LayoutData<B> {
             run.glyph_start = 0;
             run.advance = 0.0;
         }
-        for item in &mut self.items {
+        for item in Arc::make_mut(&mut self.items) {
             item.text_range = 0..0;
             item.cluster_range = 0..0;
         }

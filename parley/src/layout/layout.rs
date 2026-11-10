@@ -665,7 +665,7 @@ impl<B: Brush> Layout<B> {
     }
 
     pub fn inline_boxes_mut(&mut self) -> &mut [InlineBox] {
-        &mut self.data.inline_boxes
+        Arc::make_mut(&mut self.data.inline_boxes).as_mut_slice()
     }
 
     /// Returns the shaped font runs before or after line breaking.

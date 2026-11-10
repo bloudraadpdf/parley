@@ -1,7 +1,7 @@
 // Copyright 2026 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
 use super::{BreakLines, BreakerState, LineTabOrigin};
 use crate::layout::data::{ClusterData, LayoutData, LineData, LineItemData};
@@ -87,7 +87,7 @@ impl CandidateMutations {
                 CandidateMutation::Cluster { index, before, .. } => data.clusters[*index] = *before,
                 CandidateMutation::Glyph { index, before, .. } => data.glyphs[*index] = *before,
                 CandidateMutation::InlineBox { index, before, .. } => {
-                    data.inline_boxes[*index] = before.clone();
+                    Arc::make_mut(&mut data.inline_boxes)[*index] = before.clone();
                 }
             }
         }
@@ -99,7 +99,7 @@ impl CandidateMutations {
                 CandidateMutation::Cluster { index, after, .. } => data.clusters[*index] = *after,
                 CandidateMutation::Glyph { index, after, .. } => data.glyphs[*index] = *after,
                 CandidateMutation::InlineBox { index, after, .. } => {
-                    data.inline_boxes[*index] = after.clone();
+                    Arc::make_mut(&mut data.inline_boxes)[*index] = after.clone();
                 }
             }
         }

@@ -3,7 +3,7 @@
 
 //! Greedy line breaking.
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 #[cfg(feature = "libm")]
 #[allow(unused_imports)]
@@ -2918,7 +2918,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     CandidateMutations::inline_box(
                         &mut self.candidate_mutations,
                         box_index,
-                        &mut data.inline_boxes[box_index],
+                        &mut Arc::make_mut(&mut data.inline_boxes)[box_index],
                         |inline_box| {
                             inline_box.resolve_letter_spacing(retained);
                         },

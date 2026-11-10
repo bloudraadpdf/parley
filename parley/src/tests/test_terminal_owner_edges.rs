@@ -106,7 +106,7 @@ fn following_content_preserves_edge_until_the_selected_wrap() {
 fn preceding_sibling_space_does_not_trim_an_empty_owner() {
     let mut value = layout("X  ", 20.0, false);
     // The final edge belongs to an empty sibling beginning after the spaces.
-    value.data.inline_boxes[0] = InlineBox::inline_end_edge(
+    value.inline_boxes_mut()[0] = InlineBox::inline_end_edge(
         7,
         3,
         InlineOwnerEdgeAdvance::uniform(25.0)

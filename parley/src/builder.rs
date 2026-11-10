@@ -9,7 +9,7 @@ use super::style::{BaseDirection, Brush, StyleProperty, TextStyle, WhiteSpaceCol
 
 use super::layout::Layout;
 
-use alloc::string::String;
+use alloc::{string::String, sync::Arc};
 use core::ops::{Bound, Range, RangeBounds};
 use hashbrown::HashSet;
 
@@ -385,8 +385,11 @@ fn build_into_layout<B: Brush>(
     }
 
     // Move inline boxes into the layout
-    layout.data.inline_boxes.clear();
-    core::mem::swap(&mut layout.data.inline_boxes, &mut lcx.inline_boxes);
+    Arc::make_mut(&mut layout.data.inline_boxes).clear();
+    core::mem::swap(
+        Arc::make_mut(&mut layout.data.inline_boxes),
+        &mut lcx.inline_boxes,
+    );
 
     layout
         .data

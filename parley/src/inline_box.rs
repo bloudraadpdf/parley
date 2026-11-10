@@ -322,6 +322,10 @@ impl InlineBox {
         self.applied_letter_spacing = spacing;
     }
 
+    pub(crate) fn needs_letter_spacing_restore(&self) -> bool {
+        self.applied_letter_spacing.to_bits() != self.letter_spacing.to_bits()
+    }
+
     pub(crate) fn restore_letter_spacing(&mut self) {
         self.applied_letter_spacing = self.letter_spacing;
     }

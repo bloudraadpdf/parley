@@ -242,7 +242,7 @@ impl DeferredSourceShape {
             safe_concat_boundaries: safe_concat_boundaries(&shaped.glyphs, text, range.start),
         };
         scratch.runs.clear();
-        scratch.items.clear();
+        alloc::sync::Arc::make_mut(&mut scratch.items).clear();
         scratch.coords.clear();
         context.unicode_buffer = Some(shaped.glyphs.clear());
         result
