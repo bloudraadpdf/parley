@@ -1326,11 +1326,11 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) coords: Vec<i16>,
 
     // Input (/ output of style resolution)
-    pub(crate) styles: Vec<Style<B>>,
+    pub(crate) styles: Arc<Vec<Style<B>>>,
     pub(crate) inline_boxes: Arc<Vec<InlineBox>>,
 
     // Output of shaping
-    pub(crate) runs: Vec<RunData>,
+    pub(crate) runs: Arc<Vec<RunData>>,
     pub(crate) items: Arc<Vec<LayoutItem>>,
     pub(crate) clusters: Vec<ClusterData>,
     pub(crate) glyphs: Vec<Glyph>,
@@ -1406,9 +1406,9 @@ impl<B: Brush> Default for LayoutData<B> {
             height: 0.,
             fonts: Vec::new(),
             coords: Vec::new(),
-            styles: Vec::new(),
+            styles: Arc::default(),
             inline_boxes: Arc::default(),
-            runs: Vec::new(),
+            runs: Arc::default(),
             items: Arc::default(),
             clusters: Vec::new(),
             glyphs: Vec::new(),
@@ -1653,13 +1653,21 @@ impl<B: Brush> LayoutData<B> {
         self.height = 0.;
         self.fonts.clear();
         self.coords.clear();
-        self.styles.clear();
+        if let Some(values) = Arc::get_mut(&mut self.styles) {
+            values.clear();
+        } else {
+            self.styles = Arc::default();
+        }
         if let Some(values) = Arc::get_mut(&mut self.inline_boxes) {
             values.clear();
         } else {
             self.inline_boxes = Arc::default();
         }
-        self.runs.clear();
+        if let Some(values) = Arc::get_mut(&mut self.runs) {
+            values.clear();
+        } else {
+            self.runs = Arc::default();
+        }
         if let Some(values) = Arc::get_mut(&mut self.items) {
             values.clear();
         } else {
@@ -2036,7 +2044,7 @@ impl<B: Brush> LayoutData<B> {
         let run_text_range = run.text_range.clone();
         let run_cluster_range = run.cluster_range.clone();
         let bidi_level = run.bidi_level;
-        self.runs.push(run);
+        Arc::make_mut(&mut self.runs).push(run);
 
         let mut text_start = run_text_range.start;
         let mut cluster_start = run_cluster_range.start;
@@ -2085,7 +2093,7 @@ impl<B: Brush> LayoutData<B> {
                 inline_box.restore_letter_spacing();
             }
         }
-        for run in &self.runs {
+        for run in self.runs.iter() {
             for index in run.cluster_range.clone() {
                 let trimmed = self.clusters[index].trimmed_letter_spacing;
                 if nearly_zero(trimmed) {
@@ -2110,7 +2118,7 @@ impl<B: Brush> LayoutData<B> {
         // same spacing unit, including when a grapheme ends in a variation selector.
         let mut boundaries = grapheme_boundaries.peekable();
         let mut last_visible: Option<usize> = None;
-        for run in &self.runs {
+        for run in self.runs.iter() {
             for index in run.cluster_range.clone() {
                 let cluster = &self.clusters[index];
                 let source_start = cluster.text_range(run).start;
@@ -2138,7 +2146,7 @@ impl<B: Brush> LayoutData<B> {
     pub(crate) fn retain_empty_text_metrics(&mut self) {
         self.clusters.clear();
         self.glyphs.clear();
-        for run in &mut self.runs {
+        for run in Arc::make_mut(&mut self.runs) {
             run.text_range = 0..0;
             run.cluster_range = 0..0;
             run.glyph_start = 0;
@@ -2156,7 +2164,7 @@ impl<B: Brush> LayoutData<B> {
     }
 
     pub(crate) fn finish_advances(&mut self) {
-        for run in &self.runs {
+        for run in self.runs.iter() {
             for index in run.cluster_range.clone() {
                 self.clusters[index].flags &= !ClusterData::LETTER_SPACING_BOUNDARY;
                 if self.clusters[index].flags & ClusterData::GRAPHEME_END == 0 {
@@ -2201,7 +2209,7 @@ impl<B: Brush> LayoutData<B> {
         // Set default tab advances based on tab_size and the run's space advance.
         // This provides a reasonable default for intrinsic sizing; the line breaker
         // will override with position-dependent values during layout.
-        for run in &self.runs {
+        for run in self.runs.iter() {
             let space_advance = run.metrics.space_advance;
             let space_glyph_id = run.metrics.space_glyph_id;
             let cluster_range = run.cluster_range.clone();

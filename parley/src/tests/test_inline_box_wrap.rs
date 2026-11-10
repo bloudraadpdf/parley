@@ -2817,3 +2817,31 @@ fn cloned_shape_line_breaking_and_mutation_preserve_the_source() {
     assert!(cloned.inline_boxes().is_empty());
     assert!(!cloned.data.items.is_empty());
 }
+
+#[test]
+fn cloned_shape_shares_runs_and_styles_through_line_breaking() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let source = build_inline_box_layout(&mut lcx, &mut fcx, "A B C D", 10.0, None, []);
+    assert!(!source.data.runs.is_empty());
+    assert!(!source.styles().is_empty());
+    let mut cloned = source.clone();
+    assert_eq!(
+        (
+            source.data.runs.as_ptr() == cloned.data.runs.as_ptr(),
+            source.styles().as_ptr() == cloned.styles().as_ptr()
+        ),
+        (true, true),
+    );
+    cloned.break_all_lines(Some(20.0));
+    assert_eq!(source.data.runs.as_ptr(), cloned.data.runs.as_ptr());
+    assert_eq!(source.styles().as_ptr(), cloned.styles().as_ptr());
+    let retained = source.data.clone();
+    let mut builder = lcx.ranged_builder(&mut fcx, "replacement", 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(30.0));
+    builder.build_into(&mut cloned, "replacement");
+    assert_eq!(source.data, retained);
+    assert_ne!(source.data.runs.as_ptr(), cloned.data.runs.as_ptr());
+    assert_ne!(source.styles().as_ptr(), cloned.styles().as_ptr());
+}

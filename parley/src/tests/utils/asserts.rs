@@ -12,7 +12,7 @@ fn canonicalize_layout_data<B: Brush>(layout_data: &LayoutData<B>) -> LayoutData
     let mut canonical_styles = Vec::with_capacity(normalized.styles.len());
     let mut remap = Vec::with_capacity(normalized.styles.len());
 
-    for style in &normalized.styles {
+    for style in normalized.styles.iter() {
         if let Some(index) = canonical_styles
             .iter()
             .position(|existing| existing == style)
@@ -31,7 +31,7 @@ fn canonicalize_layout_data<B: Brush>(layout_data: &LayoutData<B>) -> LayoutData
     for glyph in &mut normalized.glyphs {
         glyph.style_index = remap[glyph.style_index as usize];
     }
-    normalized.styles = canonical_styles;
+    normalized.styles = canonical_styles.into();
     normalized
 }
 

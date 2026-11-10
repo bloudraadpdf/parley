@@ -353,9 +353,7 @@ fn build_into_layout<B: Brush>(
     }
 
     // Copy the visual styles into the layout
-    layout
-        .data
-        .styles
+    Arc::make_mut(&mut layout.data.styles)
         .extend(lcx.style_table.iter().map(|s| s.as_layout_style()));
 
     // Sort the inline boxes as subsequent code assumes that they are in text index order.
