@@ -1779,3 +1779,48 @@ fn source_justification_expands_inline_group_contents_by_their_opportunity_count
         assert_eq!(boxes(&layout), original);
     }
 }
+
+#[test]
+fn selected_inline_group_opportunities_expand_an_empty_source_last_line() {
+    use crate::{JustificationOpportunity::WithinInlineBox, PositionedLayoutItem};
+    for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+        let mut layout = configured_layout("", |builder| {
+            builder.set_direction(direction);
+            builder.push_inline_box(InlineBox::new(41, 0, 75.0, 0.0).with_letter_spacing(0.0));
+        });
+        let width = |layout: &Layout<ColorBrush>| {
+            layout
+                .get(0)
+                .unwrap()
+                .items()
+                .find_map(|item| match item {
+                    PositionedLayoutItem::InlineBox(value) => Some(value.width),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        layout.break_all_lines(Some(150.0));
+        assert_eq!(layout.get(0).unwrap().text_range(), 0..0);
+        for _ in 0..2 {
+            layout.set_selected_line_justification_opportunities(vec![WithinInlineBox {
+                id: 41,
+                opportunities: 1,
+            }]);
+            layout.align(
+                Some(150.0),
+                Alignment::Start,
+                AlignmentOptions {
+                    justification_mode: crate::JustificationMode::SourceOpportunities,
+                    last_line_alignment: Some(Alignment::Justify),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(width(&layout), 150.0);
+            layout.align(Some(150.0), Alignment::Start, AlignmentOptions::default());
+            assert_eq!(width(&layout), 75.0);
+        }
+        layout.break_all_lines(Some(75.0));
+        assert_eq!(layout.get(0).unwrap().text_range(), 0..0);
+        assert_eq!(width(&layout), 75.0);
+    }
+}

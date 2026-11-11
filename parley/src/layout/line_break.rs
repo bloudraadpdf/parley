@@ -3217,6 +3217,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             match line_item.kind {
                 LayoutItemKind::InlineBox => {
                     let item = &self.layout.data.inline_boxes[line_item.index];
+                    if matches!(
+                        item.line_break_participation(),
+                        InlineBoxLineBreakParticipation::Atomic(_)
+                    ) {
+                        line.text_range.start = line.text_range.start.min(item.index);
+                        line.text_range.end = line.text_range.end.max(item.index);
+                    }
 
                     if line_item.bidi_level != 0 {
                         needs_reorder = true;
