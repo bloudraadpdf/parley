@@ -904,3 +904,33 @@ fn empty_inline_edges_separate_the_two_tracking_halves() {
         }
     }
 }
+
+#[test]
+fn word_separator_kerning_policy_keeps_internal_pairs() {
+    let measure = |text: &str, across_spaces: bool, enabled: bool| {
+        configured_layout("Arimo", text, 0.0, |builder| {
+            builder.push_default(StyleProperty::KerningAcrossSpaces(across_spaces));
+            let features = [crate::setting::FontFeature::new(
+                crate::setting::Tag::from_bytes(*b"kern"),
+                u16::from(enabled),
+            )];
+            builder.push_default(StyleProperty::FontFeatures((&features).into()));
+        })
+        .full_width()
+    };
+    for word in ["AV", "To", "WA"] {
+        let ordinary = measure(word, true, true);
+        assert_eq!(measure(word, false, true), ordinary, "{word}");
+        assert!(
+            ordinary < measure(word, false, false),
+            "{word} keeps real word kerning"
+        );
+    }
+    for text in ["A V", "T o", "Z A"] {
+        assert_eq!(
+            measure(text, false, true),
+            measure(text, true, false),
+            "{text}"
+        );
+    }
+}

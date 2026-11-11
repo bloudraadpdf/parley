@@ -265,6 +265,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         letter_spacing: 1.5,
         justify_shrink: 0.25,
         line_end_space: LineEndSpace::Kept,
+        kerning_across_spaces: false,
         wrap_avoid_depth: 2,
         word_break: WordBreak::BreakAll,
         line_break_mode: LineBreakMode::Anywhere,
@@ -316,6 +317,7 @@ fn set_root_style(rb: &mut RangedBuilder<'_, ColorBrush>) {
     rb.push_default(StyleProperty::LetterSpacing(1.5));
     rb.push_default(StyleProperty::JustifyShrink(0.25));
     rb.push_default(StyleProperty::LineEndSpace(LineEndSpace::Kept));
+    rb.push_default(StyleProperty::KerningAcrossSpaces(false));
     rb.push_default(StyleProperty::WrapAvoidDepth(2));
     rb.push_default(StyleProperty::WordBreak(WordBreak::BreakAll));
     rb.push_default(StyleProperty::LineBreakMode(LineBreakMode::Anywhere));

@@ -13,6 +13,7 @@ pub(super) struct SegmentShape<'a> {
     pub(super) variations: Option<&'a [FontVariation]>,
     pub(super) features: &'a [harfrust::Feature],
     pub(super) disabled_pair_kerning: &'a [u32],
+    pub(super) kerning_across_spaces: bool,
     pub(super) size: f32,
     pub(super) direction: harfrust::Direction,
     pub(super) script: harfrust::Script,
@@ -150,10 +151,26 @@ impl ShapeContext {
                 },
             )
         };
+        let mut disabled_pairs = Vec::new();
+        let disabled_pair_kerning = if input.kerning_across_spaces {
+            input.disabled_pair_kerning
+        } else {
+            let mut after_space = false;
+            for (index, character) in input.text.chars().enumerate() {
+                if index > 0 && (after_space || character == ' ') {
+                    disabled_pairs.push(index as u32);
+                }
+                after_space = character == ' ';
+            }
+            disabled_pairs.extend_from_slice(input.disabled_pair_kerning);
+            disabled_pairs.sort_unstable();
+            disabled_pairs.dedup();
+            disabled_pairs.as_slice()
+        };
         let options = harfrust::ShapeOptions::new()
             .plan(Some(plan))
             .features(input.features)
-            .disable_pair_kerning_at(input.disabled_pair_kerning)
+            .disable_pair_kerning_at(disabled_pair_kerning)
             .point_size(Some(input.size));
         let options = match em_box.as_mut() {
             Some(funcs) => options.font_funcs(Some(funcs)),

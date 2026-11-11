@@ -248,6 +248,8 @@ pub enum StyleProperty<'a, B: Brush> {
     JustifyShrink(f32),
     /// Whether a collapsible space at the end of a line is removed or kept.
     LineEndSpace(LineEndSpace),
+    /// Whether optional pair kerning crosses U+0020 word separators.
+    KerningAcrossSpaces(bool),
     /// Nesting depth of the `wrap-inside: avoid` boxes that contain the text. A soft wrap opportunity in a shallower box is
     /// taken before one in a deeper box, so only the lowest depth on a line is broken at.
     WrapAvoidDepth(u8),
@@ -335,6 +337,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub justify_shrink: f32,
     /// Whether a collapsible space at the end of a line is removed or kept.
     pub line_end_space: LineEndSpace,
+    /// Whether optional pair kerning crosses U+0020 word separators.
+    pub kerning_across_spaces: bool,
     /// Nesting depth of the containing `wrap-inside: avoid` boxes.
     pub wrap_avoid_depth: u8,
     /// Control over where words can wrap.
@@ -388,6 +392,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             letter_spacing: 0.0,
             justify_shrink: 0.0,
             line_end_space: LineEndSpace::default(),
+            kerning_across_spaces: true,
             wrap_avoid_depth: 0,
             word_break: WordBreak::default(),
             line_break_mode: LineBreakMode::default(),

@@ -86,6 +86,7 @@ pub struct Style<B: Brush> {
     pub(crate) justify_shrink: f32,
     /// Whether a collapsible space at the end of a line is removed or kept.
     pub(crate) line_end_space: crate::LineEndSpace,
+    pub(crate) kerning_across_spaces: bool,
     /// Nesting depth of the containing `wrap-inside: avoid` boxes.
     pub(crate) wrap_avoid_depth: u8,
     /// Per-cluster text-wrap-mode setting

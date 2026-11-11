@@ -179,6 +179,7 @@ impl ResolveContext {
             StyleProperty::LetterSpacing(value) => LetterSpacing(*value * scale),
             StyleProperty::JustifyShrink(value) => JustifyShrink(*value),
             StyleProperty::LineEndSpace(value) => LineEndSpace(*value),
+            StyleProperty::KerningAcrossSpaces(value) => KerningAcrossSpaces(*value),
             StyleProperty::WrapAvoidDepth(value) => WrapAvoidDepth(*value),
             StyleProperty::WordBreak(value) => WordBreak(*value),
             StyleProperty::LineBreakMode(value) => LineBreakMode(*value),
@@ -209,7 +210,7 @@ impl ResolveContext {
             font_features_for_justification: self
                 .resolve_features(&raw_style.font_features_for_justification),
             shaping_orientation: raw_style.shaping_orientation,
-            font_metric_advance_quantization: FontMetricAdvanceProjection(
+            font_metric_advance_quantization: DefaultEnabled(
                 raw_style.font_metric_advance_quantization,
             ),
             locale: raw_style.locale,
@@ -238,6 +239,7 @@ impl ResolveContext {
             letter_spacing: raw_style.letter_spacing * scale,
             justify_shrink: raw_style.justify_shrink,
             line_end_space: raw_style.line_end_space,
+            kerning_across_spaces: DefaultEnabled(raw_style.kerning_across_spaces),
             wrap_avoid_depth: raw_style.wrap_avoid_depth,
             word_break: raw_style.word_break,
             line_break_mode: raw_style.line_break_mode,
@@ -447,6 +449,7 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     JustifyShrink(f32),
     /// Whether a collapsible space at the end of a line is removed or kept.
     LineEndSpace(LineEndSpace),
+    KerningAcrossSpaces(bool),
     /// Nesting depth of the containing `wrap-inside: avoid` boxes.
     WrapAvoidDepth(u8),
     /// Control over where words can wrap.
@@ -467,9 +470,9 @@ pub(crate) enum ResolvedProperty<B: Brush> {
 
 /// Boolean style state whose semantic default is enabled.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct FontMetricAdvanceProjection(bool);
+struct DefaultEnabled(bool);
 
-impl Default for FontMetricAdvanceProjection {
+impl Default for DefaultEnabled {
     fn default() -> Self {
         Self(true)
     }
@@ -499,7 +502,7 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) font_features_for_justification: Resolved<FontFeature>,
     /// Whether the consumer-selected fixed font-metric grid applies to this
     /// style run.
-    font_metric_advance_quantization: FontMetricAdvanceProjection,
+    font_metric_advance_quantization: DefaultEnabled,
     pub(crate) shaping_orientation: crate::ShapingOrientation,
     /// Locale.
     pub(crate) locale: Option<Language>,
@@ -523,6 +526,7 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) justify_shrink: f32,
     /// Whether a collapsible space at the end of a line is removed or kept.
     pub(crate) line_end_space: LineEndSpace,
+    kerning_across_spaces: DefaultEnabled,
     /// Nesting depth of the containing `wrap-inside: avoid` boxes.
     pub(crate) wrap_avoid_depth: u8,
     /// Control over where words can wrap.
@@ -542,6 +546,10 @@ pub(crate) struct ResolvedStyle<B: Brush> {
 }
 
 impl<B: Brush> ResolvedStyle<B> {
+    pub(crate) fn kerning_across_spaces(&self) -> bool {
+        self.kerning_across_spaces.0
+    }
+
     /// Applies the specified property to this style.
     pub(crate) fn apply(&mut self, property: ResolvedProperty<B>) {
         use ResolvedProperty::*;
@@ -557,7 +565,7 @@ impl<B: Brush> ResolvedStyle<B> {
             FontFeatures(value) => self.font_features = value,
             FontFeaturesForJustification(value) => self.font_features_for_justification = value,
             FontMetricAdvanceQuantization(value) => {
-                self.font_metric_advance_quantization = FontMetricAdvanceProjection(value);
+                self.font_metric_advance_quantization = DefaultEnabled(value);
             }
             ShapingOrientation(value) => self.shaping_orientation = value,
             Locale(value) => self.locale = value,
@@ -580,6 +588,7 @@ impl<B: Brush> ResolvedStyle<B> {
             LetterSpacing(value) => self.letter_spacing = value,
             JustifyShrink(value) => self.justify_shrink = value,
             LineEndSpace(value) => self.line_end_space = value,
+            KerningAcrossSpaces(value) => self.kerning_across_spaces = DefaultEnabled(value),
             WrapAvoidDepth(value) => self.wrap_avoid_depth = value,
             WordBreak(value) => self.word_break = value,
             LineBreakMode(value) => self.line_break_mode = value,
@@ -628,6 +637,7 @@ impl<B: Brush> ResolvedStyle<B> {
             LetterSpacing(value) => nearly_eq(self.letter_spacing, *value),
             JustifyShrink(value) => nearly_eq(self.justify_shrink, *value),
             LineEndSpace(value) => self.line_end_space == *value,
+            KerningAcrossSpaces(value) => self.kerning_across_spaces.0 == *value,
             WrapAvoidDepth(value) => self.wrap_avoid_depth == *value,
             WordBreak(value) => self.word_break == *value,
             LineBreakMode(value) => self.line_break_mode == *value,
@@ -650,6 +660,7 @@ impl<B: Brush> ResolvedStyle<B> {
             overflow_wrap: self.overflow_wrap,
             justify_shrink: self.justify_shrink,
             line_end_space: self.line_end_space,
+            kerning_across_spaces: self.kerning_across_spaces.0,
             wrap_avoid_depth: self.wrap_avoid_depth,
             text_wrap_mode: self.text_wrap_mode,
             white_space_collapse: self.white_space_collapse,

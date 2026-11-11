@@ -71,6 +71,7 @@ struct Item {
     font_language_override: Option<[u8; 4]>,
     variations: Resolved<FontVariation>,
     features: Resolved<FontFeature>,
+    kerning_across_spaces: bool,
     word_spacing: f32,
     letter_spacing: f32,
 }
@@ -158,6 +159,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
         font_language_override: style.font_language_override,
         variations: style.font_variations,
         features: style.font_features,
+        kerning_across_spaces: style.kerning_across_spaces(),
         word_spacing: style.word_spacing,
         letter_spacing: style.letter_spacing,
     };
@@ -209,6 +211,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 || next_style.font_language_override != item.font_language_override
                 || next_style.font_variations != item.variations
                 || next_style.font_features != item.features
+                || next_style.kerning_across_spaces() != item.kerning_across_spaces
                 || next_style.shaping_orientation != item.orientation
                 || !nearly_eq(next_style.letter_spacing, item.letter_spacing)
                 || !nearly_eq(next_style.word_spacing, item.word_spacing)
@@ -295,6 +298,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
             item.font_language_override = style.font_language_override;
             item.variations = style.font_variations;
             item.features = style.font_features;
+            item.kerning_across_spaces = style.kerning_across_spaces();
             item.orientation = style.shaping_orientation;
             item.word_spacing = style.word_spacing;
             item.letter_spacing = style.letter_spacing;
@@ -567,6 +571,7 @@ fn shape_item<'a, B: Brush>(
             variations: rcx.variations(item.variations),
             features: &features,
             disabled_pair_kerning: &[],
+            kerning_across_spaces: item.kerning_across_spaces,
             size: item.size,
             direction,
             script: hb_script,
@@ -587,6 +592,7 @@ fn shape_item<'a, B: Brush>(
                 variations: rcx.variations(item.variations),
                 features: &features,
                 disabled_pair_kerning: &line_end_spaces,
+                kerning_across_spaces: item.kerning_across_spaces,
                 size: item.size,
                 direction,
                 script: hb_script,

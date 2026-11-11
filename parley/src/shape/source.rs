@@ -161,6 +161,9 @@ impl DeferredSourceShape {
             variations: self.variations.as_deref(),
             features: &features,
             disabled_pair_kerning: &disabled_pair_kerning,
+            kerning_across_spaces: infos
+                .first()
+                .is_none_or(|(_, style)| data.styles[*style as usize].kerning_across_spaces),
             size: run.font_size,
             direction: if run.shaping_orientation == crate::ShapingOrientation::UprightVertical {
                 harfrust::Direction::TopToBottom
