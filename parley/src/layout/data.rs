@@ -1197,7 +1197,8 @@ pub(crate) struct LineItemData {
     pub(crate) advance: f32,
     /// Placement between the outgoing and incoming tracking halves.
     pub(crate) letter_spacing_offset: f32,
-    pub(crate) terminal_owner_edge_reduction: f32,
+    pub(crate) terminal_inline_space_reduction: f32,
+    pub(crate) terminal_source_space: bool,
 
     // Fields that only apply to text runs (Ignored for boxes)
     // TODO: factor this out?
@@ -1220,7 +1221,8 @@ impl LineItemData {
             layout_item_index: source,
             advance,
             letter_spacing_offset: 0.0,
-            terminal_owner_edge_reduction: 0.0,
+            terminal_inline_space_reduction: 0.0,
+            terminal_source_space: false,
             is_whitespace: false,
             has_trailing_whitespace: false,
             cluster_range: 0..0,
@@ -2467,17 +2469,20 @@ impl<B: Brush> LayoutData<B> {
                         min_spacing.include(self, item_index, None);
                         min_spacing.measure(trim);
                         max_spacing.measure(trim);
-                        trailing_min_width = 0.0;
-                        trailing_max_width = 0.0;
-                        trailing_unconditional_max_width = 0.0;
+                        let terminal =
+                            f64::from(ibox.terminal_source_space_reduction().unwrap_or(0.0));
+                        trailing_min_width = terminal;
+                        trailing_max_width = terminal;
+                        trailing_unconditional_max_width = terminal;
                         if can_wrap && break_after {
                             min_spacing.finish(
                                 &cloned_owners,
                                 &mut min_width,
                                 &mut running_min_width,
-                                0.0,
+                                terminal,
                                 false,
                             );
+                            trailing_min_width = 0.0;
                         }
                     };
                     match ibox.line_break_participation() {

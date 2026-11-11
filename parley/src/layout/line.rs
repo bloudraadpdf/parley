@@ -315,6 +315,8 @@ pub struct PositionedInlineBox {
     pub width: f32,
     pub height: f32,
     pub id: u64,
+    /// Whether caller-supplied terminal source spacing was selected.
+    pub terminal_source_space: bool,
 }
 
 /// Sequence of fully positioned glyphs with the same style.
@@ -431,10 +433,11 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                         x,
                         y: self.line.data.metrics.baseline - inline_box.height(),
                         width: inline_box.width_for_line(self.line.index as usize)
-                            - item_data.terminal_owner_edge_reduction
+                            - item_data.terminal_inline_space_reduction
                             + content_expansion,
                         height: inline_box.height(),
                         id: inline_box.id,
+                        terminal_source_space: item_data.terminal_source_space,
                     }));
                 }
                 LineItem::Run(run) => {

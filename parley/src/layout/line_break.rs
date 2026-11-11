@@ -619,6 +619,7 @@ impl BreakerState {
         box_height: f32,
         participation: InlineBoxShapingParticipation,
         source_kind: InlineBoxSourceKind,
+        terminal_source_space_reduction: Option<f32>,
     ) {
         // self.item_idx += 1;
         self.line.items.end += 1;
@@ -627,6 +628,7 @@ impl BreakerState {
         self.add_line_height(box_height);
         if participation.has_inline_advance() {
             self.line.content_end = self.line.measure();
+            self.line.content_end.advance -= terminal_source_space_reduction.unwrap_or(0.0);
         }
         self.last_appended_authored_unit = AuthoredBreakUnit::Other;
         if source_kind != InlineBoxSourceKind::EmptyInlineContent {
@@ -1083,6 +1085,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 inline_box.height(),
                 inline_box.shaping_participation(),
                 inline_box.source_kind(),
+                inline_box.terminal_source_space_reduction(),
             );
             state.line.cloned_owners.after_edge(inline_box);
             next += 1;
@@ -1444,6 +1447,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let inline_box = &self.layout.data.inline_boxes[inline_box_index];
                     let shaping_participation = inline_box.shaping_participation();
                     let source_kind = inline_box.source_kind();
+                    let terminal_source_space_reduction =
+                        inline_box.terminal_source_space_reduction();
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
@@ -1496,6 +1501,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                         height,
                                         shaping_participation,
                                         source_kind,
+                                        terminal_source_space_reduction,
                                     );
                                 }
                             } else {
@@ -1506,6 +1512,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     height,
                                     shaping_participation,
                                     source_kind,
+                                    terminal_source_space_reduction,
                                 );
                             }
                             continue;
@@ -1614,6 +1621,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 edge_height,
                                 shaping_participation,
                                 source_kind,
+                                terminal_source_space_reduction,
                             );
                             self.state
                                 .line
@@ -1638,6 +1646,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 0.0,
                                 shaping_participation,
                                 source_kind,
+                                terminal_source_space_reduction,
                             );
                             continue;
                         }
@@ -1708,7 +1717,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         resolved_contribution,
                         next_fit_x - tracking_correction,
                         max_advance,
-                    ) || (break_affinity == InlineBoxBreakAffinity::SourceText
+                    ) || terminal_source_space_reduction.is_some_and(|reduction| {
+                        self.advance_contribution_fits(
+                            resolved_contribution - reduction,
+                            next_fit_x - tracking_correction - reduction,
+                            max_advance,
+                        )
+                    }) || (break_affinity == InlineBoxBreakAffinity::SourceText
                         && self.state.line.text_wrap_mode != TextWrapMode::Wrap)
                     {
                         // println!("BOX FITS");
@@ -1721,6 +1736,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             height,
                             shaping_participation,
                             source_kind,
+                            terminal_source_space_reduction,
                         );
 
                         // We can always line break after a REPLACED inline
@@ -1743,6 +1759,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 height,
                                 shaping_participation,
                                 source_kind,
+                                terminal_source_space_reduction,
                             );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if !allows_break_before {
@@ -1769,6 +1786,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 box_height,
                                 shaping_participation,
                                 source_kind,
+                                terminal_source_space_reduction,
                             );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else {
@@ -2630,6 +2648,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             0.0,
                             inline_box.shaping_participation(),
                             inline_box.source_kind(),
+                            inline_box.terminal_source_space_reduction(),
                         );
                         self.state.line.cloned_owners.after_edge(inline_box);
                         continue;
@@ -2656,6 +2675,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         inline_box.height(),
                         inline_box.shaping_participation(),
                         inline_box.source_kind(),
+                        inline_box.terminal_source_space_reduction(),
                     );
                     self.state.line.cloned_owners.after_edge(inline_box);
                     self.state
@@ -3055,7 +3075,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     continue;
                 }
                 let item = &mut self.lines.line_items[index];
-                item.terminal_owner_edge_reduction = reduction;
+                item.terminal_inline_space_reduction = reduction;
                 item.advance -= reduction;
                 self.lines.lines[line_idx].metrics.advance -= reduction;
                 self.lines.lines[line_idx].source_fit_delta += reduction;
@@ -3091,10 +3111,20 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             .selected_source_cluster_advance
             .clone();
         let terminal = collect_terminal_whitespace(
-            &self.lines.line_items[item_range],
+            &self.lines.line_items[item_range.clone()],
             &self.layout.data,
             &selected_source_cluster_advance,
         );
+        if let Some(relative_index) = terminal.terminal_inline_source_space {
+            let item = &mut self.lines.line_items[item_range.start + relative_index];
+            let reduction = self.layout.data.inline_boxes[item.index]
+                .terminal_source_space_reduction()
+                .unwrap();
+            item.terminal_source_space = true;
+            item.terminal_inline_space_reduction += reduction;
+            item.advance -= reduction;
+            self.lines.lines[line_idx].metrics.advance -= reduction;
+        }
         let line = &mut self.lines.lines[line_idx];
         line.terminal_whitespace = terminal.whitespace;
         line.terminal_fit_whitespace = terminal.fit_whitespace;
@@ -3424,7 +3454,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         layout_item_index: None,
                         advance: 0.,
                         letter_spacing_offset: 0.0,
-                        terminal_owner_edge_reduction: 0.0,
+                        terminal_inline_space_reduction: 0.0,
+                        terminal_source_space: false,
                         is_whitespace: false,
                         has_trailing_whitespace: false,
                         cluster_range: cluster..cluster,
@@ -4180,7 +4211,8 @@ fn try_commit_line<B: Brush>(
                     layout_item_index: Some(state.items.start + i),
                     advance: 0.,
                     letter_spacing_offset: 0.0,
-                    terminal_owner_edge_reduction: 0.0,
+                    terminal_inline_space_reduction: 0.0,
+                    terminal_source_space: false,
                     is_whitespace: false,
                     has_trailing_whitespace: false,
                     cluster_range,
@@ -4368,6 +4400,7 @@ struct CollectedTerminalWhitespace {
     justification_spaces: usize,
     justification_start: Option<usize>,
     source_start: Option<usize>,
+    terminal_inline_source_space: Option<usize>,
 }
 
 fn collect_terminal_whitespace<B: Brush>(
@@ -4381,9 +4414,19 @@ fn collect_terminal_whitespace<B: Brush>(
     let mut justification_spaces = 0;
     let mut justification_start = None;
     let mut source_start = None;
-    'items: for line_item in line_items.iter().rev() {
+    let mut terminal_inline_source_space = None;
+    'items: for (item_index, line_item) in line_items.iter().enumerate().rev() {
         match line_item.kind {
             LayoutItemKind::InlineBox => {
+                if layout_data.inline_boxes[line_item.index]
+                    .terminal_source_space_reduction()
+                    .is_some()
+                {
+                    if terminal.removes_source(TerminalWhitespaceDisposition::Removed) {
+                        terminal_inline_source_space = Some(item_index);
+                    }
+                    break;
+                }
                 if blocks_source_whitespace(line_item, layout_data) {
                     break;
                 }
@@ -4436,6 +4479,7 @@ fn collect_terminal_whitespace<B: Brush>(
         justification_spaces,
         justification_start,
         source_start,
+        terminal_inline_source_space,
     }
 }
 

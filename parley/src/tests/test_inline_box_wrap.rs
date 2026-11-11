@@ -3024,3 +3024,164 @@ fn source_empty_inline_content_keeps_leading_whitespace_and_words_on_the_same_li
         }
     }
 }
+
+fn terminal_source_group_layout(
+    prefix: f32,
+    following: bool,
+    reduction: f32,
+    direction: crate::BaseDirection,
+) -> crate::Layout<ColorBrush> {
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, "", 1.0, false);
+    builder.set_direction(direction);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    if prefix > 0.0 {
+        builder.push_inline_box(InlineBox::new(90, 0, prefix, 10.0));
+    }
+    builder.push_inline_box(
+        InlineBox::new(91, 0, 40.0, 10.0)
+            .with_source_kind(crate::InlineBoxSourceKind::InlineContent)
+            .with_terminal_source_space_reduction(reduction),
+    );
+    if following {
+        builder.push_inline_box(InlineBox::new(92, 0, 20.0, 10.0));
+    }
+    builder.build("")
+}
+
+#[test]
+fn terminal_source_group_widths_preserve_continuing_admission_and_alignment() {
+    use crate::{Alignment, AlignmentOptions, BaseDirection, PositionedLayoutItem};
+    for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+        for (prefix, width, used, lines, terminal) in [
+            (0.0, 60.0, 40.0, 1, false),
+            (0.0, 50.0, 20.0, 2, true),
+            (10.0, 35.0, 20.0, 2, true),
+        ] {
+            let mut layout = terminal_source_group_layout(prefix, true, 20.0, direction);
+            for _ in 0..2 {
+                layout.break_all_lines(Some(width));
+                assert_eq!(
+                    layout.lines().count(),
+                    lines,
+                    "{direction:?}, {prefix}, {width}"
+                );
+                assert_eq!(inline_box_line(&layout, 91), 0);
+                assert_eq!(inline_box_line(&layout, 92), lines - 1);
+                let occupied = if terminal {
+                    prefix + used
+                } else {
+                    prefix + used + 20.0
+                };
+                assert_eq!(layout.get(0).unwrap().metrics().advance, occupied);
+                for (alignment, offset) in [
+                    (Alignment::Left, 0.0),
+                    (Alignment::Center, (width - occupied) * 0.5),
+                    (Alignment::Right, width - occupied),
+                ] {
+                    layout.align(Some(width), alignment, AlignmentOptions::default());
+                    let boxes = layout
+                        .get(0)
+                        .unwrap()
+                        .items()
+                        .filter_map(|item| match item {
+                            PositionedLayoutItem::InlineBox(value) => Some(value),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    let group = boxes.iter().find(|value| value.id == 91).unwrap();
+                    assert_eq!((group.width, group.terminal_source_space), (used, terminal));
+                    let first = boxes
+                        .iter()
+                        .map(|value| value.x)
+                        .fold(f32::INFINITY, f32::min);
+                    assert!(
+                        (first - offset).abs() < 0.001,
+                        "{direction:?} {alignment:?}: {boxes:?}"
+                    );
+                }
+                assert_eq!(
+                    layout
+                        .inline_boxes()
+                        .iter()
+                        .find(|value| value.id == 91)
+                        .unwrap()
+                        .width(),
+                    40.0
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn terminal_source_group_receipts_and_widths_survive_rebreak_and_unjustify() {
+    use crate::{
+        Alignment, AlignmentOptions, BaseDirection, JustificationMode, JustificationOpportunity,
+        PositionedLayoutItem,
+    };
+    let mut layout = terminal_source_group_layout(0.0, true, 20.0, BaseDirection::Ltr);
+    for (width, used, terminal) in [(60.0, 40.0, false), (50.0, 20.0, true), (60.0, 40.0, false)] {
+        layout.break_all_lines(Some(width));
+        let group = layout
+            .get(0)
+            .unwrap()
+            .items()
+            .find_map(|item| match item {
+                PositionedLayoutItem::InlineBox(value) if value.id == 91 => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((group.width, group.terminal_source_space), (used, terminal));
+    }
+    layout.break_all_lines(Some(50.0));
+    layout.set_selected_line_justification_opportunities(vec![
+        JustificationOpportunity::WithinInlineBox {
+            id: 91,
+            opportunities: 1,
+        },
+    ]);
+    layout.align(
+        Some(50.0),
+        Alignment::Justify,
+        AlignmentOptions {
+            justification_mode: JustificationMode::SourceOpportunities,
+            ..Default::default()
+        },
+    );
+    let group = |layout: &crate::Layout<ColorBrush>| {
+        layout
+            .get(0)
+            .unwrap()
+            .items()
+            .find_map(|item| match item {
+                PositionedLayoutItem::InlineBox(value) if value.id == 91 => {
+                    Some((value.width, value.terminal_source_space))
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(group(&layout), (50.0, true));
+    layout.align(Some(50.0), Alignment::Left, AlignmentOptions::default());
+    assert_eq!(group(&layout), (20.0, true));
+    let mut unchanged = terminal_source_group_layout(0.0, true, 0.0, BaseDirection::Ltr);
+    unchanged.break_all_lines(Some(50.0));
+    assert_eq!(group(&unchanged), (40.0, true));
+    unchanged.break_all_lines(Some(60.0));
+    assert_eq!(group(&unchanged), (40.0, false));
+}
+
+#[test]
+fn terminal_source_group_intrinsics_keep_full_width_when_source_continues() {
+    for following in [false, true] {
+        let layout = terminal_source_group_layout(0.0, following, 20.0, crate::BaseDirection::Ltr);
+        let widths = layout.calculate_content_widths();
+        assert_eq!(
+            (widths.min, widths.max),
+            (20.0, if following { 60.0 } else { 20.0 })
+        );
+    }
+}

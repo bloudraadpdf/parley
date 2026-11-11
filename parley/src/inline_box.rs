@@ -63,6 +63,8 @@ enum InlineBoxParticipation {
         width: f32,
         height: f32,
         break_affinity: InlineBoxBreakAffinity,
+        source_kind: InlineBoxSourceKind,
+        terminal_source_space_reduction: Option<f32>,
     },
     /// Contextual inline spacing which disappears when its boundary wraps.
     ContextualSpacing { width: f32, height: f32 },
@@ -297,7 +299,6 @@ pub struct InlineBox {
     /// The box's closed layout participation.
     participation: InlineBoxParticipation,
     preserves_shaping_context: bool,
-    source_kind: InlineBoxSourceKind,
     bidi_attachment: InlineBoxBidiAttachment,
     cloned_owner: Option<ClonedInlineOwner>,
     letter_spacing: f32,
@@ -307,14 +308,41 @@ pub struct InlineBox {
 impl InlineBox {
     /// Sets the source-flow contract of an atomic inline group.
     pub fn with_source_kind(mut self, kind: InlineBoxSourceKind) -> Self {
-        if matches!(self.participation, InlineBoxParticipation::Atomic { .. }) {
-            self.source_kind = kind;
+        if let InlineBoxParticipation::Atomic { source_kind, .. } = &mut self.participation {
+            *source_kind = kind;
         }
         self
     }
 
     pub(crate) const fn source_kind(&self) -> InlineBoxSourceKind {
-        self.source_kind
+        match self.participation {
+            InlineBoxParticipation::Atomic { source_kind, .. } => source_kind,
+            _ => InlineBoxSourceKind::Atomic,
+        }
+    }
+
+    /// Supplies the source-space advance removed only when this group ends a line.
+    /// A zero reduction still reports a terminal source-space selection.
+    pub fn with_terminal_source_space_reduction(mut self, reduction: f32) -> Self {
+        assert!(reduction.is_finite() && reduction >= 0.0 && reduction <= self.width());
+        if let InlineBoxParticipation::Atomic {
+            terminal_source_space_reduction,
+            ..
+        } = &mut self.participation
+        {
+            *terminal_source_space_reduction = Some(reduction);
+        }
+        self
+    }
+
+    pub(crate) const fn terminal_source_space_reduction(&self) -> Option<f32> {
+        match self.participation {
+            InlineBoxParticipation::Atomic {
+                terminal_source_space_reduction,
+                ..
+            } => terminal_source_space_reduction,
+            _ => None,
+        }
     }
 
     /// Preserves glyph context across this box's source position.
@@ -364,11 +392,12 @@ impl InlineBox {
                 width,
                 height,
                 break_affinity: InlineBoxBreakAffinity::Independent,
+                source_kind: InlineBoxSourceKind::Atomic,
+                terminal_source_space_reduction: None,
             },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
             preserves_shaping_context: false,
-            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -383,7 +412,6 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
             preserves_shaping_context: false,
-            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -404,11 +432,12 @@ impl InlineBox {
                 width,
                 height,
                 break_affinity,
+                source_kind: InlineBoxSourceKind::Atomic,
+                terminal_source_space_reduction: None,
             },
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
             preserves_shaping_context: false,
-            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -425,7 +454,6 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
             preserves_shaping_context: false,
-            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -446,7 +474,6 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::ToNext,
             cloned_owner: None,
             preserves_shaping_context: false,
-            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -491,7 +518,6 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::ToPrevious,
             cloned_owner: None,
             preserves_shaping_context: false,
-            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
