@@ -1712,3 +1712,70 @@ fn measured_line_advance_retains_positive_indentation() {
         }
     }
 }
+
+#[test]
+fn source_justification_expands_inline_group_contents_by_their_opportunity_count() {
+    use crate::{JustificationOpportunity::WithinInlineBox, PositionedLayoutItem};
+    for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+        let mut layout = configured_layout("X", |builder| {
+            builder.set_direction(direction);
+            builder.push_inline_box(InlineBox::new(41, 0, 10.0, 10.0));
+            builder.push_inline_box(InlineBox::new(42, 0, 20.0, 10.0));
+        });
+        let width = full_width("X") + 30.0 + 60.0;
+        layout.set_justification_opportunities(vec![
+            WithinInlineBox {
+                id: 41,
+                opportunities: 2,
+            },
+            WithinInlineBox {
+                id: 42,
+                opportunities: 1,
+            },
+            WithinInlineBox {
+                id: 41,
+                opportunities: 0,
+            },
+            WithinInlineBox {
+                id: 999,
+                opportunities: 7,
+            },
+        ]);
+        let boxes = |layout: &Layout<ColorBrush>| {
+            let mut boxes = layout
+                .lines()
+                .next()
+                .unwrap()
+                .items()
+                .filter_map(|item| match item {
+                    PositionedLayoutItem::InlineBox(value) => {
+                        Some((value.id, value.x, value.width))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            boxes.sort_by_key(|value| value.0);
+            boxes
+        };
+        layout.break_all_lines(Some(width));
+        let original = boxes(&layout);
+        for _ in 0..2 {
+            layout.align(
+                Some(width),
+                Alignment::Left,
+                AlignmentOptions {
+                    justification_mode: crate::JustificationMode::SourceOpportunities,
+                    last_line_alignment: Some(Alignment::Justify),
+                    ..Default::default()
+                },
+            );
+            let expanded = boxes(&layout);
+            assert!((expanded[0].2 - 50.0).abs() < 0.001, "{expanded:?}");
+            assert!((expanded[1].2 - 40.0).abs() < 0.001, "{expanded:?}");
+            layout.align(Some(width), Alignment::Left, AlignmentOptions::default());
+            assert_eq!(boxes(&layout), original);
+        }
+        layout.break_all_lines(Some(width - 60.0));
+        assert_eq!(boxes(&layout), original);
+    }
+}

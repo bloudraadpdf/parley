@@ -15,6 +15,7 @@ pub(crate) struct JustificationSideSpacing {
     pub(crate) leading: f32,
     pub(crate) trailing: f32,
     pub(crate) applied_after: f32,
+    pub(crate) content_expansion: f32,
 }
 
 /// A source unit at an eligible expansion boundary.
@@ -31,6 +32,14 @@ pub enum JustificationUnit {
 pub enum JustificationOpportunity {
     /// Expansion within a word separator.
     WordSeparator(Range<usize>),
+    /// Expansion within an atomic inline group. The caller lays out its contents
+    /// again at the expanded positioned width. A zero count contributes nothing.
+    WithinInlineBox {
+        /// The caller-supplied inline box identifier.
+        id: u64,
+        /// The number of internal expansion opportunities.
+        opportunities: usize,
+    },
     /// Expansion between adjacent visual typographic units.
     BetweenUnits {
         /// The unit on the physical left side of the opportunity.
@@ -48,6 +57,7 @@ impl JustificationOpportunity {
         };
         match self {
             Self::WordSeparator(range) => Some(range.start),
+            Self::WithinInlineBox { id, .. } => boxes.get(id).copied(),
             Self::BetweenUnits { before, after } => Some(anchor(before)?.min(anchor(after)?)),
         }
     }

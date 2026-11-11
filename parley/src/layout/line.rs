@@ -413,6 +413,15 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                         + self.line.data.metrics.offset
                         + item_data.letter_spacing_offset;
 
+                    let content_expansion = self
+                        .line
+                        .data
+                        .justification_side_spacing
+                        .get(&super::justification::JustificationUnitAddress::InlineBox(
+                            item_data.index,
+                        ))
+                        .map_or(0.0, |spacing| spacing.content_expansion);
+
                     self.item_index += 1;
                     self.glyph_start = 0;
                     self.cluster_corrections.clear();
@@ -422,7 +431,8 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                         x,
                         y: self.line.data.metrics.baseline - inline_box.height(),
                         width: inline_box.width_for_line(self.line.index as usize)
-                            - item_data.terminal_owner_edge_reduction,
+                            - item_data.terminal_owner_edge_reduction
+                            + content_expansion,
                         height: inline_box.height(),
                         id: inline_box.id,
                     }));

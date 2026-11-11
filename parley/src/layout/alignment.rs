@@ -287,7 +287,11 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                         is_rtl,
                     ),
                     JustificationMode::None => 0,
-                    JustificationMode::SourceOpportunities => source_targets.len(),
+                    JustificationMode::SourceOpportunities => {
+                        source_targets.iter().fold(0_usize, |count, site| {
+                            count.saturating_add(site.opportunities)
+                        })
+                    }
                 };
 
                 // Unexpandable lines use text-align-last, including an original
@@ -322,6 +326,7 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                     free_space / opportunities as f32 * if UNDO_JUSTIFICATION { -1. } else { 1. };
                 if justification_mode == JustificationMode::SourceOpportunities {
                     for site in source_targets {
+                        let adjustment = adjustment * site.opportunities as f32;
                         match site.before.address {
                             super::justification::JustificationUnitAddress::TextCluster(index) => {
                                 layout.clusters[index].advance += adjustment;
@@ -329,6 +334,13 @@ fn align_impl<B: Brush, const UNDO_JUSTIFICATION: bool>(
                             super::justification::JustificationUnitAddress::InlineBox(_) => {
                                 layout.line_items[site.before.item_index].advance += adjustment;
                             }
+                        }
+                        if site.within_inline_box && !UNDO_JUSTIFICATION {
+                            layout.lines[line_index]
+                                .justification_side_spacing
+                                .entry(site.before.address)
+                                .or_default()
+                                .content_expansion += adjustment;
                         }
                         if let Some(after) = site.after {
                             if site.before.item_index < after.item_index {
@@ -517,6 +529,8 @@ struct SourceUnitPosition {
 struct SourceExpansionSite {
     before: SourceUnitPosition,
     after: Option<SourceUnitPosition>,
+    opportunities: usize,
+    within_inline_box: bool,
 }
 
 fn source_justification_targets<B: Brush>(
@@ -598,8 +612,19 @@ fn source_justification_targets<B: Brush>(
                 text_unit(source).map(|before| SourceExpansionSite {
                     before,
                     after: None,
+                    opportunities: 1,
+                    within_inline_box: false,
                 })
             }
+            JustificationOpportunity::WithinInlineBox { id, opportunities } => (*opportunities > 0)
+                .then(|| boxes.get(id).copied())
+                .flatten()
+                .map(|before| SourceExpansionSite {
+                    before,
+                    after: None,
+                    opportunities: *opportunities,
+                    within_inline_box: true,
+                }),
             JustificationOpportunity::BetweenUnits { before, after } => {
                 let before = unit(before)?;
                 let after = unit(after)?;
@@ -609,11 +634,15 @@ fn source_justification_targets<B: Brush>(
                     Some(SourceExpansionSite {
                         before,
                         after: Some(after),
+                        opportunities: 1,
+                        within_inline_box: false,
                     })
                 } else {
                     Some(SourceExpansionSite {
                         before: after,
                         after: Some(before),
+                        opportunities: 1,
+                        within_inline_box: false,
                     })
                 }
             }
