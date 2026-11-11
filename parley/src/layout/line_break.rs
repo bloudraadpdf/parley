@@ -1647,10 +1647,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         break_affinity.allows_break_before() && !joins_owner_start;
                     if allows_break_before {
                         finish_source_fragment!();
-                        if self.probes_current_break() && self.state.line.has_content_advance() {
+                        let probing = self.probes_current_break();
+                        if self.state.line.has_content_advance() {
                             self.state
                                 .mark_line_break_opportunity(RegularBreakKind::Ordinary);
-                            commit_probed_candidate!();
+                            if probing {
+                                commit_probed_candidate!();
+                            }
                         }
                     }
                     if break_affinity == InlineBoxBreakAffinity::SourceText

@@ -2892,3 +2892,41 @@ fn cloned_shape_shares_runs_and_styles_through_line_breaking() {
     assert_ne!(source.data.runs.as_ptr(), cloned.data.runs.as_ptr());
     assert_ne!(source.styles().as_ptr(), cloned.styles().as_ptr());
 }
+
+#[test]
+fn a_box_bound_to_following_punctuation_retains_the_break_before_it() {
+    let mut fcx = create_font_context();
+    let mut lcx = LayoutContext::new();
+    let prefix_width = build_inline_box_layout(&mut lcx, &mut fcx, "foo", 20.0, None, [])
+        .calculate_content_widths()
+        .max;
+    let punctuation_width = build_inline_box_layout(&mut lcx, &mut fcx, ")", 20.0, None, [])
+        .calculate_content_widths()
+        .max;
+    let width = prefix_width + 100.0 + punctuation_width / 2.0;
+    for (affinity, expected_line) in [
+        (InlineBoxBreakAffinity::ToNext, 1),
+        (InlineBoxBreakAffinity::Both, 0),
+    ] {
+        let mut layout = build_inline_box_layout(
+            &mut lcx,
+            &mut fcx,
+            "foo)",
+            20.0,
+            None,
+            [InlineBox::atomic_with_break_affinity(
+                91, 3, 100.0, 20.0, affinity,
+            )],
+        );
+        layout.break_all_lines(Some(width));
+        assert_eq!(inline_box_line(&layout, 91), expected_line, "{affinity:?}");
+        assert_eq!(layout.len(), expected_line + 1, "{affinity:?}");
+        if expected_line == 1 {
+            assert!(
+                layout
+                    .lines()
+                    .all(|line| line.metrics().advance <= width + 0.01)
+            );
+        }
+    }
+}
