@@ -912,6 +912,11 @@ impl ClusterInfo {
         self.boundary
     }
 
+    pub(crate) fn is_bidi_control(self) -> bool {
+        icu_properties::CodePointSetData::new::<icu_properties::props::BidiControl>()
+            .contains(self.source_char)
+    }
+
     // Returns the whitespace type of the cluster.
     pub(crate) fn whitespace(self) -> Whitespace {
         to_whitespace(self.source_char)
@@ -1576,6 +1581,9 @@ impl<B: Brush> LayoutData<B> {
                             return SourceSoftWrapBoundary::Absent;
                         }
                         let disposition = boundary_override(cluster_index);
+                        if cluster.info.is_bidi_control() && disposition.is_none() {
+                            continue;
+                        }
                         if matches!(search, SourceBoundarySearch::AfterSpaces)
                             && cluster.info.whitespace() == Whitespace::Space
                         {
@@ -2295,7 +2303,10 @@ impl<B: Brush> LayoutData<B> {
                             .map(|index| self.line_break_overrides[index].disposition());
                         let style = &self.styles[cluster.style_index as usize];
                         let prev_text_wrap_mode = text_wrap_mode;
-                        text_wrap_mode = style.text_wrap_mode;
+                        let bidi_control = cluster.info.is_bidi_control();
+                        if !bidi_control {
+                            text_wrap_mode = style.text_wrap_mode;
+                        }
                         let projected_collapsed_space =
                             projected_source_boundary.is_some_and(|projection| {
                                 projection.cluster_participation(byte_index)

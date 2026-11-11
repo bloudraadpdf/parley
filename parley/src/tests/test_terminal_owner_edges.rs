@@ -179,3 +179,81 @@ fn atomic_boundary_affinity_survives_a_preserved_child() {
         }
     }
 }
+
+#[test]
+fn bidi_isolation_keeps_nowrap_source_boundary_context() {
+    let build = |outer: bool, inner: bool| {
+        let mut text = alloc::string::String::from("お");
+        let mut edges = vec![];
+        if outer {
+            text.push('\u{2066}');
+        }
+        let outer_start = text.len();
+        let mut ranges = vec![];
+        for base in ["あい", "うえ"] {
+            if inner {
+                text.push('\u{2066}');
+            }
+            let start = text.len();
+            text.push_str(base);
+            let end = text.len();
+            ranges.push(start..end);
+            if inner {
+                text.push('\u{2069}');
+            }
+            edges.push((start, text.len()));
+        }
+        if outer {
+            text.push('\u{2069}');
+        }
+        edges.push((outer_start, text.len()));
+        text.push('お');
+        let mut fonts = create_font_context();
+        let mut context = LayoutContext::<ColorBrush>::new();
+        let mut builder = context.ranged_builder(&mut fonts, &text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+        builder.push_default(StyleProperty::FontSize(16.0));
+        for range in ranges {
+            builder.push(StyleProperty::TextWrapMode(TextWrapMode::NoWrap), range);
+        }
+        for (index, (start, end)) in edges.into_iter().enumerate() {
+            builder.push_inline_box(InlineBox::inline_start_edge(
+                index as u64 * 2,
+                start,
+                InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToNext,
+            ));
+            builder.push_inline_box(InlineBox::inline_end_edge(
+                index as u64 * 2 + 1,
+                end,
+                InlineOwnerEdgeAdvance::uniform(0.0),
+                0.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            ));
+        }
+        builder.build(&text)
+    };
+    let mut reference = build(false, false);
+    reference.break_all_lines(None);
+    let expected = reference.calculate_content_widths();
+    reference.break_all_lines(Some(expected.min));
+    let expected_lines: alloc::vec::Vec<_> = reference
+        .lines()
+        .map(|line| line.metrics().advance)
+        .collect();
+    for (outer, inner) in [(true, false), (false, true), (true, true)] {
+        let mut actual = build(outer, inner);
+        actual.break_all_lines(None);
+        let widths = actual.calculate_content_widths();
+        assert!(
+            (widths.min - expected.min).abs() < 0.001,
+            "outer={outer} inner={inner}: {} != {}",
+            widths.min,
+            expected.min
+        );
+        actual.break_all_lines(Some(expected.min));
+        let lines: alloc::vec::Vec<_> = actual.lines().map(|line| line.metrics().advance).collect();
+        assert_eq!(lines, expected_lines, "outer={outer} inner={inner}");
+    }
+}

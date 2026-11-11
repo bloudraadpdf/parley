@@ -1863,11 +1863,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // Lag text_wrap_mode style by one cluster
                         let text_wrap_mode = self.state.line.text_wrap_mode;
-                        self.state.line.text_wrap_mode = style.text_wrap_mode;
                         let soft_break_policy = self.state.line.soft_break_policy;
-                        self.state.line.soft_break_policy = style.soft_break_policy;
                         let wrap_avoid_depth = self.state.line.wrap_avoid_depth;
-                        self.state.line.wrap_avoid_depth = style.wrap_avoid_depth;
+                        let bidi_control = cluster.info().is_bidi_control();
+                        if !bidi_control {
+                            self.state.line.text_wrap_mode = style.text_wrap_mode;
+                            self.state.line.soft_break_policy = style.soft_break_policy;
+                            self.state.line.wrap_avoid_depth = style.wrap_avoid_depth;
+                        }
 
                         let allows_fallback =
                             self.layout.data.line_break_purpose == LineBreakPurpose::LineLayout;
