@@ -2872,6 +2872,11 @@ fn cloned_shape_shares_runs_and_styles_through_line_breaking() {
     let source = build_inline_box_layout(&mut lcx, &mut fcx, "A B C D", 10.0, None, []);
     assert!(!source.data.runs.is_empty());
     assert!(!source.styles().is_empty());
+    assert_eq!(
+        (source.data.runs.capacity(), source.data.styles.capacity()),
+        (source.data.runs.len(), source.data.styles.len()),
+        "a shared shape must not retain spare builder storage"
+    );
     let mut cloned = source.clone();
     assert_eq!(
         (

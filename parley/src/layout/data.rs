@@ -2172,6 +2172,12 @@ impl<B: Brush> LayoutData<B> {
     pub(crate) fn finish(&mut self, grapheme_boundaries: impl Iterator<Item = usize>) {
         self.mark_grapheme_boundaries(grapheme_boundaries);
         self.finish_advances();
+        if let Some(runs) = Arc::get_mut(&mut self.runs) {
+            runs.shrink_to_fit();
+        }
+        if let Some(styles) = Arc::get_mut(&mut self.styles) {
+            styles.shrink_to_fit();
+        }
     }
 
     pub(crate) fn finish_advances(&mut self) {
