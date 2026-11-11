@@ -137,7 +137,8 @@ pub use builder::{RangedBuilder, StyleRunBuilder, TreeBuilder};
 pub use context::{FontMetricAdvanceQuantization, LayoutContext, VerticalMetricGrid};
 pub use font::FontContext;
 pub use inline_box::{
-    FollowingSourceSpace, InlineBox, InlineBoxBreakAffinity, InlineOwnerEdgeAdvance,
+    FollowingSourceSpace, InlineBox, InlineBoxBreakAffinity, InlineBoxSourceKind,
+    InlineOwnerEdgeAdvance,
 };
 #[doc(inline)]
 pub use layout::Layout;

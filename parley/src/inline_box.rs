@@ -17,6 +17,18 @@ pub enum InlineBoxBreakAffinity {
     SourceText,
 }
 
+/// The source content represented by an inline box, independently of its geometry.
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+pub enum InlineBoxSourceKind {
+    /// An atomic object or glued edge with its existing wrapping contract.
+    #[default]
+    Atomic,
+    /// A group of inline source content with caller-resolved edge affinities.
+    InlineContent,
+    /// A group with no source text, whose geometry does not end leading whitespace.
+    EmptyInlineContent,
+}
+
 /// The advance participation of a collapsible source space after an inline-end
 /// edge when the edge projects that source break.
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
@@ -285,6 +297,7 @@ pub struct InlineBox {
     /// The box's closed layout participation.
     participation: InlineBoxParticipation,
     preserves_shaping_context: bool,
+    source_kind: InlineBoxSourceKind,
     bidi_attachment: InlineBoxBidiAttachment,
     cloned_owner: Option<ClonedInlineOwner>,
     letter_spacing: f32,
@@ -292,6 +305,18 @@ pub struct InlineBox {
 }
 
 impl InlineBox {
+    /// Sets the source-flow contract of an atomic inline group.
+    pub fn with_source_kind(mut self, kind: InlineBoxSourceKind) -> Self {
+        if matches!(self.participation, InlineBoxParticipation::Atomic { .. }) {
+            self.source_kind = kind;
+        }
+        self
+    }
+
+    pub(crate) const fn source_kind(&self) -> InlineBoxSourceKind {
+        self.source_kind
+    }
+
     /// Preserves glyph context across this box's source position.
     /// The box retains its advance and line-break participation.
     pub fn with_continuous_shaping(mut self) -> Self {
@@ -343,6 +368,7 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
             preserves_shaping_context: false,
+            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -357,6 +383,7 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
             preserves_shaping_context: false,
+            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -381,6 +408,7 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
             preserves_shaping_context: false,
+            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -397,6 +425,7 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::Independent,
             cloned_owner: None,
             preserves_shaping_context: false,
+            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -417,6 +446,7 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::ToNext,
             cloned_owner: None,
             preserves_shaping_context: false,
+            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }
@@ -461,6 +491,7 @@ impl InlineBox {
             bidi_attachment: InlineBoxBidiAttachment::ToPrevious,
             cloned_owner: None,
             preserves_shaping_context: false,
+            source_kind: InlineBoxSourceKind::Atomic,
             letter_spacing: 0.0,
             applied_letter_spacing: 0.0,
         }

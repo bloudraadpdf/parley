@@ -34,7 +34,7 @@ use crate::layout::{LetterSpacingUnit, LetterSpacingUnitRecord};
 use crate::style::Brush;
 use crate::style::SoftBreakPolicy;
 use crate::util::nearly_zero;
-use crate::{InlineBoxBreakAffinity, OverflowWrap, TextWrapMode, WordBreak};
+use crate::{InlineBoxBreakAffinity, InlineBoxSourceKind, OverflowWrap, TextWrapMode, WordBreak};
 
 use core::ops::Range;
 
@@ -618,6 +618,7 @@ impl BreakerState {
         next_fit_x: f32,
         box_height: f32,
         participation: InlineBoxShapingParticipation,
+        source_kind: InlineBoxSourceKind,
     ) {
         // self.item_idx += 1;
         self.line.items.end += 1;
@@ -628,11 +629,13 @@ impl BreakerState {
             self.line.content_end = self.line.measure();
         }
         self.last_appended_authored_unit = AuthoredBreakUnit::Other;
-        self.line
-            .source_start_whitespace
-            .include_inline_box(participation);
-        if participation.has_inline_advance() {
-            self.line.start_position = LineStartPosition::Interior;
+        if source_kind != InlineBoxSourceKind::EmptyInlineContent {
+            self.line
+                .source_start_whitespace
+                .include_inline_box(participation);
+            if participation.has_inline_advance() {
+                self.line.start_position = LineStartPosition::Interior;
+            }
         }
         // Would like to add:
         // self.item_idx += 1;
@@ -1079,6 +1082,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 state.line.fit_x + width,
                 inline_box.height(),
                 inline_box.shaping_participation(),
+                inline_box.source_kind(),
             );
             state.line.cloned_owners.after_edge(inline_box);
             next += 1;
@@ -1439,6 +1443,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let inline_box_index = item.index;
                     let inline_box = &self.layout.data.inline_boxes[inline_box_index];
                     let shaping_participation = inline_box.shaping_participation();
+                    let source_kind = inline_box.source_kind();
                     let break_affinity = match inline_box.line_break_participation() {
                         InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
@@ -1490,6 +1495,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                         next_fit_x,
                                         height,
                                         shaping_participation,
+                                        source_kind,
                                     );
                                 }
                             } else {
@@ -1499,6 +1505,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     self.state.line.fit_x + width,
                                     height,
                                     shaping_participation,
+                                    source_kind,
                                 );
                             }
                             continue;
@@ -1606,6 +1613,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.fit_x + edge_width,
                                 edge_height,
                                 shaping_participation,
+                                source_kind,
                             );
                             self.state
                                 .line
@@ -1629,6 +1637,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.fit_x,
                                 0.0,
                                 shaping_participation,
+                                source_kind,
                             );
                             continue;
                         }
@@ -1711,6 +1720,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             next_fit_x,
                             height,
                             shaping_participation,
+                            source_kind,
                         );
 
                         // We can always line break after a REPLACED inline
@@ -1732,11 +1742,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 next_fit_x,
                                 height,
                                 shaping_participation,
+                                source_kind,
                             );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else if !allows_break_before {
                             if (break_affinity == InlineBoxBreakAffinity::SourceText
-                                || joins_owner_start)
+                                || joins_owner_start
+                                || source_kind != InlineBoxSourceKind::Atomic)
                                 && self.state.line.fragment_fit != FragmentFit::PendingOverflow
                             {
                                 if let Some(candidate) = self.state.take_overflow_candidate() {
@@ -1756,6 +1768,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 next_fit_x,
                                 box_height,
                                 shaping_participation,
+                                source_kind,
                             );
                             self.state.mark_inline_box_break_after(break_affinity);
                         } else {
@@ -2616,6 +2629,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.line.fit_x,
                             0.0,
                             inline_box.shaping_participation(),
+                            inline_box.source_kind(),
                         );
                         self.state.line.cloned_owners.after_edge(inline_box);
                         continue;
@@ -2641,6 +2655,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         next_fit_x,
                         inline_box.height(),
                         inline_box.shaping_participation(),
+                        inline_box.source_kind(),
                     );
                     self.state.line.cloned_owners.after_edge(inline_box);
                     self.state

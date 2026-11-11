@@ -2935,3 +2935,92 @@ fn a_box_bound_to_following_punctuation_retains_the_break_before_it() {
         }
     }
 }
+
+#[test]
+fn source_inline_content_uses_prior_legal_breaks_without_changing_glued_edges() {
+    use crate::InlineBoxSourceKind;
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let text = "xx (";
+    let mut measure = build_inline_box_layout(&mut context, &mut fonts, "x", 10.0, None, []);
+    measure.break_all_lines(None);
+    let unit = measure.width();
+    let mut prefix = build_inline_box_layout(&mut context, &mut fonts, text, 10.0, None, []);
+    prefix.break_all_lines(None);
+    let width = prefix.width();
+    for (kind, expected_line) in [
+        (InlineBoxSourceKind::Atomic, 0),
+        (InlineBoxSourceKind::InlineContent, 1),
+    ] {
+        let mut layout = build_inline_box_layout(
+            &mut context,
+            &mut fonts,
+            text,
+            10.0,
+            None,
+            [InlineBox::atomic_with_break_affinity(
+                71,
+                text.len(),
+                unit * 2.0,
+                10.0,
+                InlineBoxBreakAffinity::ToPrevious,
+            )
+            .with_source_kind(kind)],
+        );
+        layout.break_all_lines(Some(width));
+        assert_eq!(inline_box_line(&layout, 71), expected_line, "{kind:?}");
+        if kind == InlineBoxSourceKind::InlineContent {
+            assert_eq!(
+                line_text_ranges(&layout)
+                    .iter()
+                    .map(|range| text[range.clone()].trim())
+                    .collect::<Vec<_>>(),
+                ["xx", "("]
+            );
+        }
+    }
+}
+
+#[test]
+fn source_empty_inline_content_keeps_leading_whitespace_and_words_on_the_same_line() {
+    use crate::InlineBoxSourceKind;
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let text = " word";
+    for (kind, expected_lines) in [
+        (InlineBoxSourceKind::Atomic, 2),
+        (InlineBoxSourceKind::EmptyInlineContent, 1),
+    ] {
+        let mut layout = build_inline_box_layout(
+            &mut context,
+            &mut fonts,
+            text,
+            10.0,
+            None,
+            [InlineBox::atomic_with_break_affinity(
+                72,
+                0,
+                10.0,
+                10.0,
+                InlineBoxBreakAffinity::Both,
+            )
+            .with_source_kind(kind)],
+        );
+        layout.break_all_lines(Some(10.0));
+        assert_eq!(layout.lines().count(), expected_lines, "{kind:?}");
+        let line = layout.get(0).unwrap();
+        let width = line.items().find_map(|item| match item {
+            crate::PositionedLayoutItem::InlineBox(value) if value.id == 72 => Some(value.width),
+            _ => None,
+        });
+        assert_eq!(
+            width,
+            Some(10.0),
+            "source transparency must retain box geometry"
+        );
+        if kind == InlineBoxSourceKind::EmptyInlineContent {
+            assert_eq!(line.text_range(), 0..text.len());
+            assert!(line.metrics().advance > 10.0);
+        }
+    }
+}
