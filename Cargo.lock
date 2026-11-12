@@ -1501,7 +1501,7 @@ dependencies = [
 [[package]]
 name = "harfrust"
 version = "0.13.3"
-source = "git+ssh://git@git.bloudraad.io/external/harfrust.git?rev=06343ae50bcf830c9d8f6861ad9d326f198a847c#06343ae50bcf830c9d8f6861ad9d326f198a847c"
+source = "git+ssh://git@git.bloudraad.io/external/harfrust.git?rev=f51fca3a43d69939331edcc8d6649acc435624ad#f51fca3a43d69939331edcc8d6649acc435624ad"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -3347,7 +3347,7 @@ dependencies = [
 [[package]]
 name = "read-fonts"
 version = "0.43.3"
-source = "git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39#c4c9501abff873702bca4b8d04f867cc7742de39"
+source = "git+ssh://git@git.bloudraad.io/external/fontations.git?rev=b52c4e8fdf905274c7d557daf2f43087aea35209#b52c4e8fdf905274c7d557daf2f43087aea35209"
 dependencies = [
  "bytemuck",
  "core_maths",
@@ -3670,7 +3670,7 @@ dependencies = [
 [[package]]
 name = "skrifa"
 version = "0.46.2"
-source = "git+ssh://git@git.bloudraad.io/external/fontations.git?rev=c4c9501abff873702bca4b8d04f867cc7742de39#c4c9501abff873702bca4b8d04f867cc7742de39"
+source = "git+ssh://git@git.bloudraad.io/external/fontations.git?rev=b52c4e8fdf905274c7d557daf2f43087aea35209#b52c4e8fdf905274c7d557daf2f43087aea35209"
 dependencies = [
  "bytemuck",
  "core_maths",
