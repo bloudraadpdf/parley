@@ -34,3 +34,5 @@ mod utils;
 mod test_terminal_owner_edges;
 
 mod test_shaping_orientation;
+
+mod test_parallel_inline;

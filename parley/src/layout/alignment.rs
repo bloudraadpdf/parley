@@ -709,6 +709,7 @@ mod tests {
             letter_spacing_offset: 0.0,
             terminal_inline_space_reduction: 0.0,
             terminal_source_space: false,
+            parallel_fragment: None,
             is_whitespace: false,
             has_trailing_whitespace: false,
             text_range: 0..0,

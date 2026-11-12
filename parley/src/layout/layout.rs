@@ -613,7 +613,9 @@ impl<B: Brush> Layout<B> {
     /// This method currently may not return the correct results for
     /// mixed-direction text.
     pub fn calculate_content_widths(&self) -> ContentWidths {
-        if !self.data.inline_owner_shaping.is_empty() {
+        if !self.data.inline_owner_shaping.is_empty()
+            || !self.data.parallel_inline_groups.is_empty()
+        {
             let mut measured = self.clone();
             measured.clear_justification_shape_selection();
             measured.set_line_break_purpose(super::LineBreakPurpose::IntrinsicSizing);

@@ -14,6 +14,7 @@ mod justification;
 mod letter_spacing;
 mod line;
 mod line_break;
+mod parallel;
 mod physical_shaping;
 mod run;
 
@@ -45,6 +46,9 @@ pub use line::{
     GlyphRun, HangingWhitespace, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem,
 };
 pub use line_break::{BreakLines, CommittedLine, LineBreakStrategy, LineTabOrigin, TotalFit};
+pub use parallel::{
+    ParallelInlineError, ParallelInlineFragment, PreparedParallelInline, PreparedParallelRow,
+};
 pub use physical_shaping::{InlineOwnerShaping, InlineShapingEdge, ShapingEdgePlacement};
 pub use run::{Run, RunMetrics};
 

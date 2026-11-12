@@ -239,8 +239,12 @@ impl<B: Brush> BreakLines<'_, B> {
         .into_iter()
         .flatten()
         {
-            let (snapshot, _) = candidate.clone().into_snapshot();
-            if matches(snapshot.item_idx, snapshot.cluster_idx) {
+            let (snapshot, projection) = candidate.clone().into_snapshot();
+            if matches(snapshot.item_idx, snapshot.cluster_idx)
+                || byte_end.is_some_and(|limit| {
+                    projection.is_some_and(|boundary| boundary.target() == limit)
+                })
+            {
                 return Some(ProbedBreak::Regular(candidate.clone()));
             }
         }
@@ -376,9 +380,11 @@ mod tests {
             );
             let mut breaker = layout.break_lines();
             for end in [1, 2] {
-                assert!(breaker
-                    .preview_source_prefix(SourceCursor::BeforeItem(end), LineTabOrigin::ZERO)
-                    .is_none());
+                assert!(
+                    breaker
+                        .preview_source_prefix(SourceCursor::BeforeItem(end), LineTabOrigin::ZERO)
+                        .is_none()
+                );
                 assert_eq!(breaker.state.item_idx, 0);
                 assert!(breaker.lines.lines.is_empty());
             }
@@ -398,10 +404,12 @@ mod tests {
                 Some(BaseDirection::Ltr),
             );
             let end = cursor_at(&layout, text.len() - 1);
-            assert!(layout
-                .break_lines()
-                .preview_source_prefix(end, LineTabOrigin::ZERO)
-                .is_some());
+            assert!(
+                layout
+                    .break_lines()
+                    .preview_source_prefix(end, LineTabOrigin::ZERO)
+                    .is_some()
+            );
         }
         let mut layout = build_layout_with_direction(
             "",

@@ -317,6 +317,14 @@ pub struct PositionedInlineBox {
     pub id: u64,
     /// Whether caller-supplied terminal source spacing was selected.
     pub terminal_source_space: bool,
+    parallel_fragment: Option<super::ParallelInlineFragment>,
+}
+
+impl PositionedInlineBox {
+    /// Source intervals selected together for this actual fragment.
+    pub fn parallel_fragment(&self) -> Option<&super::ParallelInlineFragment> {
+        self.parallel_fragment.as_ref()
+    }
 }
 
 /// Sequence of fully positioned glyphs with the same style.
@@ -432,12 +440,17 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                     return Some(PositionedLayoutItem::InlineBox(PositionedInlineBox {
                         x,
                         y: self.line.data.metrics.baseline - inline_box.height(),
-                        width: inline_box.width_for_line(self.line.index as usize)
-                            - item_data.terminal_inline_space_reduction
-                            + content_expansion,
+                        width: if let Some(fragment) = &item_data.parallel_fragment {
+                            fragment.inline_advance + content_expansion
+                        } else {
+                            inline_box.width_for_line(self.line.index as usize)
+                                - item_data.terminal_inline_space_reduction
+                                + content_expansion
+                        },
                         height: inline_box.height(),
                         id: inline_box.id,
                         terminal_source_space: item_data.terminal_source_space,
+                        parallel_fragment: item_data.parallel_fragment.clone(),
                     }));
                 }
                 LineItem::Run(run) => {

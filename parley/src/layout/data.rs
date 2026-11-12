@@ -759,6 +759,18 @@ impl LineBreakOverride {
         self.byte_index
     }
 
+    /// Whether this is a normal resolved opportunity, excluding overflow-only
+    /// and emergency opportunities.
+    pub const fn is_normal_opportunity(self) -> bool {
+        matches!(
+            self.disposition,
+            LineBreakOverrideDisposition::NormalOpportunity
+                | LineBreakOverrideDisposition::UnprioritizedOpportunity
+                | LineBreakOverrideDisposition::ResolvedCollapsedSourceOpportunity
+                | LineBreakOverrideDisposition::ResolvedRetainedSourceOpportunity
+        )
+    }
+
     /// Whether the override adds rather than suppresses an opportunity.
     pub const fn allows_break(self) -> bool {
         !matches!(
@@ -1199,6 +1211,7 @@ pub(crate) struct LineItemData {
     pub(crate) letter_spacing_offset: f32,
     pub(crate) terminal_inline_space_reduction: f32,
     pub(crate) terminal_source_space: bool,
+    pub(crate) parallel_fragment: Option<super::ParallelInlineFragment>,
 
     // Fields that only apply to text runs (Ignored for boxes)
     // TODO: factor this out?
@@ -1223,6 +1236,7 @@ impl LineItemData {
             letter_spacing_offset: 0.0,
             terminal_inline_space_reduction: 0.0,
             terminal_source_space: false,
+            parallel_fragment: None,
             is_whitespace: false,
             has_trailing_whitespace: false,
             cluster_range: 0..0,
@@ -1335,6 +1349,7 @@ pub(crate) struct LayoutData<B: Brush> {
     // Input (/ output of style resolution)
     pub(crate) styles: Arc<Vec<Style<B>>>,
     pub(crate) inline_boxes: Arc<Vec<InlineBox>>,
+    pub(crate) parallel_inline_groups: Vec<(u64, super::PreparedParallelInline<B>)>,
 
     // Output of shaping
     pub(crate) runs: Arc<Vec<RunData>>,
@@ -1415,6 +1430,7 @@ impl<B: Brush> Default for LayoutData<B> {
             coords: Vec::new(),
             styles: Arc::default(),
             inline_boxes: Arc::default(),
+            parallel_inline_groups: Vec::new(),
             runs: Arc::default(),
             items: Arc::default(),
             clusters: Vec::new(),
@@ -1646,6 +1662,7 @@ impl<B: Brush> LayoutData<B> {
         self.trim_line_end_letter_spacing = true;
         self.line_fit_tolerance = 0.0;
         self.line_break_overrides.clear();
+        self.parallel_inline_groups.clear();
         self.first_fit_prefix_commits.clear();
         self.first_line_source_end = None;
         self.justification_opportunities.clear();

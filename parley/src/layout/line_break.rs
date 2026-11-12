@@ -39,6 +39,8 @@ use crate::{InlineBoxBreakAffinity, InlineBoxSourceKind, OverflowWrap, TextWrapM
 use core::ops::Range;
 
 mod justification;
+mod parallel;
+pub(super) use parallel::boundary_advances as parallel_boundary_advances;
 mod physical;
 mod source_probe;
 mod total_fit;
@@ -157,6 +159,8 @@ struct LineState {
     removed_leading_source_ranges: Vec<Range<usize>>,
     conditional_line_start_omission: Option<Range<usize>>,
     tab_advances: Vec<SelectedTabAdvance>,
+    parallel_fragments: Option<Arc<parallel::SelectedParallelFragment>>,
+    parallel_continuation: Option<parallel::ParallelContinuation>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -871,6 +875,7 @@ pub struct BreakLines<'a, B: Brush> {
     source_probe: Option<SourceProbe>,
     physical_shaper: Option<crate::shape::physical::PhysicalShaper<B>>,
     total_fit: TotalFitState,
+    parallel_rows: Vec<Vec<Layout<B>>>,
     #[cfg(test)]
     visited_clusters: usize,
     #[cfg(test)]
@@ -932,6 +937,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let uniform_letter_spacing = uniform_letter_spacing(&layout.data);
         let physical_shaper = (!layout.data.deferred_physical_shapes.is_empty())
             .then(|| crate::shape::physical::PhysicalShaper::new(&layout.data));
+        let parallel_rows = layout
+            .data
+            .parallel_inline_groups
+            .iter()
+            .map(|(_, group)| group.rows.iter().map(|row| (*row.layout).clone()).collect())
+            .collect();
         Self {
             layout,
             lines,
@@ -949,6 +960,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             source_probe: None,
             physical_shaper,
             total_fit: TotalFitState::default(),
+            parallel_rows,
             #[cfg(test)]
             visited_clusters: 0,
             #[cfg(test)]
@@ -1005,6 +1017,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         };
 
         self.finish_line(self.lines.lines.len() - 1, line_height, &tab_advances);
+        self.state.line.parallel_fragments = None;
+        if let Some(continuation) = &self.state.line.parallel_continuation {
+            self.state.item_idx = continuation.item;
+            self.state.line.items = continuation.item..continuation.item;
+        }
         // The selected source range is final only after finish_line has
         // collected its items and applied line-end shaping.
         if preceding_break != BreakReason::None {
@@ -1163,6 +1180,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     fn prepare_total_fit(&mut self, max_advance: f32, tab_origin: LineTabOrigin) {
         self.state.planned_end = None;
         self.state.planned_end_reached = false;
+        // Parallel continuations have row-local source cursors; the scalar
+        // total-fit planner cannot represent them, so use its first-fit fallback.
+        if !self.layout.data.parallel_inline_groups.is_empty() {
+            return;
+        }
         let LineBreakStrategy::TotalFit(params) = self.layout.data.line_break_strategy else {
             return;
         };
@@ -1692,14 +1714,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         );
                     }
 
-                    // Compute the x position of the content being currently processed
-                    let next_x = self.state.line.x + width;
-                    let next_fit_x = self.state.line.fit_x + width;
-
-                    // println!("BOX next_x: {}", next_x);
-
-                    // If the box fits on the current line (or we are at the start of the current line)
-                    // then simply move on to the next item
                     let tracking_correction = line_edge_letter_spacing(
                         &mut self.letter_spacing_edges,
                         &self.layout.data,
@@ -1712,6 +1726,99 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         .map_or(0.0, |edges| {
                             edges.correction(self.layout.data.trim_line_end_letter_spacing)
                         });
+
+                    if let Some(group) = self
+                        .parallel_group_index(self.layout.data.inline_boxes[inline_box_index].id)
+                    {
+                        let tracking = width
+                            - self.layout.data.inline_boxes[inline_box_index]
+                                .width_for_line(self.state.lines);
+                        let available =
+                            max_advance - self.state.line.fit_x - tracking + tracking_correction;
+                        let measured = self
+                            .fit_parallel_group(group, available, false)
+                            .expect("prepared group has complete source rows");
+                        let full_fits = measured.complete
+                            && self.advance_contribution_fits(
+                                measured.advance + tracking + preceding_correction
+                                    - tracking_correction,
+                                self.state.line.fit_x + measured.advance + tracking
+                                    - tracking_correction,
+                                max_advance,
+                            );
+                        let partial = self.fit_parallel_group(group, available, true);
+                        if full_fits {
+                            // Keep an internal source candidate even when the entire group fits.
+                            // Following prohibited line-start content may need this earlier cut.
+                            if let Some(partial) = partial.filter(|fit| {
+                                self.advance_contribution_fits(
+                                    fit.advance + tracking + preceding_correction
+                                        - tracking_correction,
+                                    self.state.line.fit_x + fit.advance + tracking
+                                        - tracking_correction,
+                                    max_advance,
+                                )
+                            }) {
+                                let preceding = self.state.line.clone();
+                                self.append_parallel_fragment(partial, height, break_affinity);
+                                self.state
+                                    .mark_line_break_opportunity(RegularBreakKind::Ordinary);
+                                self.state.line = preceding;
+                            }
+                            self.append_parallel_fragment(measured, height, break_affinity);
+                            continue;
+                        }
+                        let selected = partial.unwrap_or_else(|| {
+                            self.fit_parallel_group(group, f32::MAX, false)
+                                .expect("uncuttable remaining rows must finish together")
+                        });
+                        if !self.advance_contribution_fits(
+                            selected.advance + tracking + preceding_correction
+                                - tracking_correction,
+                            self.state.line.fit_x + selected.advance + tracking
+                                - tracking_correction,
+                            max_advance,
+                        ) && self.state.line.has_content_advance()
+                        {
+                            if let Some(candidate) = self.state.take_overflow_candidate() {
+                                if try_commit_regular_candidate!(candidate) {
+                                    return self.start_new_line();
+                                }
+                            }
+                            if allows_break_before
+                                && commit_current_line!(
+                                    self,
+                                    max_advance,
+                                    line_indent,
+                                    BreakReason::Regular
+                                )
+                            {
+                                return self.start_new_line();
+                            }
+                        }
+                        let complete = selected.complete;
+                        self.append_parallel_fragment(selected, height, break_affinity);
+                        if !complete
+                            && commit_current_line!(
+                                self,
+                                max_advance,
+                                line_indent,
+                                BreakReason::Regular
+                            )
+                        {
+                            return self.start_new_line();
+                        }
+                        continue;
+                    }
+
+                    // Compute the x position of the content being currently processed
+                    let next_x = self.state.line.x + width;
+                    let next_fit_x = self.state.line.fit_x + width;
+
+                    // println!("BOX next_x: {}", next_x);
+
+                    // If the box fits on the current line (or we are at the start of the current line)
+                    // then simply move on to the next item
                     let resolved_contribution = width + preceding_correction - tracking_correction;
                     if self.advance_contribution_fits(
                         resolved_contribution,
@@ -2970,7 +3077,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
         for item in &mut line_items[line.item_range.clone()] {
             if item.kind == LayoutItemKind::InlineBox {
-                item.advance = data.inline_boxes[item.index].advance_for_line(line_idx);
+                let inline_box = &data.inline_boxes[item.index];
+                item.advance = item.parallel_fragment.as_ref().map_or_else(
+                    || inline_box.advance_for_line(line_idx),
+                    |fragment| {
+                        fragment.inline_advance + inline_box.advance_for_line(line_idx)
+                            - inline_box.width_for_line(line_idx)
+                    },
+                );
             }
         }
     }
@@ -3157,8 +3271,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             for line_item in &self.lines.line_items[line.item_range.clone()] {
                 match line_item.kind {
                     LayoutItemKind::InlineBox => {
-                        line_x += self.layout.data.inline_boxes[line_item.index]
-                            .advance_for_line(line_idx);
+                        line_x += if line_item.parallel_fragment.is_some() {
+                            line_item.advance
+                        } else {
+                            self.layout.data.inline_boxes[line_item.index]
+                                .advance_for_line(line_idx)
+                        };
                     }
                     LayoutItemKind::TextRun => {
                         let run = &self.layout.data.runs[line_item.index];
@@ -3456,6 +3574,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         letter_spacing_offset: 0.0,
                         terminal_inline_space_reduction: 0.0,
                         terminal_source_space: false,
+                        parallel_fragment: None,
                         is_whitespace: false,
                         has_trailing_whitespace: false,
                         cluster_range: cluster..cluster,
@@ -4154,6 +4273,13 @@ fn try_commit_line<B: Brush>(
 
     // Iterate over the items to commit
     // println!("\nCOMMIT LINE");
+    let mut parallel_fragments = Vec::new();
+    let mut selected = state.parallel_fragments.as_deref();
+    while let Some(fragment) = selected {
+        parallel_fragments.push((fragment.item, fragment.advance, fragment.fragment.clone()));
+        selected = fragment.previous.as_deref();
+    }
+    parallel_fragments.sort_unstable_by_key(|fragment| fragment.0);
     let mut committed_text_run = false;
     for (i, item) in items_to_commit.iter().enumerate() {
         // println!("i = {} index = {} {:?}", i, item.index, item.kind);
@@ -4162,11 +4288,20 @@ fn try_commit_line<B: Brush>(
             LayoutItemKind::InlineBox => {
                 let inline_box = &layout.data.inline_boxes[item.index];
 
-                lines.line_items.push(LineItemData::inline_box(
+                let selected = parallel_fragments
+                    .binary_search_by_key(&(state.items.start + i), |fragment| fragment.0)
+                    .ok()
+                    .map(|index| &parallel_fragments[index]);
+                let mut line_item = LineItemData::inline_box(
                     item,
                     Some(state.items.start + i),
-                    inline_box.width_for_line(line_index),
-                ));
+                    selected.map_or_else(
+                        || inline_box.width_for_line(line_index),
+                        |selected| selected.1,
+                    ),
+                );
+                line_item.parallel_fragment = selected.map(|selected| selected.2.clone());
+                lines.line_items.push(line_item);
             }
             LayoutItemKind::TextRun => {
                 let run_data = &layout.data.runs[item.index];
@@ -4213,6 +4348,7 @@ fn try_commit_line<B: Brush>(
                     letter_spacing_offset: 0.0,
                     terminal_inline_space_reduction: 0.0,
                     terminal_source_space: false,
+                    parallel_fragment: None,
                     is_whitespace: false,
                     has_trailing_whitespace: false,
                     cluster_range,
@@ -4418,9 +4554,10 @@ fn collect_terminal_whitespace<B: Brush>(
     'items: for (item_index, line_item) in line_items.iter().enumerate().rev() {
         match line_item.kind {
             LayoutItemKind::InlineBox => {
-                if layout_data.inline_boxes[line_item.index]
-                    .terminal_source_space_reduction()
-                    .is_some()
+                if line_item.parallel_fragment.is_none()
+                    && layout_data.inline_boxes[line_item.index]
+                        .terminal_source_space_reduction()
+                        .is_some()
                 {
                     if terminal.removes_source(TerminalWhitespaceDisposition::Removed) {
                         terminal_inline_source_space = Some(item_index);
