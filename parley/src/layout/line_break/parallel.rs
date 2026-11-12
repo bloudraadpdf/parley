@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use super::{BreakLines, LineTabOrigin};
-use crate::layout::{Layout, ParallelInlineFragment, PreparedParallelRow};
+use crate::layout::{
+    Layout, LineBreakPurpose, ParallelInlineCut, ParallelInlineFragment, PreparedParallelRow,
+};
 use crate::{Brush, InlineBoxBreakAffinity};
 use alloc::{sync::Arc, vec::Vec};
 
@@ -11,8 +13,17 @@ use alloc::{sync::Arc, vec::Vec};
 pub(in crate::layout) fn boundary_advances<B: Brush>(
     layout: &mut Layout<B>,
     boundaries: &[usize],
+    inline_boundaries: Option<&[usize]>,
 ) -> Option<Vec<f32>> {
     let mut breaker = layout.break_lines();
+    if let Some(items) = inline_boundaries {
+        breaker.parallel_row_cuts = Some(
+            items[1..items.len() - 1]
+                .iter()
+                .map(|item| (*item, crate::OverflowWrap::Normal))
+                .collect(),
+        );
+    }
     breaker.state.probe = Some(super::total_fit::Segment::default());
     let candidate = breaker.preview_shape_candidate_with(|probe| {
         probe
@@ -23,17 +34,28 @@ pub(in crate::layout) fn boundary_advances<B: Brush>(
     let mut measured = Vec::with_capacity(segment.opportunities.len() + 2);
     measured.push((0, 0.0));
     for opportunity in &segment.opportunities {
-        let byte = opportunity.projected_boundary.unwrap_or_else(|| {
-            super::SourceCursor::at(
-                &breaker.layout.data,
-                opportunity.cursor.0,
-                opportunity.cursor.1,
-            )
-            .source_offset(&breaker.layout.data)
-        });
+        let byte = if inline_boundaries.is_some() {
+            opportunity.cursor.0
+        } else {
+            opportunity.projected_boundary.unwrap_or_else(|| {
+                super::SourceCursor::at(
+                    &breaker.layout.data,
+                    opportunity.cursor.0,
+                    opportunity.cursor.1,
+                )
+                .source_offset(&breaker.layout.data)
+            })
+        };
         measured.push((byte, opportunity.start.advance));
     }
-    measured.push((breaker.layout.data.text_len, segment.end?.advance));
+    measured.push((
+        if inline_boundaries.is_some() {
+            breaker.layout.data.items.len()
+        } else {
+            breaker.layout.data.text_len
+        },
+        segment.end?.advance,
+    ));
     measured.sort_unstable_by_key(|entry| entry.0);
     let advances = boundaries
         .iter()
@@ -86,11 +108,39 @@ fn row_fit<B: Brush>(
     start: usize,
     limit: usize,
     measure: f32,
+    purpose: LineBreakPurpose,
+    emergency: bool,
 ) -> (usize, f32) {
+    layout.set_line_break_purpose(purpose);
+    layout.set_line_break_overrides(if emergency {
+        row.emergency_overrides.to_vec()
+    } else {
+        row.normal_overrides.to_vec()
+    });
     let byte_limit = row.boundaries[limit];
-    layout.data.first_line_source_end = (limit + 1 < row.boundaries.len()).then_some(byte_limit);
+    layout.data.first_line_source_end =
+        (row.inline_boundaries.is_none() && limit + 1 < row.boundaries.len()).then_some(byte_limit);
     let (item_index, cluster_index) = row.cursors[start];
     let mut breaker = layout.break_lines();
+    if let Some(items) = &row.inline_boundaries {
+        breaker.source_probe = Some(super::SourceProbe::Prefix(super::SourceCursor::BeforeItem(
+            items[limit],
+        )));
+        breaker.parallel_row_cuts = Some(
+            row.cuts
+                .iter()
+                .enumerate()
+                .filter_map(|(index, cut)| {
+                    let ParallelInlineCut::AfterInlineBox { overflow, .. } = cut else {
+                        return None;
+                    };
+                    (*overflow == crate::OverflowWrap::Normal
+                        || emergency && purpose.allows_emergency_wrap(*overflow))
+                    .then_some((items[index + 1], *overflow))
+                })
+                .collect(),
+        );
+    }
     breaker.state.item_idx = item_index;
     breaker.state.cluster_idx = cluster_index;
     breaker.state.line.items = item_index..item_index;
@@ -101,14 +151,19 @@ fn row_fit<B: Brush>(
         .lines
         .first()
         .expect("nonempty prepared row must emit a line");
-    let source_end = breaker
-        .state
-        .taken_projected_source_boundary
-        .map_or(line.text_range.end, |boundary| boundary.target());
-    let end = row
-        .boundaries
-        .binary_search(&source_end)
-        .expect("row line must end at a validated source boundary");
+    let end = if let Some(items) = &row.inline_boundaries {
+        items
+            .binary_search(&breaker.state.item_idx)
+            .expect("whole-child row ends at a validated native item cursor")
+    } else {
+        let source_end = breaker
+            .state
+            .taken_projected_source_boundary
+            .map_or(line.text_range.end, |boundary| boundary.target());
+        row.boundaries
+            .binary_search(&source_end)
+            .expect("row line must end at a validated source boundary")
+    };
     assert!(
         end > start && end <= limit,
         "parallel rows must make bounded source progress"
@@ -130,8 +185,13 @@ impl<B: Brush> BreakLines<'_, B> {
         group_index: usize,
         measure: f32,
         partial: bool,
+        emergency: bool,
     ) -> Option<ParallelFit> {
+        let purpose = self.layout.data.line_break_purpose;
         let group = &self.layout.data.parallel_inline_groups[group_index].1;
+        if emergency && !group.rows.iter().any(|row| row.cuts.iter().any(|cut| {
+            matches!(cut, ParallelInlineCut::Emergency { overflow, .. } | ParallelInlineCut::AfterInlineBox { overflow, .. } if purpose.allows_emergency_wrap(*overflow))
+        })) { return None; }
         let starts = self
             .state
             .line
@@ -142,25 +202,44 @@ impl<B: Brush> BreakLines<'_, B> {
                 || alloc::vec![0; group.rows.len()],
                 |continuation| continuation.starts.clone(),
             );
-        if partial
-            && group
-                .rows
-                .iter()
-                .zip(&starts)
-                .any(|(row, start)| start + 2 >= row.boundaries.len())
-        {
-            return None;
-        }
+        let limits = group
+            .rows
+            .iter()
+            .zip(&starts)
+            .map(|(row, &start)| {
+                if !partial {
+                    return Some(row.boundaries.len() - 1);
+                }
+                row.cuts.iter().enumerate().rev().find_map(|(index, cut)| {
+                    let ordinal = index + 1;
+                    let allowed = match cut {
+                        ParallelInlineCut::Normal(_) => true,
+                        ParallelInlineCut::AfterInlineBox { overflow, .. }
+                            if *overflow == crate::OverflowWrap::Normal =>
+                        {
+                            true
+                        }
+                        ParallelInlineCut::Emergency { overflow, .. }
+                        | ParallelInlineCut::AfterInlineBox { overflow, .. } => {
+                            emergency && purpose.allows_emergency_wrap(*overflow)
+                        }
+                    };
+                    (ordinal > start && allowed).then_some(ordinal)
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
         let mut rows = Vec::with_capacity(group.rows.len());
         let mut widths = Vec::with_capacity(group.rows.len());
         for (index, (row, &start)) in group.rows.iter().zip(&starts).enumerate() {
-            let limit = row.boundaries.len() - if partial { 2 } else { 1 };
+            let limit = limits[index];
             let (end, width) = row_fit(
                 &mut self.parallel_rows[group_index][index],
                 row,
                 start,
                 limit,
                 measure,
+                purpose,
+                emergency,
             );
             widths.push(width);
             rows.push(start..end);
@@ -205,13 +284,15 @@ impl<B: Brush> BreakLines<'_, B> {
                     measure
                 };
                 if *width != target {
-                    let limit = row.boundaries.len() - 2;
+                    let limit = limits[index];
                     let (end, fitted) = row_fit(
                         &mut self.parallel_rows[group_index][index],
                         row,
                         start,
                         limit,
                         target,
+                        purpose,
+                        emergency,
                     );
                     rows[index] = start..end;
                     *width = fitted;

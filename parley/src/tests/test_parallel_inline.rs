@@ -37,6 +37,22 @@ fn sized_row_layout(
     font_size: f32,
     inline_boxes: impl IntoIterator<Item = InlineBox>,
 ) -> Layout<crate::tests::utils::ColorBrush> {
+    sized_row_layout_with_policy(
+        text,
+        font_size,
+        inline_boxes,
+        crate::OverflowWrap::Normal,
+        crate::WordBreak::Normal,
+    )
+}
+
+fn sized_row_layout_with_policy(
+    text: &str,
+    font_size: f32,
+    inline_boxes: impl IntoIterator<Item = InlineBox>,
+    overflow: crate::OverflowWrap,
+    word_break: crate::WordBreak,
+) -> Layout<crate::tests::utils::ColorBrush> {
     let mut fonts = crate::tests::test_builders::create_font_context();
     let mut context = crate::LayoutContext::new();
     let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
@@ -44,6 +60,8 @@ fn sized_row_layout(
         "Roboto",
     )));
     builder.push_default(crate::StyleProperty::FontSize(font_size));
+    builder.push_default(crate::StyleProperty::OverflowWrap(overflow));
+    builder.push_default(crate::StyleProperty::WordBreak(word_break));
     builder.push_default(crate::StyleProperty::TextWrapMode(
         crate::TextWrapMode::NoWrap,
     ));
@@ -422,4 +440,489 @@ fn zero_owner_edges_keep_their_order_and_source_cuts_through_rebreaking() {
             result.as_ref().map(|row| row.boundaries())
         );
     }
+}
+
+fn overflow_row(
+    text: &str,
+    normal: &[usize],
+    overflow: crate::OverflowWrap,
+) -> PreparedParallelRow<crate::tests::utils::ColorBrush> {
+    let layout = sized_row_layout(text, 10.0, []);
+    let cuts = (1..text.len())
+        .map(|byte| {
+            if normal.contains(&byte) {
+                crate::ParallelInlineCut::Normal(byte)
+            } else {
+                crate::ParallelInlineCut::Emergency {
+                    byte_index: byte,
+                    overflow,
+                }
+            }
+        })
+        .collect();
+    PreparedParallelRow::with_cuts(layout, cuts).unwrap()
+}
+
+fn overflow_group(
+    overflow: crate::OverflowWrap,
+) -> PreparedParallelInline<crate::tests::utils::ColorBrush> {
+    PreparedParallelInline::new(vec![
+        overflow_row("MMMM", &[], overflow),
+        overflow_row("MMMM", &[], overflow),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn parallel_emergency_cuts_defer_to_a_prior_ordinary_parent_boundary() {
+    for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+        let group = overflow_group(crate::OverflowWrap::BreakWord);
+        let full = group.full_advance();
+        let mut layout = build_layout_with_direction(
+            "",
+            [
+                InlineBox::new(501, 0, full / 2.0, 10.0),
+                InlineBox::atomic_with_break_affinity(
+                    502,
+                    0,
+                    full,
+                    10.0,
+                    InlineBoxBreakAffinity::Independent,
+                ),
+            ],
+            Some(direction),
+        );
+        layout
+            .set_parallel_inline_groups(vec![(502, group)])
+            .unwrap();
+        layout.break_all_lines(Some(full));
+        let selected = fragments(&layout);
+        assert_eq!(
+            selected.len(),
+            1,
+            "ordinary parent boundary wins: {direction:?}: {selected:?}"
+        );
+        assert_eq!(selected[0].0, 1);
+        assert_eq!(selected[0].2, [0..4, 0..4]);
+    }
+}
+
+#[test]
+fn parallel_emergency_cuts_split_wide_rows_and_rebreak_with_the_parent_purpose() {
+    for overflow in [
+        crate::OverflowWrap::BreakWord,
+        crate::OverflowWrap::Anywhere,
+    ] {
+        for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+            let group = overflow_group(overflow);
+            let full = group.full_advance();
+            let mut layout = build_layout_with_direction(
+                "",
+                [InlineBox::new(503, 0, full, 10.0)],
+                Some(direction),
+            );
+            layout
+                .set_parallel_inline_groups(vec![(503, group)])
+                .unwrap();
+            for width in [full / 2.0, full, full / 2.0] {
+                layout.break_all_lines(Some(width));
+                let selected = fragments(&layout);
+                assert_eq!(
+                    selected.len(),
+                    if width == full { 1 } else { 2 },
+                    "{overflow:?}/{direction:?}/{width}: {selected:?}"
+                );
+                assert!(
+                    selected.iter().all(|(_, advance, _)| *advance <= width),
+                    "{selected:?}"
+                );
+                if width != full {
+                    assert_eq!(selected[0].2, [0..2, 0..2]);
+                }
+            }
+            let widths = layout.calculate_content_widths();
+            assert!((widths.max - full).abs() < 0.01);
+            let expected_min = if overflow == crate::OverflowWrap::BreakWord {
+                full
+            } else {
+                full / 4.0
+            };
+            assert!(
+                (widths.min - expected_min).abs() < 0.01,
+                "{overflow:?}: {widths:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn parallel_normal_word_space_precedes_internal_emergency_cuts() {
+    let group = PreparedParallelInline::new(vec![
+        overflow_row("MM MMMM", &[3], crate::OverflowWrap::BreakWord),
+        overflow_row("MM MMMM", &[3], crate::OverflowWrap::BreakWord),
+    ])
+    .unwrap();
+    let width = sized_row("MMM", vec![], 10.0).layout.width();
+    let mut layout = build_layout_with_direction(
+        "",
+        [InlineBox::new(504, 0, group.full_advance(), 10.0)],
+        None,
+    );
+    layout
+        .set_parallel_inline_groups(vec![(504, group)])
+        .unwrap();
+    layout.break_all_lines(Some(width));
+    let selected = fragments(&layout);
+    assert!(selected.len() >= 3, "{selected:?}");
+    assert_eq!(
+        selected[0].2,
+        [0..3, 0..3],
+        "the first piece ends at the normal source space: {selected:?}"
+    );
+    assert!(
+        selected.iter().all(|(_, advance, _)| *advance <= width),
+        "{selected:?}"
+    );
+}
+
+#[test]
+fn parallel_emergency_requires_a_permitted_internal_cut_in_every_row() {
+    let group = PreparedParallelInline::new(vec![
+        overflow_row("MMMM", &[], crate::OverflowWrap::BreakWord),
+        row("MMMM", vec![]),
+    ])
+    .unwrap();
+    let full = group.full_advance();
+    let mut layout = build_layout_with_direction("", [InlineBox::new(505, 0, full, 10.0)], None);
+    layout
+        .set_parallel_inline_groups(vec![(505, group)])
+        .unwrap();
+    layout.break_all_lines(Some(full / 2.0));
+    assert_eq!(fragments(&layout).len(), 1);
+    assert!((layout.width() - full).abs() < 0.01);
+    assert!(matches!(
+        PreparedParallelRow::with_cuts(
+            sized_row_layout("á", 10.0, []),
+            vec![crate::ParallelInlineCut::Emergency {
+                byte_index: 1,
+                overflow: crate::OverflowWrap::Anywhere,
+            }]
+        ),
+        Err(ParallelInlineError::InvalidCut)
+    ));
+    assert!(matches!(
+        PreparedParallelRow::with_cuts(
+            sized_row_layout("office", 10.0, []),
+            vec![crate::ParallelInlineCut::Emergency {
+                byte_index: 2,
+                overflow: crate::OverflowWrap::Anywhere,
+            }]
+        ),
+        Err(ParallelInlineError::InvalidCut)
+    ));
+}
+
+#[test]
+fn parallel_emergency_does_not_displace_parent_space_before_following_punctuation() {
+    let group = overflow_group(crate::OverflowWrap::BreakWord);
+    let full = group.full_advance();
+    let mut suffix = build_layout_with_direction(")", [], None);
+    suffix.break_all_lines(None);
+    let width = full + suffix.width();
+    let mut layout =
+        build_layout_with_direction(
+            "x )",
+            [InlineBox::atomic_with_break_affinity(
+                506,
+                2,
+                full,
+                10.0,
+                InlineBoxBreakAffinity::ToNext,
+            )
+            .with_source_kind(InlineBoxSourceKind::InlineContent)],
+            None,
+        );
+    layout
+        .set_parallel_inline_groups(vec![(506, group)])
+        .unwrap();
+    layout.break_all_lines(Some(width));
+    let selected = fragments(&layout);
+    assert_eq!(
+        selected.len(),
+        1,
+        "keep group and close intact after prior space: {selected:?}"
+    );
+    assert_eq!(selected[0].0, 1);
+    assert_eq!(selected[0].2, [0..4, 0..4]);
+    assert!(
+        layout
+            .lines()
+            .all(|line| line.metrics().advance <= width + 0.01)
+    );
+}
+
+#[test]
+fn parallel_emergency_cut_table_does_not_infer_permission_from_another_run() {
+    let layout = sized_row_layout_with_policy(
+        "MMMM",
+        10.0,
+        [],
+        crate::OverflowWrap::Anywhere,
+        crate::WordBreak::KeepAll,
+    );
+    let prepared = PreparedParallelRow::with_cuts(
+        layout,
+        vec![crate::ParallelInlineCut::Emergency {
+            byte_index: 2,
+            overflow: crate::OverflowWrap::BreakWord,
+        }],
+    )
+    .unwrap();
+    assert!(
+        prepared
+            .layout
+            .data
+            .styles
+            .iter()
+            .all(|style| style.text_wrap_mode == crate::TextWrapMode::NoWrap
+                && style.overflow_wrap == crate::OverflowWrap::Anywhere)
+    );
+    let group = PreparedParallelInline::new(vec![prepared.clone(), prepared]).unwrap();
+    let full = group.full_advance();
+    let mut parent = build_layout_with_direction("", [InlineBox::new(507, 0, full, 10.0)], None);
+    parent
+        .set_parallel_inline_groups(vec![(507, group)])
+        .unwrap();
+    assert!(
+        (parent.calculate_content_widths().min - full).abs() < 0.01,
+        "unlisted Anywhere style boundaries must not leak through the row's BreakWord table"
+    );
+    parent.break_all_lines(Some(full / 4.0));
+    let selected = fragments(&parent);
+    assert_eq!(
+        selected.len(),
+        2,
+        "only supplied boundary2 is eligible: {selected:?}"
+    );
+    assert_eq!(selected[0].2, [0..1, 0..1]);
+    assert!(matches!(
+        PreparedParallelRow::with_cuts(
+            sized_row_layout("MMMM", 10.0, []),
+            vec![crate::ParallelInlineCut::Emergency {
+                byte_index: 2,
+                overflow: crate::OverflowWrap::Normal,
+            }]
+        ),
+        Err(ParallelInlineError::InvalidCut)
+    ));
+}
+
+fn whole_child_row(
+    overflow: crate::OverflowWrap,
+) -> PreparedParallelRow<crate::tests::utils::ColorBrush> {
+    let edges = vec![
+        InlineBox::inline_start_edge(
+            800,
+            0,
+            InlineOwnerEdgeAdvance::uniform(0.0),
+            0.0,
+            InlineBoxBreakAffinity::Both,
+        ),
+        InlineBox::atomic_with_break_affinity(
+            801,
+            0,
+            40.0,
+            10.0,
+            InlineBoxBreakAffinity::SourceText,
+        )
+        .with_source_kind(InlineBoxSourceKind::InlineContent),
+        InlineBox::inline_end_edge(
+            802,
+            0,
+            InlineOwnerEdgeAdvance::uniform(0.0),
+            0.0,
+            InlineBoxBreakAffinity::Both,
+        ),
+        InlineBox::transparent_anchor(803, 0),
+        InlineBox::atomic_with_break_affinity(
+            804,
+            0,
+            60.0,
+            10.0,
+            InlineBoxBreakAffinity::SourceText,
+        )
+        .with_source_kind(InlineBoxSourceKind::InlineContent),
+    ];
+    let layout = sized_row_layout("", 10.0, edges.clone());
+    let row = PreparedParallelRow::with_cuts(
+        layout,
+        vec![crate::ParallelInlineCut::AfterInlineBox { id: 801, overflow }],
+    )
+    .unwrap();
+    assert_eq!(row.boundaries(), [0, 1, 2]);
+    assert_eq!(
+        row.layout.inline_boxes(),
+        edges.as_slice(),
+        "native metadata and source ordering stay unchanged"
+    );
+    row
+}
+
+#[test]
+fn whole_child_parallel_rows_use_source_item_cursors_and_emergency_purpose() {
+    for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+        let group = PreparedParallelInline::new(vec![
+            whole_child_row(crate::OverflowWrap::BreakWord),
+            overflow_row("MMMMMMMMMM", &[], crate::OverflowWrap::BreakWord),
+        ])
+        .unwrap();
+        assert_eq!(group.full_advance(), 100.0);
+        let mut layout =
+            build_layout_with_direction("", [InlineBox::new(810, 0, 100.0, 10.0)], Some(direction));
+        layout
+            .set_parallel_inline_groups(vec![(810, group)])
+            .unwrap();
+        for width in [80.0, 100.0, 80.0] {
+            layout.break_all_lines(Some(width));
+            let selected = fragments(&layout);
+            assert_eq!(
+                selected.len(),
+                if width == 80.0 { 2 } else { 1 },
+                "{direction:?}/{width}: {selected:?}"
+            );
+            assert!(
+                selected.iter().all(|(_, advance, _)| *advance <= width),
+                "{selected:?}"
+            );
+            if width == 80.0 {
+                assert_eq!(
+                    selected[0].2,
+                    [0..1, 0..4],
+                    "same byte0 cuts use real child source cursor: {selected:?}"
+                );
+                assert_eq!(selected[1].2, [1..2, 4..10]);
+                assert_eq!(selected[0].1, 40.0);
+                assert_eq!(selected[1].1, 60.0);
+            }
+        }
+        let widths = layout.calculate_content_widths();
+        assert_eq!(
+            widths.min, 100.0,
+            "BreakWord child cuts do not reduce intrinsic width"
+        );
+        assert_eq!(widths.max, 100.0);
+    }
+}
+
+#[test]
+fn whole_child_emergency_cuts_keep_parent_normal_priority_and_never_split_children() {
+    let group = PreparedParallelInline::new(vec![
+        whole_child_row(crate::OverflowWrap::BreakWord),
+        overflow_row("MMMMMMMMMM", &[], crate::OverflowWrap::BreakWord),
+    ])
+    .unwrap();
+    let mut parent = build_layout_with_direction(
+        "",
+        [
+            InlineBox::new(820, 0, 40.0, 10.0),
+            InlineBox::new(821, 0, 100.0, 10.0),
+        ],
+        None,
+    );
+    parent
+        .set_parallel_inline_groups(vec![(821, group)])
+        .unwrap();
+    parent.break_all_lines(Some(100.0));
+    let selected = fragments(&parent);
+    assert_eq!(
+        selected.len(),
+        1,
+        "parent boundary precedes child-only emergency: {selected:?}"
+    );
+    assert_eq!(selected[0].0, 1);
+    assert_eq!(selected[0].2, [0..2, 0..10]);
+    parent.break_all_lines(Some(20.0));
+    let selected = fragments(&parent);
+    assert_eq!(
+        selected.len(),
+        2,
+        "unbreakable 40/60 child geometry stays whole: {selected:?}"
+    );
+    assert_eq!(selected[0].2[0], 0..1);
+    assert_eq!(selected[1].2[0], 1..2);
+}
+
+#[test]
+fn whole_child_cuts_validate_identity_order_and_unsupported_geometry() {
+    let tracked = PreparedParallelRow::with_cuts(
+        sized_row_layout(
+            "",
+            10.0,
+            [
+                InlineBox::new(1, 0, 40.0, 10.0).with_letter_spacing(1.0),
+                InlineBox::new(2, 0, 60.0, 10.0),
+            ],
+        ),
+        vec![crate::ParallelInlineCut::AfterInlineBox {
+            id: 1,
+            overflow: crate::OverflowWrap::BreakWord,
+        }],
+    );
+    assert!(
+        matches!(tracked, Err(ParallelInlineError::UnsupportedRow)),
+        "nonzero actual tracking stays unsupported: {tracked:?}"
+    );
+
+    for cuts in [
+        vec![crate::ParallelInlineCut::AfterInlineBox {
+            id: 999,
+            overflow: crate::OverflowWrap::BreakWord,
+        }],
+        vec![crate::ParallelInlineCut::AfterInlineBox {
+            id: 2,
+            overflow: crate::OverflowWrap::BreakWord,
+        }],
+        vec![
+            crate::ParallelInlineCut::AfterInlineBox {
+                id: 1,
+                overflow: crate::OverflowWrap::BreakWord,
+            },
+            crate::ParallelInlineCut::AfterInlineBox {
+                id: 1,
+                overflow: crate::OverflowWrap::BreakWord,
+            },
+        ],
+        vec![crate::ParallelInlineCut::Normal(1)],
+    ] {
+        let result = PreparedParallelRow::with_cuts(
+            sized_row_layout(
+                "",
+                10.0,
+                [
+                    InlineBox::new(1, 0, 40.0, 10.0),
+                    InlineBox::new(2, 0, 60.0, 10.0),
+                ],
+            ),
+            cuts,
+        );
+        assert!(
+            matches!(result, Err(ParallelInlineError::InvalidCut)),
+            "{result:?}"
+        );
+    }
+    let result = PreparedParallelRow::with_cuts(
+        sized_row_layout(
+            "",
+            10.0,
+            [
+                InlineBox::new(1, 0, 40.0, 10.0).with_terminal_source_space_reduction(0.0),
+                InlineBox::new(2, 0, 60.0, 10.0),
+            ],
+        ),
+        vec![crate::ParallelInlineCut::AfterInlineBox {
+            id: 1,
+            overflow: crate::OverflowWrap::BreakWord,
+        }],
+    );
+    assert!(matches!(result, Err(ParallelInlineError::UnsupportedRow)));
 }

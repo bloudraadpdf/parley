@@ -47,7 +47,8 @@ pub use line::{
 };
 pub use line_break::{BreakLines, CommittedLine, LineBreakStrategy, LineTabOrigin, TotalFit};
 pub use parallel::{
-    ParallelInlineError, ParallelInlineFragment, PreparedParallelInline, PreparedParallelRow,
+    ParallelInlineCut, ParallelInlineError, ParallelInlineFragment, PreparedParallelInline,
+    PreparedParallelRow,
 };
 pub use physical_shaping::{InlineOwnerShaping, InlineShapingEdge, ShapingEdgePlacement};
 pub use run::{Run, RunMetrics};

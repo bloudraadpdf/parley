@@ -876,6 +876,7 @@ pub struct BreakLines<'a, B: Brush> {
     physical_shaper: Option<crate::shape::physical::PhysicalShaper<B>>,
     total_fit: TotalFitState,
     parallel_rows: Vec<Vec<Layout<B>>>,
+    parallel_row_cuts: Option<Vec<(usize, OverflowWrap)>>,
     #[cfg(test)]
     visited_clusters: usize,
     #[cfg(test)]
@@ -961,6 +962,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             physical_shaper,
             total_fit: TotalFitState::default(),
             parallel_rows,
+            parallel_row_cuts: None,
             #[cfg(test)]
             visited_clusters: 0,
             #[cfg(test)]
@@ -1454,6 +1456,25 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             if self.prefix_ends_at(SourceCursor::BeforeItem(self.state.item_idx)) {
                 return self.commit_source_prefix(max_advance, line_indent);
             }
+            if let Some(overflow) = self.parallel_row_cuts.as_ref().and_then(|cuts| {
+                cuts.binary_search_by_key(&self.state.item_idx, |cut| cut.0)
+                    .ok()
+                    .map(|index| cuts[index].1)
+            }) {
+                if self.state.line.has_content_advance() {
+                    if overflow == OverflowWrap::Normal {
+                        self.state
+                            .mark_line_break_opportunity(RegularBreakKind::Ordinary);
+                    } else if self
+                        .layout
+                        .data
+                        .line_break_purpose
+                        .allows_emergency_wrap(overflow)
+                    {
+                        self.state.mark_emergency_break_opportunity();
+                    }
+                }
+            }
             commit_probed_candidate!();
             let item = &self.layout.data.items[self.state.item_idx];
 
@@ -1472,7 +1493,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let terminal_source_space_reduction =
                         inline_box.terminal_source_space_reduction();
                     let break_affinity = match inline_box.line_break_participation() {
-                        InlineBoxLineBreakParticipation::Atomic(break_affinity) => break_affinity,
+                        InlineBoxLineBreakParticipation::Atomic(break_affinity) => {
+                            if self.parallel_row_cuts.is_some() {
+                                InlineBoxBreakAffinity::Both
+                            } else {
+                                break_affinity
+                            }
+                        }
                         InlineBoxLineBreakParticipation::ContextualSpacing => {
                             if self
                                 .state
@@ -1736,7 +1763,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let available =
                             max_advance - self.state.line.fit_x - tracking + tracking_correction;
                         let measured = self
-                            .fit_parallel_group(group, available, false)
+                            .fit_parallel_group(group, available, false, false)
                             .expect("prepared group has complete source rows");
                         let full_fits = measured.complete
                             && self.advance_contribution_fits(
@@ -1746,7 +1773,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     - tracking_correction,
                                 max_advance,
                             );
-                        let partial = self.fit_parallel_group(group, available, true);
+                        let partial = self.fit_parallel_group(group, available, true, false);
                         if full_fits {
                             // Keep an internal source candidate even when the entire group fits.
                             // Following prohibited line-start content may need this earlier cut.
@@ -1765,11 +1792,76 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     .mark_line_break_opportunity(RegularBreakKind::Ordinary);
                                 self.state.line = preceding;
                             }
+                            if let Some(emergency) = self
+                                .fit_parallel_group(group, available, true, true)
+                                .filter(|fit| {
+                                    self.advance_contribution_fits(
+                                        fit.advance + tracking + preceding_correction
+                                            - tracking_correction,
+                                        self.state.line.fit_x + fit.advance + tracking
+                                            - tracking_correction,
+                                        max_advance,
+                                    )
+                                })
+                            {
+                                let preceding = self.state.line.clone();
+                                self.append_parallel_fragment(emergency, height, break_affinity);
+                                self.state.mark_emergency_break_opportunity();
+                                self.state.line = preceding;
+                            }
                             self.append_parallel_fragment(measured, height, break_affinity);
                             continue;
                         }
+                        let normal_fits = partial.as_ref().is_some_and(|fit| {
+                            self.advance_contribution_fits(
+                                fit.advance + tracking + preceding_correction - tracking_correction,
+                                self.state.line.fit_x + fit.advance + tracking
+                                    - tracking_correction,
+                                max_advance,
+                            )
+                        });
+                        let mut emergency_selected = false;
+                        let partial = if normal_fits {
+                            partial
+                        } else {
+                            // A preceding ordinary source opportunity wins over an
+                            // overflow-only cut inside this parallel participant.
+                            if self.state.line.has_content_advance() {
+                                if let Some(candidate) = self.state.take_overflow_candidate() {
+                                    if try_commit_regular_candidate!(candidate) {
+                                        return self.start_new_line();
+                                    }
+                                }
+                                if allows_break_before
+                                    && commit_current_line!(
+                                        self,
+                                        max_advance,
+                                        line_indent,
+                                        BreakReason::Regular
+                                    )
+                                {
+                                    return self.start_new_line();
+                                }
+                            }
+                            let emergency = self.fit_parallel_group(group, available, true, true);
+                            if emergency.as_ref().is_some_and(|fit| {
+                                !self.state.line.has_content_advance()
+                                    || self.advance_contribution_fits(
+                                        fit.advance + tracking + preceding_correction
+                                            - tracking_correction,
+                                        self.state.line.fit_x + fit.advance + tracking
+                                            - tracking_correction,
+                                        max_advance,
+                                    )
+                            }) {
+                                emergency_selected = true;
+                                emergency
+                            } else {
+                                partial
+                            }
+                        };
                         let selected = partial.unwrap_or_else(|| {
-                            self.fit_parallel_group(group, f32::MAX, false)
+                            self.fit_parallel_group(group, f32::MAX, false, false)
                                 .expect("uncuttable remaining rows must finish together")
                         });
                         if !self.advance_contribution_fits(
@@ -1803,7 +1895,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self,
                                 max_advance,
                                 line_indent,
-                                BreakReason::Regular
+                                if emergency_selected {
+                                    BreakReason::Emergency
+                                } else {
+                                    BreakReason::Regular
+                                }
                             )
                         {
                             return self.start_new_line();
@@ -1820,6 +1916,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // If the box fits on the current line (or we are at the start of the current line)
                     // then simply move on to the next item
                     let resolved_contribution = width + preceding_correction - tracking_correction;
+                    if self.parallel_row_cuts.is_some()
+                        && self.state.line.has_content_advance()
+                        && !self.advance_contribution_fits(
+                            resolved_contribution,
+                            next_fit_x - tracking_correction,
+                            max_advance,
+                        )
+                        && commit_overflow_candidate!()
+                    {
+                        return self.start_new_line();
+                    }
                     if self.advance_contribution_fits(
                         resolved_contribution,
                         next_fit_x - tracking_correction,
