@@ -775,19 +775,24 @@ impl BreakerState {
     }
 }
 
-/// Whether `candidate` is within the forward-error bound of a positive f32
-/// sum whose exact result is `max_advance`.
+/// Whether `candidate` fits the explicit total tolerance, or the forward-error
+/// bound of a positive f32 sum when no explicit tolerance is supplied.
 ///
 /// For `n` additions, Higham's standard bound is `gamma_n = n*u/(1-n*u)`,
 /// where `u` is the unit roundoff. Line advances are non-negative, so their
 /// absolute sum is the candidate itself. One further `u * max_advance` term
 /// accounts for storing the independently resolved measure in `f32`.
 #[inline]
-fn line_advance_fits(candidate: f32, max_advance: f32, term_count: usize) -> bool {
+fn line_advance_fits(candidate: f32, max_advance: f32, term_count: usize, tolerance: f32) -> bool {
+    let max_advance = max_advance + tolerance;
     if candidate <= max_advance {
         return true;
     }
     if !candidate.is_finite() || !max_advance.is_finite() || max_advance < 0.0 {
+        return false;
+    }
+    // A positive tolerance is the total allowance, including rounding error.
+    if tolerance > 0.0 {
         return false;
     }
 
@@ -2805,8 +2810,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         line_advance_fits(
             candidate + self.state.line.cloned_owners.end_advance(self.state.lines)
                 - self.state.line.space_shrink,
-            max_advance + self.layout.data.line_fit_tolerance,
+            max_advance,
             self.state.line.clusters.len() + self.state.line.items.len() + 1,
+            self.layout.data.line_fit_tolerance,
         )
     }
 
@@ -4876,11 +4882,19 @@ mod tests {
         // 115 positive cluster advances accumulate to 469.88995 in f32,
         // while the same fixed-grid values and measure are 469.8898 when
         // associated at their serialisation boundaries.
-        assert!(line_advance_fits(469.88995, 469.8898, 115));
+        assert!(line_advance_fits(469.88995, 469.8898, 115, 0.0));
         assert!(
-            !line_advance_fits(469.90, 469.8898, 115),
+            !line_advance_fits(469.90, 469.8898, 115, 0.0),
             "a genuine 0.01pt overflow remains a wrap",
         );
+    }
+
+    #[test]
+    fn explicit_line_fit_tolerance_does_not_add_another_error_allowance() {
+        let measure = 351.496_06;
+        let tolerance = 0.0075;
+        assert!(!line_advance_fits(351.504, measure, 70, tolerance));
+        assert!(line_advance_fits(351.504, 351.497, 70, tolerance));
     }
 
     #[test]

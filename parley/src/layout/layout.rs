@@ -334,6 +334,7 @@ impl<B: Brush> Layout<B> {
     /// PDFreactor keeps a line that overflows by up to 0.01 px; the CSS
     /// line breaking of browsers fits a line only within its advance. Zero by
     /// default; set before calling [`break_all_lines`](Self::break_all_lines).
+    /// A positive value includes the rounding allowance; it does not add to it.
     pub fn set_line_fit_tolerance(&mut self, tolerance: f32) {
         self.data.line_fit_tolerance = tolerance;
     }
