@@ -30,6 +30,75 @@ fn owner_layout(
     layout
 }
 
+#[test]
+fn nested_end_edges_do_not_project_a_break_before_outer_padding() {
+    let text = "AAAA BBBB CCCC DDDD";
+    let start = || {
+        InlineBox::inline_start_edge(
+            1,
+            5,
+            InlineOwnerEdgeAdvance::uniform(1.0),
+            0.0,
+            InlineBoxBreakAffinity::ToNext,
+        )
+    };
+    let end = || {
+        InlineBox::inline_end_edge_with_following_source_space(
+            4,
+            9,
+            InlineOwnerEdgeAdvance::uniform(1.0),
+            0.0,
+            FollowingSourceSpace::UnicodeBoundary,
+            InlineBoxBreakAffinity::ToPrevious,
+        )
+    };
+    for width in 40..=100 {
+        let flat = owner_layout(text, [start(), end()], Some(width as f32));
+        let nested = owner_layout(
+            text,
+            [
+                start(),
+                InlineBox::inline_start_edge(
+                    2,
+                    5,
+                    InlineOwnerEdgeAdvance::uniform(0.0),
+                    0.0,
+                    InlineBoxBreakAffinity::ToNext,
+                ),
+                InlineBox::inline_end_edge_with_following_source_space(
+                    3,
+                    9,
+                    InlineOwnerEdgeAdvance::uniform(0.0),
+                    0.0,
+                    FollowingSourceSpace::CollapsedAfterProjectedBreak,
+                    InlineBoxBreakAffinity::ToPrevious,
+                ),
+                end(),
+            ],
+            Some(width as f32),
+        );
+        let signature = |layout: &Layout<ColorBrush>| {
+            layout
+                .lines()
+                .map(|line| {
+                    (
+                        line.text_range(),
+                        line.items()
+                            .filter_map(|item| match item {
+                                PositionedLayoutItem::InlineBox(edge) if edge.id == 4 => {
+                                    Some(edge.width)
+                                }
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(signature(&nested), signature(&flat), "width={width}");
+    }
+}
+
 fn differing_cloned_edges(text: &str) -> [InlineBox; 2] {
     InlineBox::cloned_inline_edges(
         [801, 802],

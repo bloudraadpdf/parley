@@ -1575,6 +1575,16 @@ impl<B: Brush> LayoutData<B> {
             match item.kind {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.inline_boxes[item.index];
+                    // Closing nested owners form one edge sequence before the source-space break.
+                    if matches!(search, SourceBoundarySearch::AfterSpaces)
+                        && inline_box.index == byte_index
+                        && matches!(
+                            inline_box.line_break_participation(),
+                            InlineBoxLineBreakParticipation::LogicalOwnerEdge(edge) if edge.is_end()
+                        )
+                    {
+                        return SourceSoftWrapBoundary::Absent;
+                    }
                     if inline_box.index < byte_index
                         || !matches!(
                             inline_box.line_break_participation(),
