@@ -573,3 +573,63 @@ fn a_soft_hyphen_line_fit_without_owners_or_safe_boundaries_works_in_proportion_
         assert!(long * 10 <= short * 22, "{short} to {long}");
     }
 }
+
+#[test]
+fn physical_fitting_keeps_emergency_breaks_after_regular_breaks() {
+    let text = "If this module is the [[CycleRoot]] of some cycle, and Evaluate() was called on some module in that cycle, this field contains the PromiseCapability Record for that entire evaluation. It is used to settle the Promise object that is returned from the Evaluate() abstract method. This field will be EMPTY for any dependencies of that module, unless a top-level Evaluate() has been initiated for some of those dependencies.";
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+    builder.set_direction(BaseDirection::Ltr);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Arimo")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::OverflowWrap(crate::OverflowWrap::BreakWord));
+    let constant = text.find("EMPTY").unwrap();
+    builder.push(
+        StyleProperty::FontFamily(FontFamily::named("Roboto")),
+        constant..constant + 5,
+    );
+    let field = text.find("[[CycleRoot]]").unwrap();
+    builder.push_inline_owner_shaping(owner(
+        field..field + 13,
+        PhysicalLineEdge::Left,
+        ShapingEdgePlacement::FirstLine,
+    ));
+    let mut layout = builder.build(text);
+    for measure in [231.45, 231.5, 231.55] {
+        layout.break_all_lines(Some(measure));
+        for line in layout.lines() {
+            assert_ne!(
+                line.break_reason(),
+                crate::layout::BreakReason::Emergency,
+                "measure {measure}: {:?}",
+                line.text_range()
+            );
+        }
+    }
+}
+
+#[test]
+fn physical_fitting_keeps_emergency_breaks_for_an_overlong_word() {
+    let text = "abcdefghijklmnopqrstuvwxyz";
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    let mut builder = context.ranged_builder(&mut fonts, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::OverflowWrap(crate::OverflowWrap::BreakWord));
+    builder.push_inline_owner_shaping(owner(
+        0..3,
+        PhysicalLineEdge::Left,
+        ShapingEdgePlacement::FirstLine,
+    ));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(10.0));
+    assert!(
+        layout
+            .lines()
+            .any(|line| line.break_reason() == crate::layout::BreakReason::Emergency)
+    );
+    assert!(layout.lines().all(|line| line.metrics().advance <= 10.0));
+    assert_eq!(layout.lines().last().unwrap().text_range().end, text.len());
+}

@@ -155,6 +155,7 @@ impl<B: Brush> BreakLines<'_, B> {
         let endpoints = self.source_endpoints(terminal);
         let mut limit = fit.limit;
         let mut fallback: Option<LineShapeCandidate> = None;
+        let mut emergency = None;
         let mut bound = None;
         for end in endpoints.iter().copied().rev() {
             if bound.is_some_and(|bound: SourceCursor| end.key() > bound.key()) {
@@ -252,12 +253,20 @@ impl<B: Brush> BreakLines<'_, B> {
                 self.layout.data.line_fit_tolerance,
             );
             candidate.physical_shape = Some(shape);
-            fallback = Some(candidate);
             if fits {
-                break;
+                if candidate.line.break_reason != BreakReason::Emergency {
+                    return Some(candidate);
+                }
+                emergency.get_or_insert(candidate);
+            } else {
+                fallback = Some(candidate);
             }
         }
-        Some(fallback.expect("retained source has a terminal or unavoidable break"))
+        Some(
+            emergency
+                .or(fallback)
+                .expect("retained source has a terminal or unavoidable break"),
+        )
     }
 
     /// The first endpoint after `natural_end` where a line can end with a regular break.
