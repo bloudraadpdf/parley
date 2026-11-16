@@ -399,3 +399,61 @@ fn inherited_marks_select_their_graphemes_script_extensions() {
         }
     }
 }
+
+fn composition_layout(
+    context: &mut LayoutContext<ColorBrush>,
+    fonts: &mut crate::FontContext,
+    physical: bool,
+) -> crate::Layout<ColorBrush> {
+    let text = "A\u{030a} A\u{030a}";
+    let features = [crate::setting::FontFeature {
+        tag: crate::setting::Tag::from_bytes(*b"ccmp"),
+        value: 0,
+    }];
+    let mut builder = context.ranged_builder(fonts, text, 1.0, false);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(StyleProperty::FontFeatures((&features).into()));
+    if physical {
+        builder.push_inline_owner_shaping(super::test_physical_shaping::owner(
+            0..3,
+            crate::PhysicalLineEdge::Left,
+            crate::ShapingEdgePlacement::FirstLine,
+        ));
+    }
+    builder.build(text)
+}
+
+#[test]
+fn unicode_mapping_policy_survives_context_clones_and_plan_cache_reuse() {
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    for (policy, count) in [
+        (crate::SimpleScriptShaping::Canonical, 3),
+        (crate::SimpleScriptShaping::Nominal, 5),
+        (crate::SimpleScriptShaping::Canonical, 3),
+        (crate::SimpleScriptShaping::Nominal, 5),
+    ] {
+        context.set_simple_script_shaping(policy);
+        let mut layout = composition_layout(&mut context, &mut fonts, false);
+        layout.break_all_lines(None);
+        let expected = logical_glyph_ids(&layout);
+        assert_eq!(expected.len(), count, "{policy:?}");
+        let mut cloned = composition_layout(&mut context.clone(), &mut fonts, false);
+        cloned.break_all_lines(None);
+        assert_eq!(logical_glyph_ids(&cloned), expected);
+    }
+}
+
+#[test]
+fn physical_reflow_retains_the_unicode_mapping_policy() {
+    let mut fonts = create_font_context();
+    let mut context = LayoutContext::<ColorBrush>::new();
+    context.set_simple_script_shaping(crate::SimpleScriptShaping::Nominal);
+    let mut layout = composition_layout(&mut context, &mut fonts, true);
+    for width in [Some(7.0), None, Some(7.0)] {
+        layout.break_all_lines(width);
+        assert_eq!(logical_glyph_ids(&layout).len(), 5, "{width:?}");
+        assert_eq!(layout.len(), if width.is_some() { 2 } else { 1 });
+    }
+}

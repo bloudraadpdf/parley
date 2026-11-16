@@ -156,6 +156,7 @@ impl DeferredSourceShape {
         let script = crate::convert::script_to_fontique(self.script, &analysis);
         let shaped = context.shape_segment(super::segment::SegmentShape {
             use_default_font_weight: data.use_default_font_weight,
+            simple_script_shaping: data.simple_script_shaping,
             font: data.fonts[run.font_index].clone(),
             synthesis: run.synthesis,
             variations: self.variations.as_deref(),

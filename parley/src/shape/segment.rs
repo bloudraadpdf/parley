@@ -8,6 +8,7 @@ use crate::{FontData, FontVariation};
 
 pub(super) struct SegmentShape<'a> {
     pub(super) use_default_font_weight: bool,
+    pub(super) simple_script_shaping: crate::SimpleScriptShaping,
     pub(super) font: FontData,
     pub(super) synthesis: fontique::Synthesis,
     pub(super) variations: Option<&'a [FontVariation]>,
@@ -104,6 +105,7 @@ impl ShapeContext {
                 input.language.clone(),
                 input.features,
                 variations,
+                input.simple_script_shaping,
             ),
             || {
                 harfrust::ShapePlan::new(
@@ -112,6 +114,7 @@ impl ShapeContext {
                     Some(input.script),
                     input.language.as_ref(),
                     input.features,
+                    input.simple_script_shaping,
                 )
             },
         );
@@ -170,6 +173,7 @@ impl ShapeContext {
         let options = harfrust::ShapeOptions::new()
             .plan(Some(plan))
             .features(input.features)
+            .simple_script_shaping(input.simple_script_shaping)
             .disable_pair_kerning_at(disabled_pair_kerning)
             .point_size(Some(input.size));
         let options = match em_box.as_mut() {

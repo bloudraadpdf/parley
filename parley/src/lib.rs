@@ -107,6 +107,7 @@ extern crate alloc;
 extern crate std;
 
 pub use fontique;
+pub use harfrust::SimpleScriptShaping;
 pub use shape::justification::JustificationShapePolicy;
 
 mod analysis;

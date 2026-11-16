@@ -103,6 +103,7 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     // Whether line fit uses nominal font metrics while glyph positioning and
     // emitted advances retain shaping adjustments such as kerning.
     pub(crate) nominal_font_metric_line_breaks: bool,
+    pub(crate) simple_script_shaping: crate::SimpleScriptShaping,
     pub(crate) vertical_metric_grid: Option<VerticalMetricGrid>,
     #[cfg(test)]
     pub(crate) owner_box_reads: usize,
@@ -127,6 +128,7 @@ impl<B: Brush> LayoutContext<B> {
             font_metric_advance_quantization: None,
             use_default_font_weight: false,
             nominal_font_metric_line_breaks: false,
+            simple_script_shaping: crate::SimpleScriptShaping::Canonical,
             vertical_metric_grid: None,
             #[cfg(test)]
             owner_box_reads: 0,
@@ -161,6 +163,11 @@ impl<B: Brush> LayoutContext<B> {
     /// advances use that same grid.
     pub fn set_nominal_font_metric_line_breaks(&mut self, enabled: bool) {
         self.nominal_font_metric_line_breaks = enabled;
+    }
+
+    /// Selects Unicode mapping for generic, Hangul and Hebrew scripts.
+    pub fn set_simple_script_shaping(&mut self, policy: crate::SimpleScriptShaping) {
+        self.simple_script_shaping = policy;
     }
 
     /// Round the ascent, descent and line gap of each run to `grid`.
@@ -325,6 +332,7 @@ impl<B: Brush> Clone for LayoutContext<B> {
         cloned.font_metric_advance_quantization = self.font_metric_advance_quantization;
         cloned.use_default_font_weight = self.use_default_font_weight;
         cloned.nominal_font_metric_line_breaks = self.nominal_font_metric_line_breaks;
+        cloned.simple_script_shaping = self.simple_script_shaping;
         cloned.vertical_metric_grid = self.vertical_metric_grid;
         cloned
     }

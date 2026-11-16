@@ -102,6 +102,7 @@ pub(crate) struct ShapePlanId {
     script: harfrust::Script,
     language: Option<harfrust::Language>,
     features: Box<[harfrust::Feature]>,
+    simple_script_shaping: crate::SimpleScriptShaping,
     variations: Option<Box<[FontVariation]>>,
 }
 
@@ -115,6 +116,7 @@ pub(crate) struct ShapePlanKey<'a> {
     script: harfrust::Script,
     language: Option<harfrust::Language>,
     features: &'a [harfrust::Feature],
+    simple_script_shaping: crate::SimpleScriptShaping,
     variations: Option<&'a [FontVariation]>,
 }
 
@@ -128,6 +130,7 @@ impl<'a> ShapePlanKey<'a> {
         language: Option<harfrust::Language>,
         features: &'a [harfrust::Feature],
         variations: Option<&'a [FontVariation]>,
+        simple_script_shaping: crate::SimpleScriptShaping,
     ) -> Self {
         Self {
             font_blob_id,
@@ -138,6 +141,7 @@ impl<'a> ShapePlanKey<'a> {
             language,
             features,
             variations,
+            simple_script_shaping,
         }
     }
 }
@@ -150,6 +154,7 @@ impl<'a> Equivalent<ShapePlanId> for ShapePlanKey<'a> {
             && *self.synthesis == key.synthesis
             && self.direction == key.direction
             && self.script == key.script
+            && self.simple_script_shaping == key.simple_script_shaping
             && self.language == key.language
             && self.variations == key.variations.as_deref()
             && plan_features_equivalent(self.features, &key.features)
@@ -177,6 +182,7 @@ impl<'a> From<ShapePlanKey<'a>> for ShapePlanId {
             script: key.script,
             language: key.language,
             features: key.features.to_vec().into(),
+            simple_script_shaping: key.simple_script_shaping,
             variations: key.variations.map(|v| v.to_vec().into()),
         }
     }

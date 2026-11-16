@@ -566,6 +566,7 @@ fn shape_item<'a, B: Brush>(
         let features = mem::take(&mut scx.features);
         let shaped = scx.shape_segment(segment::SegmentShape {
             use_default_font_weight: layout.data.use_default_font_weight,
+            simple_script_shaping: layout.data.simple_script_shaping,
             font: FontData::new(font.font.blob.clone(), font.font.index),
             synthesis: font.font.synthesis,
             variations: rcx.variations(item.variations),
@@ -587,6 +588,7 @@ fn shape_item<'a, B: Brush>(
             scx.unicode_buffer = Some(harfrust::UnicodeBuffer::new());
             scx.shape_segment(segment::SegmentShape {
                 use_default_font_weight: layout.data.use_default_font_weight,
+                simple_script_shaping: layout.data.simple_script_shaping,
                 font: FontData::new(font.font.blob.clone(), font.font.index),
                 synthesis: font.font.synthesis,
                 variations: rcx.variations(item.variations),
