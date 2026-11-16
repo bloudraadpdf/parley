@@ -141,10 +141,7 @@ fn affected_windows(
         if start >= end {
             continue;
         }
-        if let Some(previous) = windows
-            .last_mut()
-            .filter(|previous| previous.end >= start)
-        {
+        if let Some(previous) = windows.last_mut().filter(|previous| previous.end >= start) {
             previous.end = previous.end.max(end);
         } else {
             windows.push(start..end);

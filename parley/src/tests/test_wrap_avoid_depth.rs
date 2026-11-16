@@ -21,7 +21,8 @@ fn line_ends(boxes: &[(core::ops::Range<usize>, u8)]) -> Vec<usize> {
         builder.push(StyleProperty::WrapAvoidDepth(*depth), range.clone());
     }
     let mut layout: Layout<ColorBrush> = builder.build(TEXT);
-    let mut natural = layout_context.ranged_builder(&mut font_context, "aaaa bbbb cccc", 1.0, false);
+    let mut natural =
+        layout_context.ranged_builder(&mut font_context, "aaaa bbbb cccc", 1.0, false);
     natural.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
     natural.push_default(StyleProperty::FontSize(12.0));
     let mut three_words: Layout<ColorBrush> = natural.build("aaaa bbbb cccc");

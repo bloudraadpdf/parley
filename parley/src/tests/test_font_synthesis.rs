@@ -26,7 +26,9 @@ fn selected_fallback_weight_policy_preserves_other_axes_and_cache_identity() {
             ..Default::default()
         }),
     );
-    let family = collection.family_id(TEST_FAMILY).expect("registered family");
+    let family = collection
+        .family_id(TEST_FAMILY)
+        .expect("registered family");
     collection.set_fallbacks(
         fontique::FallbackKey::new(fontique::Script::from_bytes(*b"Latn"), None),
         core::iter::once(family),
@@ -39,7 +41,9 @@ fn selected_fallback_weight_policy_preserves_other_axes_and_cache_identity() {
     let mut shape = |lcx: &mut LayoutContext<ColorBrush>, settings: &str| {
         let text = "office Hamburgefonts";
         let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, false);
-        builder.push_default(StyleProperty::FontFamily(FontFamily::named("absent authored family")));
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+            "absent authored family",
+        )));
         builder.push_default(StyleProperty::FontSize(20.0));
         builder.push_default(StyleProperty::FontWeight(fontique::FontWeight::new(900.0)));
         builder.push_default(StyleProperty::FontVariations(settings.into()));
