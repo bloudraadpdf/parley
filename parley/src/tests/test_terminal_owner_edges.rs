@@ -238,7 +238,7 @@ fn bidi_isolation_keeps_nowrap_source_boundary_context() {
     reference.break_all_lines(None);
     let expected = reference.calculate_content_widths();
     reference.break_all_lines(Some(expected.min));
-    let expected_lines: alloc::vec::Vec<_> = reference
+    let expected_lines: vec::Vec<_> = reference
         .lines()
         .map(|line| line.metrics().advance)
         .collect();
@@ -253,7 +253,7 @@ fn bidi_isolation_keeps_nowrap_source_boundary_context() {
             expected.min
         );
         actual.break_all_lines(Some(expected.min));
-        let lines: alloc::vec::Vec<_> = actual.lines().map(|line| line.metrics().advance).collect();
+        let lines: vec::Vec<_> = actual.lines().map(|line| line.metrics().advance).collect();
         assert_eq!(lines, expected_lines, "outer={outer} inner={inner}");
     }
 }
