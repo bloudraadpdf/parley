@@ -1501,7 +1501,7 @@ dependencies = [
 [[package]]
 name = "harfrust"
 version = "0.13.3"
-source = "git+ssh://git@git.bloudraad.io/external/harfrust.git?rev=3a5ee7b6fe9b72ee9f37334927f6852050cc8427#3a5ee7b6fe9b72ee9f37334927f6852050cc8427"
+source = "git+ssh://git@git.bloudraad.io/external/harfrust.git?rev=7ae2148e5b45170d031af737871a8d2aafb75f98#7ae2148e5b45170d031af737871a8d2aafb75f98"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
